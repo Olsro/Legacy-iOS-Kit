@@ -14,7 +14,7 @@ from hfs import HFS
 from img3 import img3
 from rescue_prepare import RAM_VOLUME_BYTES, RECIPE_VERSION
 from restore import checkpoint
-from progress import activity, copy_stream
+from progress import activity
 
 HANDOFF = 'olsn0w-restore-handoff'
 
@@ -175,27 +175,27 @@ def prepare(session, destination, ipsw=None, keys=None):
         if component == 'RestoreRamDisk' and data != image_path.read_bytes():
             raise ValueError('Restore RAM packing readback differs')
         replacements[identity['Manifest'][component]['Info']['Path']] = blob
-    from filevault import decrypt
+    from filevault import decrypt_stream
     os_member = identity['Manifest']['OS']['Info']['Path']
     os_keys = [key for key in metadata['keys'] if key['image'] == 'RootFS']
     if len(os_keys) != 1 or Path(os_member).name != os_keys[0]['filename']:
         raise ValueError('System image/key identity mismatch')
-    encrypted = destination/'system.encrypted.dmg'
     plaintext = destination/'system.asr.dmg'
-    with zipfile.ZipFile(source) as archive, archive.open(os_member) as incoming, encrypted.open('xb') as outgoing:
-        copy_stream(incoming,outgoing,archive.getinfo(os_member).file_size,'Extracting signed system image')
-    decrypt(encrypted, plaintext, os_keys[0]['key'])
+    with zipfile.ZipFile(source) as archive, archive.open(os_member) as incoming:
+        decrypt_stream(incoming,archive.getinfo(os_member).file_size,plaintext,os_keys[0]['key'])
     verified = destination/'system.verify.hfs'
     run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=600)
     if digest(verified) != digest(firmware/'rootfs.hfs'):
         raise ValueError('Plaintext ASR image differs from the original filesystem')
     verified.unlink()
-    encrypted.unlink()
     replacements[os_member] = plaintext
     pending = destination/'base8.pending.ipsw'
     copy_ipsw(source, pending, replacements)
     pending.rename(destination/'base8.ipsw')
-    names = ['asr.patched','base8.ipsw','restore-ram.hfs','Ramdisk.img3','iBEC.img3','system.asr.dmg']
+    # copy_ipsw checked the replacement inside the completed archive; the
+    # standalone plaintext image is no longer an input to restoration.
+    plaintext.unlink()
+    names = ['asr.patched','base8.ipsw','restore-ram.hfs','Ramdisk.img3','iBEC.img3']
     report = dict(kind='signed-base-restore-handoff',identity=selected,product=selected['product'],
                   build='12H321',reboot_token=token,rescue_session=str(session),
                   stock_system_preserved=True,device_modified=False,physical_restore_verified=False,

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import shutil
 
-from common import digest
+from common import clone_or_copy, digest
 from hfs import HFS
 from hfs_policy import require_reserve
 from layout import inspect
@@ -31,7 +31,7 @@ def prepare(collection, bootstrap, destination):
     destination.mkdir(parents=True, mode=0o700)
     shutil.copytree(collection, destination/'technical')
     for name in ('root8.hfs', 'data8.hfs'):
-        shutil.copyfile(bootstrap/name, destination/name)
+        clone_or_copy(bootstrap/name, destination/name)
     root = HFS(destination/'root8.hfs')
     if root.read('/olsn0w/bootstrap.marker') != b'olsn0w-bootstrap-v1':
         raise ValueError('Invalid compact bootstrap marker')

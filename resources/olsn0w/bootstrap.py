@@ -9,6 +9,7 @@ import tarfile
 
 from archives import members, write_tar
 from bootstrap_registry import configure, jobs
+from compact_cache import write_sparse
 from common import KIT, MODELS, digest, run, tools
 from hfs import HFS
 from img3 import img3
@@ -142,7 +143,7 @@ UsePrivilegeSeparation no
         raise ValueError('Compact cache differs from qualified output')
     region=recipe['registry']
     configured = configure(cache,region['address'],region['bytes'],launch_jobs)
-    cache_path=destination/'bootstrap.cache';cache_path.write_bytes(configured)
+    cache_path=destination/'bootstrap.cache';write_sparse(configured,cache_path)
     for name,target in {'etc':'private/etc','var':'private/var','tmp':'private/var/tmp','bin/sh':'bash',
         'sbin/fsck_hfs':'/System/Library/Filesystems/hfs.fs/Contents/Resources/fsck_hfs',
         'usr/libexec/CrashHousekeeping':'/everuntether','usr/share/zoneinfo':'/var/db/timezone/zoneinfo'}.items():
@@ -158,6 +159,7 @@ UsePrivilegeSeparation no
     image=HFS(root);image.command('untar',archive)
     image.command('chmod','040755','/');image.command('chown','0:0','/')
     image.add_compressed('/System/Library/Caches/com.apple.dyld/dyld_shared_cache_armv7s',cache_path)
+    cache_path.unlink()
     var=destination/'data8.hfs';shutil.copyfile(var_template,var)
     var_image=HFS(var)
     for name in ('db','db/FIPS','db/timezone','db/timezone/tz','empty','log','mobile','mobile/Library','mobile/Library/Preferences','root','run','tmp'):
@@ -177,6 +179,6 @@ UsePrivilegeSeparation no
                 raise ValueError('Bootstrap permissions readback mismatch: '+path)
     report=dict(product=product,base_build='12H321',autoboot_policy='persistent-enable',
         target_rearm_required=False,source_packages=provenance,root=image.info(),var=var_image.info(),
-        files={p.name:digest(p) for p in (root,var,cache_path,archive)},physical_boot_verified=False)
+        files={p.name:digest(p) for p in (root,var,archive)},physical_boot_verified=False)
     (destination/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')
     return report

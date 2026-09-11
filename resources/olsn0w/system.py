@@ -8,7 +8,6 @@ from pathlib import Path, PurePosixPath
 import plistlib
 import re
 import shlex
-import shutil
 import stat
 import tarfile
 import tempfile
@@ -16,7 +15,7 @@ import uuid
 
 from archives import members, deb_payload, write_tar
 from aquila import ios7_payload, job_loader, prepare_payload, prepare_ios8_payload
-from common import KIT, MODELS, digest, run, save, version
+from common import KIT, MODELS, clone_or_copy, digest, run, save, version
 from hfs import HFS
 from img3 import img3
 from signing import resign, verify
@@ -470,7 +469,7 @@ Subsystem sftp /usr/libexec/sftp-server
     add_parents(payload)
     write_tar(out/'root-overlay.tar', payload.values())
 
-    shutil.copyfile(stock.path, out/'system.hfs')
+    clone_or_copy(stock.path, out/'system.hfs')
     image = HFS(out/'system.hfs')
     image.command('rmall', '/private/var')
     image.mkdir('/private/var')
@@ -574,6 +573,13 @@ Subsystem sftp /usr/libexec/sftp-server
             checks[name] = hashlib.sha256(data).hexdigest()
     if image.ls('/private/var'):
         raise ValueError('Target root still contains Data payload')
+    # These archives and temporary binaries have all been read back from the
+    # finished image. Keep the source provenance in the manifest, not another
+    # copy of payload bytes already embedded in system.hfs.
+    for temporary in ('root-overlay.tar','data-firstboot.tar.gz','overlay-directories.tar',
+                      'aquila','everuntether','fixkeybag'):
+        path=out/temporary
+        if path.exists():path.unlink()
     report = dict(recipe_version=RECIPE_VERSION,
                   product=source['product'], version=source['version'], build=source['build'],
                   generation=generation, root_device=root_device, data_device=data_device,
@@ -586,7 +592,7 @@ Subsystem sftp /usr/libexec/sftp-server
                   service_loading='skip-registered-jobs-before-creating-sockets',
                   activation='official activation required for the selected device',
                   restore_ready=False, filesystem_check_required=True, physical_boot_validated=False,
-                  files={n:digest(out/n) for n in ('system.hfs','data-seed.tar','root-overlay.tar')})
+                  files={n:digest(out/n) for n in ('system.hfs','data-seed.tar')})
     save(out/'manifest.json', report)
     if major==8:
         report['files']['cache-remapping.json']=digest(out/'cache-remapping.json')

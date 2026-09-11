@@ -173,4 +173,7 @@ def prepare(session, ipsw=None, keys=None, port=6414):
                   packages={str(p.relative_to(KIT)):digest(p) for p in (ssh_package,freeze)},
                   tools={name:digest(out/name) for name in utilities})
     checkpoint(session/'rescue-preparation.json',report)
+    # Successful publication makes the private construction directory wholly
+    # redundant. Failed preparation still retains it for diagnosis.
+    shutil.rmtree(out)
     return report

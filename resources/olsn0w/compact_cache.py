@@ -81,6 +81,18 @@ def verify_mappings(source, output, recipe):
     return retained
 
 
+def write_sparse(data, destination):
+    """Write zero pages as holes while preserving the exact logical bytes."""
+    destination=Path(destination)
+    with destination.open('xb') as stream:
+        for offset in range(0,len(data),4096):
+            page=data[offset:offset+4096]
+            if any(page):
+                stream.seek(offset);stream.write(page)
+        stream.truncate(len(data))
+    return destination
+
+
 def prepare(source, destination):
     source, destination = Path(source), Path(destination)
     if not source.is_file() or not 0 < source.stat().st_size <= 512*1024**2:
@@ -104,13 +116,7 @@ def prepare(source, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='olsn0w-cache-', dir=destination.parent) as temporary:
         result = Path(temporary) / 'cache'
-        with result.open('xb') as stream:
-            for offset in range(0, len(output), 4096):
-                page = output[offset:offset+4096]
-                if any(page):
-                    stream.seek(offset)
-                    stream.write(page)
-            stream.truncate(len(output))
+        write_sparse(output,result)
         if digest(result) != recipe['output_sha256']:
             raise ValueError('Compact cache disk readback mismatch')
         result.rename(destination)

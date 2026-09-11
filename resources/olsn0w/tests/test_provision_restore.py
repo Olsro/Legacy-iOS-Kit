@@ -10,6 +10,27 @@ import provision_restore as pipeline
 
 
 class ProvisionSequence(unittest.TestCase):
+    def test_cleanup_requires_success_and_preserves_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session=Path(tmp)/'session';bundle=session/'provision';bootstrap=session/'bootstrap'
+            (bundle/'target').mkdir(parents=True);(bundle/'base8').mkdir();bootstrap.mkdir()
+            (bundle/'restore.log').write_text('diagnostic')
+            for path in (bundle/'base8.ipsw',bundle/'system.asr.dmg',bundle/'restore-ram.hfs',
+                         bundle/'Ramdisk.img3',bundle/'target/system.hfs',bundle/'target/data-native.hfs',
+                         bundle/'base8/system.dmg',bootstrap/'bootstrap.cache'):
+                path.write_bytes(b'bulk')
+            (bundle/'pipeline.json').write_text(json.dumps(dict(stage='normal-boot',complete=False)))
+            with self.assertRaisesRegex(ValueError,'qualified completed'):
+                pipeline.cleanup_completed(session,bundle,bootstrap)
+            self.assertTrue((bundle/'base8.ipsw').exists())
+            (bundle/'pipeline.json').write_text(json.dumps(dict(stage='qualified',complete=True)))
+            report=pipeline.cleanup_completed(session,bundle,bootstrap)
+            self.assertTrue(report['bytes_reclaimed']>0)
+            self.assertEqual((bundle/'restore.log').read_text(),'diagnostic')
+            self.assertFalse((bundle/'base8.ipsw').exists())
+            self.assertFalse((bundle/'target/system.hfs').exists())
+            self.assertTrue((session/'cleanup.json').is_file())
+
     def fixture(self, root):
         session=root/'session';bundle=root/'bundle'
         session.mkdir();bundle.mkdir()

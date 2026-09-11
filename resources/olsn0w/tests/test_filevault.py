@@ -1,12 +1,13 @@
 """A fixed OpenSSL-generated fixture checks the envelope and block boundary."""
 import base64
+import io
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from filevault import decrypt
+from filevault import decrypt, decrypt_stream
 
 class FileVaultEnvelope(unittest.TestCase):
     fixture=base64.b64decode((Path(__file__).parent/'fixtures/filevault-v2.b64').read_bytes())
@@ -23,6 +24,12 @@ class FileVaultEnvelope(unittest.TestCase):
             self.assertEqual(out.read_bytes(),expected)
             with self.assertRaises(FileExistsError):decrypt(source,out,self.key)
             self.assertEqual(out.read_bytes(),expected)
+
+    def test_sequential_firmware_member_does_not_need_an_encrypted_disk_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out=Path(directory)/'plain'
+            decrypt_stream(io.BytesIO(self.fixture),len(self.fixture),out,self.key)
+            self.assertEqual(len(out.read_bytes()),900)
 
     def test_bad_key_and_truncated_or_invalid_envelope_are_not_published(self):
         for blob,key in [(self.fixture,'ff'*36),(self.fixture[:-1],self.key),

@@ -1,6 +1,7 @@
 """Restore a signed base and the selected target through one DFU/RAM session."""
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 from device import same_hardware
@@ -10,6 +11,34 @@ from provisioned_base import prepare as bind
 from restore import checked_manifest, checkpoint, prepare, install
 from restore_run import target_prefix, qualify
 from common import version
+
+
+def cleanup_completed(session, bundle, bootstrap):
+    """Prune only reconstructible bulk data after final boot qualification."""
+    session,bundle,bootstrap=(Path(path).resolve() for path in (session,bundle,bootstrap))
+    state=json.loads((bundle/'pipeline.json').read_text())
+    if state.get('stage')!='qualified' or state.get('complete') is not True:
+        raise ValueError('Bulk cleanup requires a qualified completed restoration')
+    root=session.resolve()
+    targets=[bundle/'base8.ipsw',bundle/'system.asr.dmg',bundle/'base8',
+             bundle/'restore-ram.hfs',bundle/'Ramdisk.img3',
+             bundle/'target/system.hfs',bundle/'target/data-native.hfs']
+    if root in bootstrap.resolve().parents:
+        targets.append(bootstrap/'bootstrap.cache')
+    targets.extend(session.glob('rescue-pending-*'))
+    targets=[path for path in targets if path.exists()]
+    if any(root not in path.resolve().parents or path.is_symlink() for path in targets):
+        raise ValueError('Cleanup target escaped the completed session')
+    removed=[];physical=0
+    for path in targets:
+        items=[path] if path.is_file() else [p for p in path.rglob('*') if p.is_file() or p.is_symlink()]
+        physical+=sum(p.lstat().st_blocks*512 for p in items)
+        removed.append(str(path.relative_to(session)))
+        if path.is_dir():shutil.rmtree(path)
+        else:path.unlink()
+    report=dict(kind='completed-session-pruning',bytes_reclaimed=physical,removed=removed)
+    checkpoint(session/'cleanup.json',report)
+    return report
 
 
 def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
@@ -66,6 +95,13 @@ def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
         result=qualify(target,next_prefix,device['ram_udid'],timeout=480,progress=progress)
         state.update(stage='qualified',complete=True,qualification=result)
         checkpoint(journal,state)
+        try:
+            cleanup=cleanup_completed(session,bundle,bootstrap)
+            progress('Removed '+str(cleanup['bytes_reclaimed']//1048576)+' MiB of reconstructible completed-session files.')
+        except Exception as error:
+            # Cleanup must never turn an already qualified restoration into a
+            # reported failure. Its exact error remains visible to the user.
+            progress('Restoration is qualified; automatic disk cleanup was skipped: '+str(error))
         return result
     except DfuPreparationError:
         # The pipeline marker is written before entering provision() so that

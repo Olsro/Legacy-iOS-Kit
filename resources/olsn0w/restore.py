@@ -13,7 +13,7 @@ import struct
 import subprocess
 
 from archives import members
-from common import MODELS, digest, version
+from common import MODELS, clone_or_copy, digest, version
 from hfs import HFS
 from hfs_extents import allocated_ranges
 from hfs_policy import require_reserve
@@ -78,7 +78,7 @@ def prepare(session, system, relay, base, destination):
                 has_baseband=source['product']!='iPad3,4',activate_on_target=fresh)
     for name, source_path in [('system.hfs',system/'system.hfs'),('root8.hfs',base/'root8.hfs'),
                               ('data8.hfs',base/'data8.hfs'),('data-seed.tar',system/'data-seed.tar')]:
-        shutil.copyfile(source_path,destination/name)
+        (clone_or_copy if name.endswith('.hfs') else shutil.copyfile)(source_path,destination/name)
     target=HFS(destination/'system.hfs')
     # Use the selected firmware's formatter, never a host-specific filesystem API.
     if version(source['version'])[0]==6:
@@ -171,9 +171,18 @@ class Rescue:
         inspect(first,last)
         return first,last
     def fsck(self,device):
-        result=self.run('/sbin/fsck_hfs -fn '+device,timeout=300)
-        if b'appears to be OK' not in result:raise RuntimeError('Filesystem check did not certify '+device)
-        return result
+        command='/sbin/fsck_hfs'
+        def execute(option):
+            return subprocess.run(self.prefix+[command+' '+option+' '+device],capture_output=True,timeout=300)
+        initial=execute('-fn');initial_output=initial.stdout+initial.stderr
+        if initial.returncode==0 and b'appears to be OK' in initial_output:
+            return initial_output
+        repair=execute('-fy');repair_output=repair.stdout+repair.stderr
+        verified=execute('-fn');verified_output=verified.stdout+verified.stderr
+        if repair.returncode or verified.returncode or b'appears to be OK' not in verified_output:
+            output=(initial_output+b'\n--- repair ---\n'+repair_output+b'\n--- verification ---\n'+verified_output)
+            raise RuntimeError('Filesystem repair did not certify '+device+'\n'+output.decode(errors='replace')[-3000:])
+        return initial_output+b'\n--- repaired ---\n'+repair_output+b'\n--- verification ---\n'+verified_output
 
 
 def preview_matches(output, layout):
@@ -228,6 +237,55 @@ def copy_image(ram, path, device, *, sparse=False, progress=print, label='Image'
                     last_percent=percent
 
 
+def _finish_install(bundle,ram,report,layout,expected,state,roles,progress):
+    journal=bundle/'installation.json'
+    messages={
+        'writing-system':'Installing iOS '+report['version']+'. The phone bar may remain unchanged; follow the progress below.',
+        'writing-bootstrap':'Installing the 30 MiB boot system.',
+        'writing-bootstrap-data':'Installing the 2 MiB boot data volume.',
+        'formatting-data':'Preparing the user data filesystem and its initial files.',
+        'writing-data':'Writing initial user data. The total below counts transferred blocks, not the full storage capacity.',
+        'installed-and-verified':'Installation complete: every volume has passed readback and filesystem checks.',
+    }
+    def stage(value):
+        state['stage']=value;state.pop('error',None);checkpoint(journal,state);progress(messages.get(value,value))
+    for role,name in roles:
+        part=next(p for p in layout['partitions'] if p['role']==role)
+        if (bundle/name).stat().st_size!=part['bytes']:raise ValueError('Image does not fill planned partition')
+        dev=part['device'].replace('/dev/disk','/dev/rdisk')
+        # Verify that the native child mapping has the exact new endpoint.
+        probe=ram.run(f'{ram.tool("dd")} if={dev} bs=4096 skip={part["bytes"]//4096} count=1 2>/dev/null')
+        if probe:raise RuntimeError('Stale child partition endpoint')
+        stage('writing-'+role);copy_image(ram,bundle/name,dev,progress=progress,label={'system':'iOS '+report['version'],'bootstrap':'Boot system','bootstrap-data':'Boot data'}[role])
+        if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read(dev,0,1):raise RuntimeError('Parent/child mapping differs')
+        (bundle/(role+'-fsck.log')).write_bytes(ram.fsck(dev));state['verified_volumes'].append(role);checkpoint(journal,state)
+    stage('formatting-data')
+    ram.run(ram.tool('mount_hfs')+' /dev/disk0s1s3 /mnt1')
+    ram.guard(['/dev/disk0s1s3 on /mnt1'])
+    protect=uses_protected_data(report['version'])
+    options=' -P -n a=4096,c=4096,e=4096' if protect else ''
+    (bundle/'data-format.log').write_bytes(ram.run('/mnt1/olsn0w/restore-newfs -s -J'+options+' -v Data -b 4096 /dev/rdisk0s1s2'))
+    state['formatted_data']=True;checkpoint(journal,state)
+    ram.run('rm /mnt1/olsn0w/restore-newfs')
+    ram.run(ram.tool('unmount')+' /mnt1');ram.guard()
+    part=next(p for p in layout['partitions'] if p['role']=='data')
+    path=bundle/'data-native.hfs'
+    read_fresh_image(ram,'/dev/rdisk0s1s2',path,part['bytes'])
+    image=HFS(path)
+    if protect:image.initialize_protection_v4()
+    image.command('untar',bundle/'data-seed.tar')
+    if not protect:image.command('untar',bundle/'personalization/data-personalization.tar')
+    image.normalize_root()
+    stage('writing-data');copy_image(ram,path,'/dev/rdisk0s1s2',sparse=True,progress=progress,label='Initial user data')
+    for role,dev in [('data','/dev/rdisk0s1s2'),('system','/dev/rdisk0s1s3')]:
+        (bundle/(role+'-final-fsck.log')).write_bytes(ram.fsck(dev))
+    state['verified_volumes'].append('data')
+    ram.guard()
+    if ram.table()!=expected:raise RuntimeError('Final partition table differs')
+    state['complete']=True;stage('installed-and-verified')
+    return state
+
+
 def read_fresh_image(ram, device, path, expected_bytes):
     """Copy only allocated native-format blocks into a sparse host file."""
     first=ram.read(device,0,1)
@@ -278,56 +336,43 @@ def install(bundle, ram, *, erase=False, progress=print):
     ram.guard()
     if ram.table()!=old:raise ValueError('Preview changed the device')
     state=dict(stage='preflight-complete',complete=False,formatted_data=False,verified_volumes=[])
-    messages={
-        'committing-partitions':'Step 2: preparing partitions for the selected system and the 32 MiB bootstrap.',
-        'writing-system':'Installing iOS '+report['version']+'. The phone bar may remain unchanged; follow the progress below.',
-        'writing-bootstrap':'Installing the 30 MiB boot system.',
-        'writing-bootstrap-data':'Installing the 2 MiB boot data volume.',
-        'formatting-data':'Preparing the user data filesystem and its initial files.',
-        'writing-data':'Writing initial user data. The total below counts transferred blocks, not the full storage capacity.',
-        'installed-and-verified':'Installation complete: every volume has passed readback and filesystem checks.',
-    }
     def stage(value):
-        state['stage']=value;checkpoint(journal,state);progress(messages.get(value,value))
+        state['stage']=value;checkpoint(journal,state)
+        progress('Step 2: preparing partitions for the selected system and the 32 MiB bootstrap.' if value=='committing-partitions' else value)
     try:
         stage('committing-partitions')
         (bundle/'gpt-commit.log').write_bytes(ram.run(ram.tool('gptfdisk')+' /dev/rdisk0s1',editor_commands(*old,size,report['version'],True)))
         ram.guard()
         if ram.table()!=expected:raise RuntimeError('Native partition commit differs')
-        for role,name in [('system','system.hfs'),('bootstrap','root8.hfs'),('bootstrap-data','data8.hfs')]:
-            part=next(p for p in layout['partitions'] if p['role']==role)
-            if (bundle/name).stat().st_size!=part['bytes']:raise ValueError('Image does not fill planned partition')
-            dev=part['device'].replace('/dev/disk','/dev/rdisk')
-            # Verify that the native child mapping has the exact new endpoint.
-            probe=ram.run(f'{ram.tool("dd")} if={dev} bs=4096 skip={part["bytes"]//4096} count=1 2>/dev/null')
-            if probe:raise RuntimeError('Stale child partition endpoint')
-            stage('writing-'+role);copy_image(ram,bundle/name,dev,progress=progress,label={'system':'iOS '+report['version'],'bootstrap':'Boot system','bootstrap-data':'Boot data'}[role])
-            if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read(dev,0,1):raise RuntimeError('Parent/child mapping differs')
-            (bundle/(role+'-fsck.log')).write_bytes(ram.fsck(dev));state['verified_volumes'].append(role)
-        stage('formatting-data')
-        ram.run(ram.tool('mount_hfs')+' /dev/disk0s1s3 /mnt1')
-        ram.guard(['/dev/disk0s1s3 on /mnt1'])
-        protect=uses_protected_data(report['version'])
-        options=' -P -n a=4096,c=4096,e=4096' if protect else ''
-        (bundle/'data-format.log').write_bytes(ram.run('/mnt1/olsn0w/restore-newfs -s -J'+options+' -v Data -b 4096 /dev/rdisk0s1s2'))
-        state['formatted_data']=True
-        ram.run('rm /mnt1/olsn0w/restore-newfs')
-        ram.run(ram.tool('unmount')+' /mnt1');ram.guard()
-        part=next(p for p in layout['partitions'] if p['role']=='data')
-        path=bundle/'data-native.hfs'
-        read_fresh_image(ram,'/dev/rdisk0s1s2',path,part['bytes'])
-        image=HFS(path)
-        if protect:image.initialize_protection_v4()
-        image.command('untar',bundle/'data-seed.tar')
-        if not protect:image.command('untar',bundle/'personalization/data-personalization.tar')
-        image.normalize_root()
-        stage('writing-data');copy_image(ram,path,'/dev/rdisk0s1s2',sparse=True,progress=progress,label='Initial user data')
-        for role,dev in [('data','/dev/rdisk0s1s2'),('system','/dev/rdisk0s1s3')]:
-            (bundle/(role+'-final-fsck.log')).write_bytes(ram.fsck(dev))
-        state['verified_volumes'].append('data')
-        ram.guard()
-        if ram.table()!=expected:raise RuntimeError('Final partition table differs')
-        state['complete']=True;stage('installed-and-verified')
+        _finish_install(bundle,ram,report,layout,expected,state,
+                        [('system','system.hfs'),('bootstrap','root8.hfs'),('bootstrap-data','data8.hfs')],progress)
     except Exception as error:
         state['error']=str(error);checkpoint(journal,state);raise
     return state
+
+
+def resume_system_fsck(bundle,ram,progress=print):
+    """Resume the one safe interrupted state after repairing the written root."""
+    bundle=Path(bundle);report=checked_manifest(bundle);journal=bundle/'installation.json'
+    if not same_hardware(report['identity'],ram.identity):raise ValueError('Restore bundle belongs to another device')
+    state=json.loads(journal.read_text())
+    error=state.get('error','')
+    if (state.get('stage')!='writing-system' or state.get('complete') is not False
+            or state.get('formatted_data') is not False or state.get('verified_volumes')!=[]
+            or '/sbin/fsck_hfs -fn /dev/rdisk0s1s3' not in error
+            or 'found corrupt and needs to be repaired' not in error):
+        raise ValueError('Restore is not at the qualified system-fsck recovery point')
+    expected=(bundle/'next-primary.bin').read_bytes(),(bundle/'next-secondary.bin').read_bytes()
+    layout=report['layout'];ram.guard()
+    if ram.table()!=expected:raise ValueError('Interrupted restore partition table changed')
+    part=next(p for p in layout['partitions'] if p['role']=='system')
+    if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read('/dev/rdisk0s1s3',0,1):
+        raise RuntimeError('Interrupted system parent/child mapping differs')
+    progress('Repairing and verifying the prepared iOS filesystem metadata.')
+    try:
+        (bundle/'system-fsck.log').write_bytes(ram.fsck('/dev/rdisk0s1s3'))
+        state['verified_volumes'].append('system');state.pop('error',None);checkpoint(journal,state)
+        return _finish_install(bundle,ram,report,layout,expected,state,
+                               [('bootstrap','root8.hfs'),('bootstrap-data','data8.hfs')],progress)
+    except Exception as error:
+        state['error']=str(error);checkpoint(journal,state);raise

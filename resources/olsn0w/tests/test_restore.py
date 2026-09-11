@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore import install,Rescue,preview_matches,copy_image,refresh_layout
+from restore import install,Rescue,preview_matches,copy_image,refresh_layout,resume_system_fsck
 from layout import encode,editor_commands
 from test_layout import fixture
 
@@ -56,6 +56,25 @@ class RestoreGuards(unittest.TestCase):
 
     def test_unpinned_transport_is_rejected(self):
         with self.assertRaises(ValueError):Rescue(['ssh','root@127.0.0.1'],{})
+    def test_native_fsck_repairs_then_requires_a_clean_verification(self):
+        prefix=['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1']
+        ram=Rescue(prefix,dict(product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2))
+        results=[Mock(returncode=8,stdout=b'found corrupt and needs to be repaired',stderr=b''),
+                 Mock(returncode=0,stdout=b'FILE SYSTEM WAS MODIFIED',stderr=b''),
+                 Mock(returncode=0,stdout=b'appears to be OK',stderr=b'')]
+        with patch('restore.subprocess.run',side_effect=results) as run:
+            output=ram.fsck('/dev/rdisk0s1s3')
+        self.assertIn(b'--- repaired ---',output)
+        self.assertEqual([call.args[0][-1] for call in run.call_args_list],
+                         ['/sbin/fsck_hfs -fn /dev/rdisk0s1s3','/sbin/fsck_hfs -fy /dev/rdisk0s1s3','/sbin/fsck_hfs -fn /dev/rdisk0s1s3'])
+    def test_resume_rejects_any_other_interruption_before_device_access(self):
+        identity=dict(ecid=1,product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2)
+        ram=Mock();ram.identity=identity
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder);(folder/'installation.json').write_text(json.dumps(dict(stage='writing-bootstrap',complete=False,formatted_data=False,verified_volumes=['system'])))
+            with patch('restore.checked_manifest',return_value={'identity':identity}),self.assertRaisesRegex(ValueError,'recovery point'):
+                resume_system_fsck(folder,ram)
+        self.assertFalse(ram.method_calls)
     def test_failed_chunk_stops_subsequent_writes(self):
         ram=Mock();ram.write.side_effect=RuntimeError('Readback failed')
         with tempfile.TemporaryDirectory() as folder:

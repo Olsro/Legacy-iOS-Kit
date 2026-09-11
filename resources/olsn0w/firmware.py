@@ -149,6 +149,12 @@ def extract(product, release, ipsw=None, key_file=None, build=None):
         report = json.loads((destination / 'manifest.json').read_text())
         if report['ipsw_sha256'] != digest(ipsw) or any(digest(destination / n) != h for n, h in report['files'].items()):
             raise ValueError('Prepared firmware changed')
+        # Older extractions retained the encrypted RootFS member even though
+        # the verified IPSW and extracted HFS are the reproducible inputs.
+        if 'RootFS.orig' in report['files']:
+            report['files'].pop('RootFS.orig')
+            save(destination/'manifest.json',report)
+            (destination/'RootFS.orig').unlink()
         return destination, report
     destination.parent.mkdir(parents=True, exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix='firmware-pending-', dir=destination.parent))
@@ -166,6 +172,7 @@ def extract(product, release, ipsw=None, key_file=None, build=None):
                     copy_stream(source,output_stream,archive.getinfo(member).file_size,'Extracting '+name)
                 if name == 'RootFS':
                     run([tools()/'dmg', 'extract', original, out/'rootfs.hfs', '-k', key['key']], out/'rootfs.log', timeout=600)
+                    original.unlink()
                 else:
                     run([tools()/'xpwntool', original, out/(name+'.raw'), '-iv',key['iv'],'-k',key['key']], out/(name+'.log'))
                     if name in ('AppleLogo', 'Kernelcache'):

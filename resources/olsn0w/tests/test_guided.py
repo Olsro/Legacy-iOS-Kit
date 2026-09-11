@@ -12,6 +12,27 @@ RELEASE=dict(version='7.1.2',buildid='11D257')
 IOS8_RELEASE=dict(version='8.4.1',buildid='12H321')
 
 class GuidedTest(unittest.TestCase):
+    def test_disk_estimate_shrinks_when_firmware_and_system_are_cached(self):
+        records={
+            'iPad3,4':[dict(version='8.3',buildid='12F69',filesize=1800),
+                       dict(version='8.4.1',buildid='12H321',filesize=1900)],
+            'iPhone5,2':[dict(version='8.4.1',buildid='12H321',filesize=1700)],
+        }
+        selected=records['iPad3,4'][0]
+        with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)):
+            cold=guided.preparation_space('iPad3,4',selected,records.__getitem__)
+            for product,build in [('iPad3,4','12F69'),('iPad3,4','12H321'),('iPhone5,2','12H321')]:
+                firmware=Path(folder)/'targets'/product/build/'firmware';firmware.mkdir(parents=True)
+                (firmware/'manifest.json').write_text('{}')
+            system=Path(folder)/'targets/iPad3,4/12F69/system';system.mkdir(parents=True)
+            (system/'manifest.json').write_text('{}')
+            for product,record in [('iPad3,4',records['iPad3,4'][0]),('iPad3,4',records['iPad3,4'][1]),
+                                   ('iPhone5,2',records['iPhone5,2'][0])]:
+                ipsw=Path(folder)/'ipsw'/(product+'_'+record['version']+'_'+record['buildid']+'_Restore.ipsw')
+                ipsw.parent.mkdir(exist_ok=True);ipsw.touch()
+            warm=guided.preparation_space('iPad3,4',selected,records.__getitem__)
+        self.assertGreater(cold,warm);self.assertEqual(warm,guided.SESSION_WORKSPACE)
+
     def test_selected_phone_base_is_the_qualified_cache_source(self):
         base=Path('/qualified-phone-base')
         extract=lambda *args,**kwargs:self.fail('qualified source should be reused')

@@ -1,9 +1,11 @@
 """Shared paths, model identities and checked host operations."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import subprocess
 from progress import activity
 
@@ -52,6 +54,32 @@ def digest(path, algorithm='sha256'):
         for chunk in iter(lambda: stream.read(4 * 1048576), b''):
             result.update(chunk);done+=len(chunk);update(done)
     return result.hexdigest()
+
+
+def clone_or_copy(source, destination):
+    """Copy a mutable image, using copy-on-write when the host supports it."""
+    source, destination = Path(source), Path(destination)
+    if not source.is_file() or destination.exists():
+        raise ValueError('Expected an existing source and a new image destination')
+    try:
+        if platform.system() == 'Darwin':
+            result = subprocess.run(['/bin/cp', '-c', str(source), str(destination)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode == 0:
+                return destination
+        elif platform.system() == 'Linux':
+            import fcntl
+            with source.open('rb') as incoming, destination.open('xb') as outgoing:
+                # Linux FICLONE. Unsupported filesystems return an error and
+                # fall through to the ordinary portable copy below.
+                fcntl.ioctl(outgoing.fileno(), 0x40049409, incoming.fileno())
+            return destination
+    except OSError:
+        pass
+    if destination.exists():
+        destination.unlink()
+    shutil.copyfile(source, destination)
+    return destination
 
 
 def run(argv, log=None, patcher=False, timeout=180):

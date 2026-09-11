@@ -64,10 +64,55 @@ def choose(options, read=input, show=print):
         return selected
 
 
-def check_space():
+GIB=1024**3
+SESSION_WORKSPACE=8*GIB
+
+
+def preparation_space(product, selected, records_provider=releases):
+    """Estimate the remaining peak from artifacts that are not cached yet."""
+    from firmware import select_release
+    from compact_cache import qualified_source
+    source=qualified_source()
+    requested={(product,selected['version'],selected['buildid']),
+               (product,'8.4.1','12H321'),
+               (source['product'],source['release'],source['build'])}
+    records=[]
+    for item_product,item_version,item_build in requested:
+        if (item_product,item_version,item_build)==(product,selected['version'],selected['buildid']):
+            record=selected
+        else:
+            record=select_release(records_provider(item_product),item_version,item_build)
+        records.append((item_product,record))
+    permanent=0;extraction_scratch=0
+    selected_firmware=None;selected_record=None
+    for item_product,record in records:
+        size=int(record['filesize'])
+        ipsw=STATE/'ipsw'/(item_product+'_'+record['version']+'_'+record['buildid']+'_Restore.ipsw')
+        firmware=STATE/'targets'/item_product/record['buildid']/'firmware'
+        if not ipsw.is_file():permanent+=size
+        if not (firmware/'manifest.json').is_file():
+            # Root HFS images for these releases are at most about 1.3 times
+            # their IPSW. The encrypted member also exists transiently while
+            # it is being decoded, but is removed after verification.
+            permanent+=(size*4+2)//3
+            extraction_scratch=max(extraction_scratch,size)
+        if (item_product,record['version'],record['buildid'])==(product,selected['version'],selected['buildid']):
+            selected_firmware=firmware;selected_record=record
+    system=STATE/'targets'/product/selected['buildid']/'system/manifest.json'
+    if not system.is_file():
+        root=selected_firmware/'rootfs.hfs'
+        permanent+=root.stat().st_size if root.is_file() else (int(selected_record['filesize'])*4+2)//3
+    return permanent+max(SESSION_WORKSPACE,extraction_scratch)
+
+
+def check_space(required):
     STATE.mkdir(parents=True,exist_ok=True)
-    if shutil.disk_usage(STATE).free < 20*1024**3:
-        raise RuntimeError('Preparation needs 20 GiB of free disk space for firmware and temporary images. Free space and try again; no device was erased.')
+    free=shutil.disk_usage(STATE).free
+    if free < required:
+        need=(required+GIB-1)//GIB;available=free//GIB
+        raise RuntimeError('Preparation needs about '+str(need)+' GiB for the files still missing and temporary images; '
+                           +str(available)+' GiB is available. Free space and try again; no device was erased.')
+    return required
 
 
 def prepare(session, release, show=print):
@@ -102,7 +147,9 @@ def _prepare(session, release, display):
     from hfs import HFS
     from guided_inputs import ticket, modem
     record=json.loads((session/'device.json').read_text());identity=record['identity'];product=identity['product']
-    check_space()
+    required=preparation_space(product,release)
+    show('Disk space needed for the remaining preparation: about '+str((required+GIB-1)//GIB)+' GiB.')
+    check_space(required)
     display.phase(1,'obtaining the signed base, selected firmware and Apple ticket. The device is not being erased yet.')
     with activity('obtaining the signed base, selected firmware and Apple ticket. The device is not being erased yet'):
         base_ipsw,keys,_,_=acquire(product,'8.4.1',build='12H321')

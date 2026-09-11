@@ -2,13 +2,12 @@
 from collections import deque
 from pathlib import Path, PurePosixPath
 import re
-import shutil
 import stat
 import struct
 import tempfile
 import zlib
 
-from common import digest, run, tools
+from common import clone_or_copy, digest, run, tools
 
 
 def image_path(value):
@@ -183,7 +182,7 @@ class HFS:
             raise ValueError('Rename destination already exists')
         with tempfile.TemporaryDirectory(prefix='olsn0w-rename-', dir=self.path.parent) as work:
             candidate = Path(work)/'candidate.hfs'
-            shutil.copyfile(self.path, candidate)
+            clone_or_copy(self.path, candidate)
             image = HFS(candidate)
             image.command('mv', source, destination)
             for parent in sorted({str(PurePosixPath(p).parent) for p in (source, destination)}):
@@ -207,7 +206,7 @@ class HFS:
             raise ValueError('Expected an ordinary file')
         with tempfile.TemporaryDirectory(prefix='olsn0w-replace-', dir=self.path.parent) as work:
             candidate, source = Path(work)/'candidate.hfs', Path(work)/'content'
-            shutil.copyfile(self.path, candidate); source.write_bytes(data)
+            clone_or_copy(self.path, candidate); source.write_bytes(data)
             run([hfscompress(), candidate, '--replace-regular', source, path])
             image = HFS(candidate)
             after = next(r for r in image.ls(parent) if r['name'] == name)
@@ -241,7 +240,7 @@ class HFS:
         with tempfile.TemporaryDirectory(prefix='olsn0w-compressed-', dir=self.path.parent) as temporary:
             temporary = Path(temporary)
             candidate = temporary / 'candidate.hfs'
-            shutil.copy2(self.path, candidate)
+            clone_or_copy(self.path, candidate)
             image = HFS(candidate)
             parent = str(PurePosixPath(path).parent)
             image.mkdir(parent)

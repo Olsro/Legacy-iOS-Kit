@@ -6,7 +6,9 @@ checks its firmware, Apple signing ticket, modem, restore environment and compac
 bootstrap automatically. No developer paths or build tools for the ARM helpers
 are requested. The Python runtime is installed on first use.
 
-Preparation needs 20 GiB of available disk space and an Internet connection.
+Preparation calculates the remaining disk requirement from firmware and system
+images that are not already cached, and reports it before creating large files.
+An Internet connection is needed for firmware that is not already available.
 After preparation, confirm the erase and follow the instructions for the initial
 manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate downloads.
 The signed 8.4.1 restore, RAM handoff, compact installation,
@@ -36,6 +38,12 @@ reported only after target and activation verification. Failures retain logs and
 stop without silently repeating an erase. The guided frontend and renamed assets
 have host tests; a complete physical restore through this new menu remains to be
 qualified.
+
+After final target boot and activation qualification, olsn0w retains manifests,
+logs and the small device-bound technical collection while pruning reconstructible
+restore archives and working images. A failure at any earlier stage preserves its
+complete session for diagnosis. Mutable HFS working images use filesystem
+copy-on-write clones where the host supports them, with an ordinary copy fallback.
 
 ## Reinstall a provisioned device
 
