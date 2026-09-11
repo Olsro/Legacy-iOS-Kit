@@ -1,0 +1,9 @@
+{
+  "architecture": "armv7",
+  "minimum_ios": "8.0",
+  "files": {
+    "target/rescue-unmount": "b4ab59204febb3d25f19bc641202e59d2fb8a5831a01a51db22b782b80158a02",
+    "native/target/rescue_unmount.c": "657bfe6ba9681cd7619831f9b25ca75bef90025883a5af87f1bc37c9267f7d05",
+    "native/target/build-rescue.sh": "6350cbea055229603557077780ab231549a92dd1958a752d03f8544324a80fe7"
+  }
+}

@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Prepare olsn0w firmware and reinstall a provisioned A6/A6X device."""
+import argparse
+import json
+from pathlib import Path
+import sys
+
+from common import MODELS, STATE
+from firmware import releases, extract
+
+
+def main():
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
+    if not __debug__:
+        raise RuntimeError('Run without Python optimization; binary validation is required')
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action',choices=['list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','prepare-provision','provision-restore','menu'])
+    parser.add_argument('--product',required=True,choices=sorted(MODELS))
+    parser.add_argument('--version')
+    parser.add_argument('--udid',help='Connected normal-mode device from the Kit menu')
+    parser.add_argument('--ecid',help='Select a recovery device by ECID')
+    parser.add_argument('--port',type=int,default=6414,help='Local USB SSH port for a prepared rescue')
+    parser.add_argument('--build', help='Select an exact build when Apple released several for one version')
+    parser.add_argument('--ipsw',type=Path)
+    parser.add_argument('--keys',type=Path)
+    parser.add_argument('--refresh',action='store_true')
+    parser.add_argument('--session',type=Path,help='Selected device provisioning/rescue session')
+    parser.add_argument('--bootstrap',type=Path,help='Prepared generic compact bootstrap')
+    parser.add_argument('--ticket',type=Path,help='Selected-device signed base ticket')
+    parser.add_argument('--base-keys',type=Path,help='Keys for the signed 8.4.1 base')
+    parser.add_argument('--baseband',type=Path)
+    parser.add_argument('--baseband-manifest',type=Path)
+    parser.add_argument('--base',type=Path,help='Verified compact base belonging to the selected device')
+    parser.add_argument('--bundle',type=Path,help='Prepared device-bound restoration bundle')
+    parser.add_argument('--erase',action='store_true',help='Erase the selected device during restoration')
+    parser.add_argument('--ram-ready',action='store_true',help='Resume from an already authenticated RAM rescue')
+    args=parser.parse_args()
+    if args.action == 'provision-restore' and not all((args.session,args.bundle,args.bootstrap,args.ticket,args.base_keys,args.version,args.erase)):
+        parser.error('provision-restore requires --session, --bundle, --bootstrap, --ticket, --base-keys, --version and --erase')
+    if args.action == 'select':
+        if not args.ecid:parser.error('select requires --ecid')
+        from device import query_recovery, select_recovery
+        if query_recovery(args.ecid)['product'] != args.product:
+            raise ValueError('Connected product differs from selection')
+        print(select_recovery(args.ecid))
+        return
+    if args.action == 'prepare-provision':
+        if not args.session or not args.bundle:
+            parser.error('prepare-provision requires --session and --bundle')
+        if json.loads((args.session/'device.json').read_text())['identity']['product'] != args.product:
+            raise ValueError('Provisioning session product differs from selection')
+        from provision import prepare as prepare_provision
+        prepare_provision(args.session,args.bundle,args.ipsw,args.keys)
+        print('Prepared signed-base restore with RAM handoff; no device modified: '+str(args.bundle))
+        return
+    if args.action == 'prepare-rescue':
+        if not args.session:parser.error('prepare-rescue requires --session')
+        if json.loads((args.session/'device.json').read_text())['identity']['product'] != args.product:
+            raise ValueError('Rescue session product differs from selection')
+        from rescue_prepare import prepare as prepare_rescue
+        prepare_rescue(args.session,args.ipsw,args.keys,args.port)
+        print('Prepared model-specific RAM rescue; no device was modified: '+str(args.session))
+        return
+    if args.action == 'restore':
+        if not args.session or not args.bundle or not args.erase:
+            parser.error('restore requires --session, --bundle and --erase')
+        from restore import checked_manifest
+        if checked_manifest(args.bundle)['product'] != args.product:
+            raise ValueError('Restore bundle product differs from selection')
+        from restore_run import run as restore_run
+        restore_run(args.session,args.bundle,erase=args.erase,ram_ready=args.ram_ready)
+        return
+    if args.action=='list':
+        for f in releases(args.product,args.refresh):
+            print(f['version']+' ('+f['buildid']+')')
+        return
+    if args.action=='menu':
+        from guided import menu
+        menu(args.product,args.ecid,args.udid,args.refresh)
+        return
+    if not args.version:parser.error('--version is required for preparation')
+    try:
+        import capstone
+        import unicorn
+    except ImportError:
+        raise RuntimeError('Preparation requires capstone and unicorn. Run resources/olsn0w/setup.sh once.')
+    from bootchain import prepare, RECIPE_VERSION
+    folder,metadata=extract(args.product,args.version,args.ipsw,args.keys,args.build)
+    relay=folder.parent/'relay'
+    if relay.exists():
+        from common import digest
+        report=json.loads((relay/'manifest.json').read_text())
+        if report.get('recipe_version') != RECIPE_VERSION:
+            raise ValueError('Prepared relay uses an older recipe; preserve or move it before preparing again')
+        if any(digest(relay/n)!=h for n,h in report['files'].items()):
+            raise ValueError('Prepared relay changed')
+    else:
+        relay,report=prepare(folder)
+    print('Prepared '+metadata['product']+' / iOS '+metadata['version']+': '+str(relay))
+    if args.action in ('prepare-system','prepare-restore','provision-restore'):
+        from system import prepare as prepare_system
+        system_folder=folder.parent/'system'
+        if system_folder.exists():
+            from restore import checked_manifest
+            from system import RECIPE_VERSION as SYSTEM_RECIPE_VERSION
+            system_report=checked_manifest(system_folder)
+            if system_report.get('recipe_version') != SYSTEM_RECIPE_VERSION:
+                raise ValueError('Prepared system uses an older recipe; preserve it and prepare a new system')
+        else:
+            system_folder, system_report = prepare_system(folder, relay)
+        print('Prepared target filesystem and Data seed: '+str(system_folder))
+        print('Device-specific baseband, activation, and bootstrap installation remain required.')
+    if args.action == 'provision-restore':
+        from provision_restore import run as provision_restore
+        provision_restore(args.session,args.bundle,args.bootstrap,system_folder,relay,args.ticket,args.base_keys,
+                          baseband=args.baseband,baseband_manifest=args.baseband_manifest,erase=args.erase)
+        return
+    if args.action == 'prepare-restore':
+        if not args.session or not args.base or not args.bundle:
+            parser.error('prepare-restore requires --session, --base and --bundle')
+        from restore import prepare as prepare_restore
+        prepare_restore(args.session,system_folder,relay,args.base,args.bundle)
+        print('Prepared device-bound restoration: '+str(args.bundle))
+    print('Host preparation completed; no device was restored.')
+
+
+if __name__=='__main__':
+    # Keep the optional disassembler isolated from the kit's normal runtime.
+    runtime=STATE/'runtime/bin/python'
+    if 'menu' in sys.argv[1:] and not runtime.exists():
+        import subprocess
+        print('Preparing the olsn0w runtime…',flush=True)
+        subprocess.run(['sh',str(Path(__file__).parent/'setup.sh')],check=True)
+    if runtime.exists() and Path(sys.prefix).resolve()!=(STATE/'runtime').resolve():
+        import os
+        os.execv(str(runtime),[str(runtime),str(Path(__file__).resolve()),*sys.argv[1:]])
+    try:
+        main()
+    except (KeyboardInterrupt,EOFError):
+        print('olsn0w: interrupted; inspect the session log before restarting a restoration.',file=sys.stderr)
+        sys.exit(130)
+    except (ValueError,RuntimeError,OSError,KeyError) as error:
+        print('olsn0w: '+str(error),file=sys.stderr)
+        sys.exit(1)

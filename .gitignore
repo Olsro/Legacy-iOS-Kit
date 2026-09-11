@@ -28,3 +28,16 @@ version.xml
 index.html
 sha1sum
 url
+
+# Local device state, firmware analysis, and preparatory experiments.
+/scratchpad/
+/.irecovery
+__pycache__/
+*.pyc
+
+# Source/binary provenance shipped with the generic target helpers.
+!resources/olsn0w/target/load-jobs.json
+!resources/olsn0w/target/keybag-init.json
+!resources/olsn0w/target/rescue-unmount.json
+
+!resources/olsn0w/target/bootstrap/manifest.json

@@ -1,0 +1,103 @@
+"""Synthetic firmware/cache fixtures, with independent ARM execution checks."""
+from pathlib import Path
+import struct
+import sys
+import unittest
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from bootchain import literal_ibss, skip_ramdisk, SECOND
+from ios8_cache import prepare, encode, export_slot
+from logo import bl
+from system import jailbreak_payload
+from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB
+from unicorn.arm_const import UC_ARM_REG_SP, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R5
+
+BASE=0x10000000
+
+
+class IOS8Payload(unittest.TestCase):
+    def test_every_ios8_release_uses_validated_patcyh_payload(self):
+        for release in ('8.0', '8.1.3', '8.3', '8.4.1'):
+            payload, provenance = jailbreak_payload(release)
+            self.assertIn('usr/lib/libpatcyh.dylib', payload)
+            self.assertIn('Library/MobileSubstrate/DynamicLibraries/patcyh.plist', payload)
+            self.assertNotIn('resources/jailbreak/nopatcyh.tar',
+                             {item['path'] for item in provenance})
+
+def firmware(token):
+    data=bytearray(2048)
+    struct.pack_into('<I',data,32,BASE+64)
+    data[0x300:0x300+len(token)]=token
+    struct.pack_into('<I',data,0x180,BASE+0x300)
+    return data
+
+class BootVariants(unittest.TestCase):
+    def test_preloaded_ibss_uses_memory_and_skips_usb(self):
+        data=firmware(b'iBSS ready, asking for DFU...\n\0')
+        code=bytes.fromhex('1f48')+bl(0x102,0x500)+bytes.fromhex('1f484ff400110690cdf81480')+bl(0x112,0x600)+bytes.fromhex('0546002df4db')
+        data[0x100:0x100+len(code)]=code
+        struct.pack_into('<I',data,0x184,0x9fe00000)
+        patched,report=literal_ibss(bytes(data))
+        uc=Uc(UC_ARCH_ARM,UC_MODE_THUMB);uc.mem_map(BASE,4096);uc.mem_write(BASE,patched)
+        uc.mem_map(0x20000000,4096);uc.reg_write(UC_ARM_REG_SP,0x20000800)
+        uc.emu_start(BASE+0x107,BASE+0x11c,count=20)
+        self.assertEqual(uc.reg_read(UC_ARM_REG_R5),0x200000)
+        self.assertEqual(struct.unpack('<I',uc.mem_read(0x20000818,4))[0],SECOND)
+        self.assertEqual(report['usb_call'],0x112)
+        struct.pack_into('<I',data,0x184,123)
+        with self.assertRaises(ValueError):literal_ibss(bytes(data))
+
+    def test_ramdisk_failure_branch_can_fall_through(self):
+        data=firmware(b'/boot/ramdisk\0')
+        code=bytes.fromhex('1f48')+bl(0x102,0x500)+bytes.fromhex('00280ad1')
+        data[0x100:0x100+len(code)]=code
+        data[0x120:0x122]=bytes.fromhex('1848')
+        message=b'failed to load ramdisk\n\0'
+        data[0x340:0x340+len(message)]=message
+        struct.pack_into('<I',data,0x184,BASE+0x340)
+        patched,report=skip_ramdisk(bytes(data))
+        self.assertEqual(report['offset'],0x108)
+        for result in (0,1,0xffffffff):
+            uc=Uc(UC_ARCH_ARM,UC_MODE_THUMB);uc.mem_map(BASE,4096);uc.mem_write(BASE,patched)
+            uc.reg_write(UC_ARM_REG_R0,result)
+            uc.emu_start(BASE+0x107,BASE+0x10a,count=2)
+            self.assertEqual(uc.reg_read(UC_ARM_REG_R0),result)
+        data[0x340]=0
+        with self.assertRaises(ValueError):skip_ramdisk(bytes(data))
+
+class CacheRemap(unittest.TestCase):
+    def fixture(self):
+        data=bytearray(0x1d00c);data[:15]=b'dyld_v1  armv7s\0'
+        struct.pack_into('<4I',data,16,0x80,3,0x200,1)
+        maps=[(0x20000000,0x10000,0,5,5),(0x20010000,0x1000,0x10000,3,3),(0x20011000,0xc000,0x11000,1,1)]
+        for i,m in enumerate(maps):struct.pack_into('<QQQII',data,0x80+i*32,*m)
+        struct.pack_into('<QQQII',data,0x200,0x20008000,0,0,0x240,0)
+        name=b'/usr/lib/libmis.dylib\0';data[0x240:0x240+len(name)]=name
+        data[0x8000:0x8004]=b'\xce\xfa\xed\xfe'
+        struct.pack_into('<II',data,0x8010,1,48)
+        struct.pack_into('<II',data,0x801c,0x80000022,48)
+        symbol=b'_MISValidateSignature'
+        trie=b'\0\1'+symbol+b'\0'+bytes([len(symbol)+4])+b'\3\0'+encode(0x301)+b'\0'
+        struct.pack_into('<II',data,0x8044,0x16000,len(trie))
+        data[0x16000:0x16000+len(trie)]=trie
+        data[0x8200:0x8204]=bytes.fromhex('00207047')
+        struct.pack_into('<QQ',data,40,0x1d000,12)
+        struct.pack_into('>III',data,0x1d000,0xfade0cc0,12,0)
+        return bytes(data),maps
+
+    def test_loaded_cache_preserves_all_bytes_except_thumb_export(self):
+        stock,maps=self.fixture();patched,report=prepare(stock)
+        loaded=b''.join(patched[m[2]:m[2]+m[1]] for m in report['mappings'])
+        original=b''.join(stock[m[2]:m[2]+m[1]] for m in maps)
+        changed=[i for i,(a,b) in enumerate(zip(original,loaded)) if a!=b]
+        self.assertEqual(changed,[report['export_offset']+1])
+        self.assertEqual(report['replacement_export'],0x201)
+        self.assertEqual(loaded[0x8000:0x10000],stock[0x8000:0x10000])
+        self.assertEqual(struct.unpack_from('<II',patched,20),(6,0x260))
+        self.assertEqual(patched[0x2a0:0x2a0+22],b'/usr/lib/libmis.dylib\0')
+
+    def test_unknown_maps_gadgets_and_cyclic_trie_rejected(self):
+        stock,_=self.fixture()
+        for offset in (0,0x90,0x8200):
+            data=bytearray(stock);data[offset]^=1
+            with self.assertRaises(ValueError):prepare(bytes(data))
+        with self.assertRaisesRegex(ValueError,'Cyclic'):export_slot(b'\0\1x\0\0',b'x')

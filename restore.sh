@@ -15,6 +15,13 @@ if [ "$bash_test" != "1" ] || [ -z $BASH_VERSION ]; then
 fi
 bash_ver=$(/usr/bin/env bash -c 'echo ${BASH_VERSINFO[0]}')
 
+# The standalone olsn0w entry point uses the same implementation as the menu.
+if [[ ${1:-} == "--olsn0w" ]]; then
+    shift
+    olsn0w_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    exec python3 "$olsn0w_root/resources/olsn0w/olsn0w.py" "$@"
+fi
+
 print() {
     echo "${color_B}${1}${color_N}"
 }
@@ -2256,6 +2263,7 @@ device_enter_mode() {
                 device_pwnd="$($irecovery -q | grep "PWND" | cut -c 7-)"
                 device_srtg="$($irecovery -q | grep "SRTG" | cut -c 7-)"
             fi
+
             if [[ -n $device_pwnd ]]; then
                 log "Device seems to be already in pwned DFU mode"
                 print "* Pwned: $device_pwnd"
@@ -8562,6 +8570,11 @@ menu_main() {
     done
 }
 
+menu_olsn0w() {
+    python3 ../resources/olsn0w/olsn0w.py menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" || warn "olsn0w stopped; see the reported reason."
+    pause
+}
+
 menu_appmanage() {
     local menu_items
     local selected
@@ -9172,6 +9185,11 @@ menu_restore() {
             iPhone3,* | iPad1,1 | iPod3,1 )
                 menu_items+=("powdersn0w (any iOS)");;
         esac
+        if [[ $1 != "ipsw" ]]; then
+            case $device_type in
+                iPhone5,[12] | iPad3,[456] ) menu_items+=("olsn0w (choose iOS version)");;
+            esac
+        fi
         if [[ $device_can_drav6 == 1 ]]; then
             menu_items+=("DRA v6 (any iOS)")
         fi
@@ -9248,6 +9266,7 @@ menu_restore() {
         case $selected in
             "" ) :;;
             "Go Back" ) back=1;;
+            "olsn0w (choose iOS version)" ) menu_olsn0w;;
             "Other (Custom IPSW)" ) restore_customipsw_confirm;;
             "DFU IPSW" ) device_dfuipsw_confirm $1;;
             "More versions" ) menu_restore_more "$1";;

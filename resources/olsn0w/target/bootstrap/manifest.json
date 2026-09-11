@@ -1,0 +1,62 @@
+{
+  "format": 1,
+  "board_placeholder": "P101AP",
+  "serial_placeholder": "0000000000000000000000000000000000000000",
+  "files": {
+    "controller": "c39334f3e967715879c9912bc41d0792a4e9177dfe736abc2bde60c48301c296",
+    "root_start": "c8615d329f6a3ef7d53909135d7698dc0365d1f276928564050cb45637f7bf08",
+    "untether_supervisor": "16b8b7b5b429f28449ca741c4e504ad6923c7998d243b9223659155acd88c4bd",
+    "power_ready": "30ba292e03ce1531b4df9022a830ddb286979133d6c99a71ecb07196a708e46f",
+    "wake": "738fbb764f8e2a8f51ae67ae6850122c43dda44edb89f18ac201847508f7a614",
+    "root.hfs.gz": "c6cb87683f4133139c0200a78ff24a299c6b85a699b1893582318790c55fddae",
+    "var.hfs.gz": "ffc41e575cfb1b900683d24261b38165908b8fc13baeb81e941b362899218477"
+  },
+  "sources": {
+    "native/bootstrap/power_ready.c": "c0f95a1116b6b26dc55aac14a3464cf1e56b62b992e5359e04bcef4199f78693",
+    "native/bootstrap/untether_supervisor.c": "a958739d3bbb29331a471a3235d789aae85e0cb6775095bcd6ea13959a79a73f",
+    "native/bootstrap/controller.c": "16ade58f9db5111ffd89112a46a68d858d392cfebb12040df7bbf21452fd6152",
+    "native/bootstrap/cache_check.c": "b90bb22ee77d31280fe7fa18f2d879c9b6bfa5d9b877eac8018c4f92b3d5910c",
+    "native/bootstrap/wake.c": "cfbcb6626d457de8f59bb4705e0eb1061b62cd070a91a5bba28ba31f3aedf9d1",
+    "native/bootstrap/root_start.c": "5f9a13fe6327cad7756c2241edce18c64c48dba146b4bacb809652a80008949f",
+    "bootstrap_native.py": "9a34e75672bac0e18cf76dcc84380197ac015b32bd73398d15a50a693c85e6f1",
+    "native/bootstrap-assets/build.py": "530c4559a7321efed5075670573a4f62500ebfff3e3e9b7ec7471f48fb15bba9",
+    "native/bootstrap/patch_completion.h": "7bd251248588380a79468b65d8336dd127a78b7b5b8a6f745cc7d29bf4830e74"
+  },
+  "templates": {
+    "root": {
+      "bytes": 31457280,
+      "sha256": "39fa56a4112ad1f5bfd776dca666c5bbc7276b980423789330d8a4b485f25b36"
+    },
+    "var": {
+      "bytes": 2097152,
+      "sha256": "172683e6281a3256fd02d3ad83b81c08b5041cd15dd6538e385a571117d928dc"
+    }
+  },
+  "native_provenance": {
+    "product": "iPad3,4",
+    "base_build": "12H321",
+    "configuration_sha256": "a76d056252cc0a35b48a7c2ea1c757c876958d0833200a6da261a32c373d02f2",
+    "sources": {
+      "power_ready.c": "c0f95a1116b6b26dc55aac14a3464cf1e56b62b992e5359e04bcef4199f78693",
+      "untether_supervisor.c": "a958739d3bbb29331a471a3235d789aae85e0cb6775095bcd6ea13959a79a73f",
+      "controller.c": "16ade58f9db5111ffd89112a46a68d858d392cfebb12040df7bbf21452fd6152",
+      "patch_completion.h": "7bd251248588380a79468b65d8336dd127a78b7b5b8a6f745cc7d29bf4830e74",
+      "cache_check.c": "b90bb22ee77d31280fe7fa18f2d879c9b6bfa5d9b877eac8018c4f92b3d5910c",
+      "wake.c": "cfbcb6626d457de8f59bb4705e0eb1061b62cd070a91a5bba28ba31f3aedf9d1",
+      "root_start.c": "5f9a13fe6327cad7756c2241edce18c64c48dba146b4bacb809652a80008949f"
+    },
+    "libraries": {
+      "usr/lib/libSystem.B.dylib": "4ed50a40601a0aedd96a2da750bb28f5e8b2c43e61a3fc053cc0cef0b9abf44e",
+      "System/Library/Frameworks/CoreFoundation.framework/CoreFoundation": "ee14c5af0dba579537b974f2bab8a1e9deabd3fd23abb79ad02873532416a2d3",
+      "System/Library/Frameworks/IOKit.framework/Versions/A/IOKit": "8c987cf7e05fa694e25b78a0c2c23402a6cea1fad4eb0fa2aad6cdd43cd40f1b"
+    },
+    "files": {
+      "controller": "c39334f3e967715879c9912bc41d0792a4e9177dfe736abc2bde60c48301c296",
+      "root_start": "c8615d329f6a3ef7d53909135d7698dc0365d1f276928564050cb45637f7bf08",
+      "untether_supervisor": "16b8b7b5b429f28449ca741c4e504ad6923c7998d243b9223659155acd88c4bd",
+      "power_ready": "30ba292e03ce1531b4df9022a830ddb286979133d6c99a71ecb07196a708e46f",
+      "wake": "738fbb764f8e2a8f51ae67ae6850122c43dda44edb89f18ac201847508f7a614"
+    },
+    "physical_boot_verified": false
+  }
+}
