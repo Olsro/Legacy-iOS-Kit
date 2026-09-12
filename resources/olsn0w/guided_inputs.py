@@ -5,7 +5,7 @@ import platform
 import plistlib
 import subprocess
 
-from common import KIT, MODELS, digest, integer, tools
+from common import KIT, MODELS, digest, integer, profile, tools
 from firmware import releases, select_release
 from tickets import binding
 
@@ -36,11 +36,15 @@ def ticket(identity, destination):
 
 
 def modem(identity, destination):
-    if identity['product']=='iPad3,4':return None,None
+    selected_profile=profile(identity['product'])
+    if not selected_profile['has_baseband']:return None,None
     destination=Path(destination);destination.mkdir(mode=0o700)
     product=identity['product'];board,chip,board_id=MODELS[product]
-    record=select_release(releases(product),'10.3.4','14G61')
-    name='Mav5-11.80.00.Release.bbfw'
+    specification=selected_profile.get('baseband',dict(
+        version='10.3.4',build='14G61',name='Mav5-11.80.00.Release.bbfw',
+        sha1='8951cf09f16029c5c0533e951eb4c06609d0ba7f'))
+    record=select_release(releases(product),specification['version'],specification['build'])
+    name=specification['name']
     for member in ('BuildManifest.plist','Firmware/'+name):
         with (destination/(Path(member).name+'.log')).open('wb') as log:
             result=subprocess.run([str(tool('pzb')),'-g',member,record['url']],cwd=destination,
@@ -50,11 +54,11 @@ def modem(identity, destination):
     data=plistlib.loads(manifest.read_bytes())
     matches=[i for i in data['BuildIdentities'] if i['Info']['DeviceClass']==board
              and integer(i['ApChipID'])==chip and integer(i['ApBoardID'])==board_id]
-    if data['ProductBuildVersion']!='14G61' or product not in data['SupportedProductTypes'] or not matches:
+    if data['ProductBuildVersion']!=specification['build'] or product not in data['SupportedProductTypes'] or not matches:
         raise ValueError('Modem manifest differs from the selected device')
     file=destination/name
     if not file.exists():file=destination/'Firmware'/name
-    if digest(file,'sha1')!='8951cf09f16029c5c0533e951eb4c06609d0ba7f':raise ValueError('Modem checksum mismatch')
+    if digest(file,'sha1')!=specification['sha1']:raise ValueError('Modem checksum mismatch')
     if not any(Path(i['Manifest']['BasebandFirmware']['Info']['Path']).name==name for i in matches):
         raise ValueError('Modem component differs from its manifest')
     return file,manifest

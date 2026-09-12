@@ -7,7 +7,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from aquila import embedded_payload, job_loader, prepare_ios8_payload, prepare_payload
+from aquila import (armv7_slice, embedded_payload, job_loader,
+                    prepare_ios6_payload, prepare_ios8_payload,
+                    prepare_pangu71_payload, prepare_payload)
 
 
 class ReleasePayload(unittest.TestCase):
@@ -15,10 +17,25 @@ class ReleasePayload(unittest.TestCase):
         binary, wrapper = job_loader()
         self.assertEqual(binary[:4], b'\xce\xfa\xed\xfe')
         self.assertIn(b'/olsn0w/load-jobs "$@"', wrapper)
+        self.assertIn(b'[ "$2" = -D ]', wrapper)
 
     def test_unknown_untether_is_not_patched(self):
         with self.assertRaisesRegex(ValueError, 'Unqualified'):
             prepare_payload(b'unknown', '/dev/disk0s1s3', '/unused')
+
+    def test_ios6_keeps_its_native_payload_and_stock_launchctl(self):
+        import tarfile
+        archive=Path(__file__).resolve().parents[2]/'jailbreak/aquila_6.tar'
+        with tarfile.open(archive) as payload:
+            original=payload.extractfile('./private/var/aquila/aquila').read()
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory)/'aquila'
+            prepare_ios6_payload(original,'/dev/disk0s1s3',output)
+            patched=output.read_bytes()
+        self.assertNotIn(b'/dev/disk0s1s1\0',patched)
+        self.assertIn(b'/dev/disk0s1s3\0',patched)
+        self.assertIn(b'/bin/launchctl\0',patched)
+        self.assertNotIn(b'/olsn0w/lctl\0',patched)
 
     def test_ios8_uses_qualified_batch_loader_and_retains_parent(self):
         original = bytearray(0x6e16)
@@ -40,6 +57,22 @@ class ReleasePayload(unittest.TestCase):
         self.assertIn(b'/olsn0w/lctl\0', patched)
         self.assertEqual(patched[0x6e0c:0x6e14], bytes.fromhex('40f23c0003f0c8ed'))
         self.assertEqual(patched[0x6e14:0x6e16], bytes.fromhex('fae7'))
+
+    def test_pangu71_uses_checked_armv7_slice_and_selected_root(self):
+        import tarfile
+        archive=Path(__file__).resolve().parents[2]/'jailbreak/panguaxe.tar'
+        with tarfile.open(archive) as payload:
+            original=payload.extractfile('panguaxe').read()
+        thin=armv7_slice(original)
+        self.assertEqual(thin[:4],b'\xce\xfa\xed\xfe')
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory)/'panguaxe'
+            prepare_pangu71_payload(original,'/dev/disk0s1s3',output)
+            patched=output.read_bytes()
+        self.assertNotIn(b'/dev/disk0s1s1\0',patched)
+        self.assertIn(b'/dev/disk0s1s3\0',patched)
+        self.assertNotIn(b'/bin/launchctl\0',patched)
+        self.assertIn(b'/olsn0w/lctl\0',patched)
 
     def test_relocation_and_decoy_headers(self):
         payload = b'\xce\xfa\xed\xfe' + bytes(range(64))

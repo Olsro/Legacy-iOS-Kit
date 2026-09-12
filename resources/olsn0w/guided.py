@@ -10,7 +10,7 @@ import subprocess
 import time
 import uuid
 
-from common import KIT, MODELS, STATE, integer, run, save, version
+from common import KIT, MODELS, STATE, integer, profile, run, save, tools, version
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
@@ -72,7 +72,7 @@ def preparation_space(product, selected, records_provider=releases):
     """Estimate the remaining peak from artifacts that are not cached yet."""
     from firmware import select_release
     from compact_cache import qualified_source
-    source=qualified_source()
+    source=qualified_source(profile(product)['cache_arch'])
     requested={(product,selected['version'],selected['buildid']),
                (product,'8.4.1','12H321'),
                (source['product'],source['release'],source['build'])}
@@ -115,6 +115,15 @@ def check_space(required):
     return required
 
 
+def reusable_recipe(path, expected, checker):
+    """Retain a reproducible cache only when its recipe is current."""
+    path=Path(path)
+    if not path.exists():return False
+    if checker(path).get('recipe_version')==expected:return True
+    shutil.rmtree(path)
+    return False
+
+
 def prepare(session, release, show=print):
     from progress import LiveProgress
     with LiveProgress(show) as display:
@@ -124,10 +133,12 @@ def prepare(session, release, show=print):
 def bootstrap_cache_firmware(product, base_firmware, extract_firmware, show=lambda _:None):
     """Select the exact stock-cache donor used by the qualified recipe."""
     from compact_cache import qualified_source
-    source=qualified_source()
+    architecture=profile(product)['cache_arch']
+    source=qualified_source(architecture)
     if product==source['product']:
         return base_firmware
-    show('Obtaining the qualified shared armv7s bootstrap source; all iPad boot components remain model-specific.')
+    kind='iPad' if product.startswith('iPad') else 'device'
+    show('Obtaining the qualified shared '+architecture+' bootstrap source; all '+kind+' boot components remain model-specific.')
     firmware,_=extract_firmware(source['product'],source['release'],build=source['build'])
     return firmware
 
@@ -162,13 +173,14 @@ def _prepare(session, release, display):
     display.phase(2,'preparing the selected system and boot relay.')
     with activity('preparing the selected system and boot relay'):
         relay=firmware.parent/'relay'
-        if relay.exists():
-            if checked_manifest(relay).get('recipe_version')!=RELAY_RECIPE:raise ValueError('Cached relay recipe is outdated')
-        else:relay_prepare(firmware)
+        if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest):
+            relay_prepare(firmware)
         system=firmware.parent/'system'
-        if system.exists():
-            if checked_manifest(system).get('recipe_version')!=SYSTEM_RECIPE:raise ValueError('Cached system recipe is outdated')
-        else:system_prepare(firmware,relay)
+        if not reusable_recipe(system,SYSTEM_RECIPE,checked_manifest):
+            # Both caches are generated solely from verified firmware and
+            # payload inputs. Rebuild an obsolete recipe in place so a safety
+            # correction never requires manual cache surgery.
+            system_prepare(firmware,relay)
     display.phase(3,'preparing the restore environment and compact bootstrap.')
     with activity('preparing the restore environment and compact bootstrap'):
         with socket.socket() as sock:
@@ -177,10 +189,15 @@ def _prepare(session, release, display):
         serial=record.get('ram_udid') or hashlib.sha1(('olsn0w:'+str(identity['ecid'])).encode()).hexdigest()
         native=native_prepare(product,serial,session/'native')
         libraries=session/'libraries';(libraries/'usr/lib').mkdir(parents=True)
-        (libraries/'usr/lib/libutil.dylib').write_bytes(HFS(session/'rescue-ram.hfs').read('/usr/lib/libutil.dylib'))
+        source=(session/'bootstrap-libutil.dylib' if (session/'bootstrap-libutil.dylib').is_file()
+                else None)
+        library=(source.read_bytes() if source else HFS(session/'rescue-ram.hfs').read('/usr/lib/libutil.dylib'))
+        (libraries/'usr/lib/libutil.dylib').write_bytes(library)
+        architecture=profile(product)['cache_arch']
         cache_source=session/'stock-cache'
-        cache_source.write_bytes(HFS(cache_firmware/'rootfs.hfs').read('/System/Library/Caches/com.apple.dyld/dyld_shared_cache_armv7s'))
-        cache=session/'compact-cache';cache_prepare(cache_source,cache)
+        cache_source.write_bytes(HFS(cache_firmware/'rootfs.hfs').read(
+            '/System/Library/Caches/com.apple.dyld/dyld_shared_cache_'+architecture))
+        cache=session/'compact-cache';cache_prepare(cache_source,cache,architecture)
         bootstrap=session/'bootstrap'
         bootstrap_prepare(product,base_firmware,libraries,native,relay/'relay.bin',base_firmware/'Kernelcache.img3',
                           cache,native/'root.hfs',native/'var.hfs',bootstrap)
@@ -206,11 +223,22 @@ def enter_dfu(identity, read=input, show=print):
         try:actual=query_recovery(identity['ecid'])
         except (RuntimeError,subprocess.TimeoutExpired):return False
         if not same_hardware(identity,actual):raise ValueError('DFU target differs from the selected device')
-        return actual['mode']=='DFU'
+        if actual['mode']!='DFU':return False
+        if profile(identity['product']).get('external_pwndfu'):
+            result=subprocess.run([str(tools()/'irecovery'),'-i',hex(identity['ecid']),'-q'],
+                                  capture_output=True,timeout=15)
+            text=(result.stdout+result.stderr).decode(errors='replace')
+            return result.returncode==0 and ('PWND: [checkm8]' in text or 'PWND:[checkm8]' in text)
+        return True
     while not ready():
         show('Keep the selected device connected by USB. Prepared files are retained across every DFU attempt.')
-        show('Hold Power + Home for 10 seconds, then release Power while continuing to hold Home for about 10 seconds. The screen must remain black.')
-        read('Press Enter once the device is in DFU (Ctrl+C to cancel): ')
+        if profile(identity['product']).get('external_pwndfu'):
+            show('Put the iPhone 4S in DFU, run the A5_8940 A5Mate profile, eject it cleanly with A, then reconnect it to this computer. The host requires PWND:[checkm8].')
+            prompt='Press Enter once the externally pwned DFU device is reconnected (Ctrl+C to cancel): '
+        else:
+            show('Hold Power + Home for 10 seconds, then release Power while continuing to hold Home for about 10 seconds. The screen must remain black.')
+            prompt='Press Enter once the device is in DFU (Ctrl+C to cancel): '
+        read(prompt)
         deadline=time.monotonic()+30
         detected=ready()
         while not detected and time.monotonic()<deadline:

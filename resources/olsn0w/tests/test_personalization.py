@@ -48,9 +48,10 @@ class RadioCapability(unittest.TestCase):
             self.assertFalse(result['has_baseband'])
             with tarfile.open(root / 'output/root-personalization.tar') as archive:
                 regular = [m.name for m in archive if m.isfile()]
-                self.assertEqual(regular, ['usr/local/share/olsn0w/data-personalization.tar'])
-                self.assertEqual(archive.extractfile(regular[0]).read(),
-                                 (root / 'output/data-personalization.tar').read_bytes())
+                # iOS 6 Data is seeded directly before boot. Only protected
+                # iOS 7/8 images need to carry this archive inside System for
+                # native first-boot extraction.
+                self.assertEqual(regular, [])
             with tarfile.open(root / 'output/data-personalization.tar') as archive:
                 self.assertIn('root/Library/Lockdown/activation_records/pod_record.plist', archive.getnames())
 

@@ -64,3 +64,27 @@ class DistributedState(unittest.TestCase):
                 restore_run.qualify(Path(work),['ssh'],'fixture',timeout=0,progress=lambda _:None)
             activate.assert_called_once()
             acknowledge.assert_called_once()
+
+    def test_transient_data_generation_mismatch_does_not_prevent_activation(self):
+        identity={'board':'p101ap','product':'iPad3,4','ecid':123}
+        report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+                    identity=identity,activation_mode='official-on-target')
+        unactivated=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
+            BuildVersion='11D257',ActivationState='Unactivated'))
+        activated=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
+            BuildVersion='11D257',ActivationState='Activated'))
+        jobs='P101AP\n11D257\nselected\n10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n- 0 com.apple.accountsd\n- 0 com.apple.managedconfiguration.profiled\n'
+        replies=[subprocess.CompletedProcess([],0,b'P101AP\n11D257\n',b''),
+                 subprocess.CompletedProcess([],0,unactivated,b''),
+                 subprocess.CompletedProcess([],0,jobs.encode(),b''),
+                 subprocess.CompletedProcess([],0,activated,b'')]
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run.subprocess,'run',side_effect=replies), \
+             patch.object(restore_run.time,'sleep'), \
+             patch('activation.activate') as activate, \
+             patch('activation.acknowledge',return_value={'activation_state':'Activated','acknowledged':True}) as acknowledge:
+            result=restore_run.qualify(Path(work),['ssh'],'fixture',progress=lambda _:None)
+            self.assertTrue(result['normal_boot_verified'])
+            activate.assert_called_once()
+            acknowledge.assert_called_once()

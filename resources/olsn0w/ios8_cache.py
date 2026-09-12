@@ -49,9 +49,12 @@ def export_slot(trie, symbol):
     return found[0]
 
 
-def prepare(stock):
-    if not stock.startswith(b'dyld_v1  armv7s\0') or len(stock)<0x8000:
-        raise ValueError('Expected a stock ARMv7s dyld cache')
+def prepare(stock, architecture='armv7s'):
+    if architecture not in {'armv7','armv7s'}:
+        raise ValueError('Expected an ARMv7 cache architecture')
+    magic=b'dyld_v1'+b' '*(8-len(architecture))+architecture.encode()+b'\0'
+    if not stock.startswith(magic) or len(stock)<0x8000:
+        raise ValueError('Expected a stock '+architecture+' dyld cache')
     mo,mc,io,ic=struct.unpack_from('<4I',stock,16)
     if mc!=3 or not 0<ic<4096 or io+ic*32>0x8000 or mo+mc*32>io:
         raise ValueError('Unsupported stock cache tables')
@@ -129,7 +132,51 @@ def prepare(stock):
         expected=bytearray(stock[source:source+m[1]])
         if source<=changed<source+m[1]:expected[changed-source:changed-source+len(new)]=new
         if result[m[2]:m[2]+m[1]]!=expected:raise ValueError('Cache remapping changed unrelated virtual bytes')
-    return bytes(result),dict(source_sha256=hashlib.sha256(stock).hexdigest(),
+    return bytes(result),dict(architecture=architecture,
+        source_sha256=hashlib.sha256(stock).hexdigest(),
         output_sha256=hashlib.sha256(result).hexdigest(),mappings=mappings,
         export_offset=changed,original_export=old,replacement_export=uleb(new,0)[0],
         executable_pages_preserved=True)
+
+
+def protect_registry(cache, address, extent):
+    """Move the cache prefix into one read-only mapping for XPC registry edits.
+
+    The stock xpcd cache image ends on a page boundary.  As in the qualified
+    ARMv7s recipe, everything before that boundary is bootstrap metadata or an
+    optional image; the bootstrap's required executable range starts after it.
+    """
+    if extent <= 0 or address < 0 or (address+extent) % 0x1000:
+        raise ValueError('Invalid registry extent')
+    mo,mc=struct.unpack_from('<II',cache,16)
+    if mc != 6 or mo+mc*32 > len(cache):
+        raise ValueError('Expected the remapped six-region cache')
+    mappings=[struct.unpack_from('<QQQII',cache,mo+i*32) for i in range(mc)]
+    header,executable=mappings[:2]
+    if (header[3:] != (1,1) or executable[3:] != (5,5) or
+            header[0]+header[1] != executable[0] or
+            header[2]+header[1] > len(cache) or
+            executable[2]+executable[1] > len(cache)):
+        raise ValueError('Unexpected cache prefix mappings')
+    end=address+extent
+    if not executable[0] < address < end < executable[0]+executable[1]:
+        raise ValueError('Registry is outside the executable cache prefix')
+    span=end-header[0]
+    copied=(len(cache)+0x3fff)&~0x3fff
+    result=bytearray(cache)
+    result.extend(bytes(copied+span-len(result)))
+    result[copied:copied+header[1]]=cache[header[2]:header[2]+header[1]]
+    tail=span-header[1]
+    result[copied+header[1]:copied+span]=cache[executable[2]:executable[2]+tail]
+    updated=[(header[0],span,copied,1,1),
+             (end,executable[0]+executable[1]-end,
+              executable[2]+end-executable[0],5,5),*mappings[2:]]
+    for i,mapping in enumerate(updated):
+        struct.pack_into('<QQQII',result,mo+i*32,*mapping)
+    # Mapping changes must not alter any previously loaded byte.  The caller
+    # subsequently changes only the selected plist through configure().
+    def loaded(blob, table):
+        return b''.join(blob[start:start+size] for _,size,start,_,_ in table)
+    if loaded(result,updated) != loaded(cache,mappings):
+        raise ValueError('Registry protection changed loaded cache bytes')
+    return bytes(result),updated

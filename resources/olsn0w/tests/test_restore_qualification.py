@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore_run import services_ready, startup_status
+from restore_run import services_ready, startup_failure, startup_status
 
 class StartupQualification(unittest.TestCase):
     def test_active_data_migration_only_blocks_pre_ios8_boots(self):
@@ -22,3 +22,10 @@ class StartupQualification(unittest.TestCase):
         self.assertTrue(services_ready(jobs,'7.1.2'))
         self.assertFalse(services_ready(jobs.replace('- 0 com.saurik','17 0 com.saurik'),'7.1.2'))
         self.assertFalse(services_ready(jobs.replace('- 0 com.saurik','- 256 com.saurik'),'7.1.2'))
+
+    def test_failed_cydia_job_is_terminal_and_actionable(self):
+        jobs='10 - com.apple.SpringBoard\n- 1 com.saurik.Cydia.Startup\n'
+        self.assertIn('status 1',startup_failure(jobs))
+        self.assertIn('olsn0w-cydia.log',startup_failure(jobs))
+        self.assertIsNone(startup_failure(jobs.replace('- 1','17 0')))
+        self.assertIsNone(startup_failure(jobs.replace('- 1','- 0')))

@@ -12,6 +12,17 @@ RELEASE=dict(version='7.1.2',buildid='11D257')
 IOS8_RELEASE=dict(version='8.4.1',buildid='12H321')
 
 class GuidedTest(unittest.TestCase):
+    def test_outdated_reproducible_recipe_is_rebuilt_automatically(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cached=Path(folder)/'relay';cached.mkdir();(cached/'old').write_bytes(b'x')
+            self.assertFalse(guided.reusable_recipe(
+                cached,10,lambda _:dict(recipe_version=9)))
+            self.assertFalse(cached.exists())
+            cached.mkdir();(cached/'current').write_bytes(b'x')
+            self.assertTrue(guided.reusable_recipe(
+                cached,10,lambda _:dict(recipe_version=10)))
+            self.assertTrue((cached/'current').is_file())
+
     def test_disk_estimate_shrinks_when_firmware_and_system_are_cached(self):
         records={
             'iPad3,4':[dict(version='8.3',buildid='12F69',filesize=1800),
@@ -37,6 +48,11 @@ class GuidedTest(unittest.TestCase):
         base=Path('/qualified-phone-base')
         extract=lambda *args,**kwargs:self.fail('qualified source should be reused')
         self.assertEqual(guided.bootstrap_cache_firmware('iPhone5,2',base,extract),base)
+
+    def test_iphone4s_uses_its_own_armv7_cache(self):
+        base=Path('/qualified-4s-base')
+        extract=lambda *args,**kwargs:self.fail('4S cache donor must not be ARMv7s')
+        self.assertEqual(guided.bootstrap_cache_firmware('iPhone4,1',base,extract),base)
 
     def test_ipad_uses_the_physically_qualified_shared_cache_source(self):
         donor=Path('/qualified-phone-donor')

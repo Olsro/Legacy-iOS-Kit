@@ -18,11 +18,19 @@ from common import digest
 # cache is not interchangeable with this reconstruction source.
 QUALIFIED_SOURCE = dict(product='iPhone5,2', release='8.4.1', build='12H321',
                         sha256='f640e8a12e5e660e6059ed1a97461c13678a38503c6e9410d6154db22baed9d8')
+ARMV7_SOURCE = dict(product='iPhone4,1', release='8.4.1', build='12H321',
+                    sha256='ce591173973c04c2289784e897d3e2a47c9aed7776f7575fbcdece861e4cc9da',
+                    bytes=428327698,
+                    prepared_sha256='b531ad04911c04b7caccfa8195bcd6811a6610b23a2c958b76f2d0a14187867b',
+                    registry=dict(address=0x201995d0,bytes=338480))
 
 
-def qualified_source():
+def qualified_source(architecture='armv7s'):
     """Return the firmware identity required to reproduce the shared cache."""
-    return dict(QUALIFIED_SOURCE)
+    if architecture == 'armv7s':return dict(QUALIFIED_SOURCE)
+    if architecture == 'armv7':
+        result=dict(ARMV7_SOURCE);result['registry']=dict(result['registry']);return result
+    raise ValueError('No qualified bootstrap cache architecture')
 
 
 def materialize(source, recipe):
@@ -93,16 +101,59 @@ def write_sparse(data, destination):
     return destination
 
 
-def prepare(source, destination):
+def prepare(source, destination, architecture='armv7s'):
     source, destination = Path(source), Path(destination)
     if not source.is_file() or not 0 < source.stat().st_size <= 512*1024**2:
         raise ValueError('Expected a regular stock dyld cache')
     if destination.exists():
         raise ValueError('Preserve the existing compact cache output')
     checksum = digest(source)
+    if architecture == 'armv7':
+        qualified=qualified_source(architecture)
+        if source.stat().st_size != qualified['bytes'] or checksum != qualified['sha256']:
+            raise ValueError('Stock ARMv7 cache does not match the qualified source')
+        recipe=json.loads((Path(__file__).parent/'recipes/dyld-armv7-12H321.recipe').read_text())
+        if (recipe.get('format')!=2 or recipe.get('architecture')!=architecture or
+                recipe.get('source_bytes')!=qualified['bytes'] or
+                recipe.get('source_sha256')!=qualified['sha256'] or
+                recipe.get('output_sha256')!=qualified['prepared_sha256'] or
+                recipe.get('registry')!=qualified['registry']):
+            raise ValueError('ARMv7 compact-cache recipe metadata differs')
+        from ios8_cache import prepare as remap, protect_registry
+        stock=source.read_bytes();transformed,report=remap(stock,architecture)
+        region=qualified['registry']
+        transformed,mappings=protect_registry(transformed,region['address'],region['bytes'])
+        if [list(item) for item in mappings]!=recipe['mappings'] or len(transformed)!=recipe['output_bytes']:
+            raise ValueError('ARMv7 cache mapping transform differs from recipe')
+        output=bytearray(len(transformed));last=0
+        for offset,count in recipe['keep_ranges']:
+            if (offset<last or count<=0 or offset%4096 or
+                    offset+count>len(stock) or (count%4096 and offset+count!=len(stock))):
+                raise ValueError('Invalid ARMv7 compact-cache source range')
+            output[offset:offset+count]=transformed[offset:offset+count]
+            last=offset+count
+        # The admission page and the read-only XPC prefix were relocated past
+        # the stock EOF by the checked mapping transform. Preserve only those
+        # referenced ranges; every other omitted page remains a sparse zero.
+        for _,size,offset,_,_ in mappings:
+            if offset>=len(stock):output[offset:offset+size]=transformed[offset:offset+size]
+        if hashlib.sha256(output).hexdigest() != qualified['prepared_sha256']:
+            raise ValueError('Prepared ARMv7 cache checksum mismatch')
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='olsn0w-cache-',dir=destination.parent) as temporary:
+            result=Path(temporary)/'cache';write_sparse(output,result)
+            if digest(result)!=qualified['prepared_sha256']:
+                raise ValueError('ARMv7 cache disk readback mismatch')
+            result.rename(destination)
+        return dict(sha256=qualified['prepared_sha256'],bytes=len(output),
+                    source_sha256=checksum,mappings=len(mappings),registry=region,
+                    architecture=architecture,
+                    preserved_executable_pages=True)
+    if architecture != 'armv7s':
+        raise ValueError('No qualified bootstrap cache architecture')
     candidates = [json.loads(path.read_text()) for path in
                   (Path(__file__).parent / 'recipes').glob('dyld-*.recipe')]
-    qualified = qualified_source()
+    qualified = qualified_source(architecture)
     if not any(r['source_sha256'] == qualified['sha256'] and
                r['bootstrap_build'] == qualified['build'] for r in candidates):
         raise ValueError('Qualified compact-cache source metadata differs from its recipe')
@@ -122,4 +173,4 @@ def prepare(source, destination):
         result.rename(destination)
     return dict(sha256=recipe['output_sha256'], bytes=len(output),
                 source_sha256=checksum, mappings=len(recipe['mappings']),
-                preserved_executable_pages=retained)
+                preserved_executable_pages=retained,architecture=architecture)

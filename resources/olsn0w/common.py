@@ -12,12 +12,58 @@ from progress import activity
 KIT = Path(__file__).resolve().parents[2]
 STATE = KIT / 'saved' / 'olsn0w'
 MODELS = {
+    'iPhone4,1': ('n94ap', 0x8940, 8),
     'iPhone5,1': ('n41ap', 0x8950, 0),
     'iPhone5,2': ('n42ap', 0x8950, 2),
     'iPad3,4': ('p101ap', 0x8955, 0),
     'iPad3,5': ('p102ap', 0x8955, 2),
     'iPad3,6': ('p103ap', 0x8955, 4),
 }
+
+# Keep the historic tuple table above for the binary-identity call sites, but
+# put every behavioural difference in one checked profile.  Adding a product
+# to MODELS must never silently make it inherit A6 boot, cache or modem rules.
+MODEL_PROFILES = {
+    'iPhone4,1': dict(soc='a5', cache_arch='armv7', has_baseband=True,
+                     baseband_family='Trek',
+                     external_pwndfu=True, multipatch=True,
+                     baseband=dict(version='9.3.6', build='13G37',
+                                   name='Trek-6.7.00.Release.bbfw',
+                                   sha1='22a35425a3cdf8fa1458b5116cfb199448eecf49')),
+    'iPhone5,1': dict(soc='a6', cache_arch='armv7s', has_baseband=True,
+                     baseband_family='Mav5'),
+    'iPhone5,2': dict(soc='a6', cache_arch='armv7s', has_baseband=True,
+                     baseband_family='Mav5',
+                     # This DeviceTree workaround was qualified only on the
+                     # N42 6.1.3 Lightning handoff.  In particular, applying
+                     # it to p101/A6X changes a kernel hang into a reboot.
+                     tristar_soft_reset_versions=('6.1.3',)),
+    'iPad3,4': dict(soc='a6x', cache_arch='armv7s', has_baseband=False),
+    'iPad3,5': dict(soc='a6x', cache_arch='armv7s', has_baseband=True,
+                   baseband_family='Mav5'),
+    'iPad3,6': dict(soc='a6x', cache_arch='armv7s', has_baseband=True,
+                   baseband_family='Mav5'),
+}
+
+BASEBAND_FILES = {
+    'Mav5': ('apps.mbn','bbticket.der','dsp1.mbn','dsp2.mbn','dsp3.mbn',
+             'rpm.mbn','sbl1.mbn','sbl2.mbn'),
+    'Trek': ('amss.mbn','bbticket.der','dbl.mbn','osbl.mbn','restoredbl.mbn'),
+}
+
+
+def baseband_files(family):
+    try:return BASEBAND_FILES[family]
+    except KeyError as error:raise ValueError('Unsupported modem family') from error
+
+
+def profile(product):
+    if product not in MODELS or product not in MODEL_PROFILES:
+        raise ValueError('Unsupported product')
+    value = dict(MODEL_PROFILES[product])
+    if 'baseband' in value:
+        value['baseband'] = dict(value['baseband'])
+    return value
 
 
 def version(value):
@@ -28,7 +74,7 @@ def version(value):
 
 def target(product, release):
     if product not in MODELS or version(release) < version('6.0'):
-        raise ValueError('Expected an iPhone 5 / iPad 4 release from iOS 6.0 onward')
+        raise ValueError('Expected a supported 32-bit release from iOS 6.0 onward')
     return MODELS[product]
 
 

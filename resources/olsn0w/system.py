@@ -14,20 +14,26 @@ import tempfile
 import uuid
 
 from archives import members, deb_payload, write_tar
-from aquila import ios7_payload, job_loader, prepare_payload, prepare_ios8_payload
-from common import KIT, MODELS, clone_or_copy, digest, run, save, version
+from aquila import (ios7_payload, job_loader, prepare_payload,
+                    prepare_ios6_payload, prepare_ios8_payload,
+                    prepare_pangu71_payload)
+from common import KIT, MODELS, clone_or_copy, digest, profile, run, save, version
 from hfs import HFS
 from img3 import img3
 from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 14
+RECIPE_VERSION = 21
 
 
 def uses_protected_data(release):
     """Return whether this recipe needs native HFS content protection."""
-    return version(release)[0] in (6, 7, 8)
+    # iOS 6's stock fstab mounts Data without the `protect` option. Applying
+    # the iOS 7/8 protected-volume bootstrap to 6.1.3 makes the A6/A6X kernel
+    # stall while Aquila is restarting services. Keep the firmware's proven
+    # unprotected Data contract on iOS 6.
+    return version(release)[0] in (7, 8)
 
 
 def uses_protected_keybag_start(release):
@@ -154,7 +160,9 @@ def jailbreak_payload(release):
     major = version(release)[0]
     if major not in PREPARABLE_MAJORS:
         raise ValueError('This firmware needs its own first-boot service integration')
-    packages = (['daibutsu/untether.tar'] if major==8 else ['aquila_'+str(major)+'.tar'])
+    pangu71 = major == 7 and version(release) >= version('7.1')
+    packages = (['daibutsu/untether.tar'] if major==8 else
+                ['panguaxe.tar'] if pangu71 else ['aquila_'+str(major)+'.tar'])
     packages += ['freeze.tar.gz', 'openssh.tar.gz', 'openssl.tar.gz','sshdeb.tar', 'LukeZGD.tar']
     # EverUntether's validated iOS 8 path installs patcyh and invokes its
     # extrainst hook.  Keep that same payload for every iOS 8 release instead
@@ -177,7 +185,7 @@ def jailbreak_payload(release):
             if not name.startswith('private/var/'):
                 item.uid = item.gid = 0
             entries[name] = (item, data)
-    if major!=8:
+    if major != 6 and major != 8 and not pangu71:
         aquila, origin = ios7_payload()
         entries.pop('private/var/aquila/aquila', None)
         entries['aquila'] = entry('aquila', aquila, 0o755)
@@ -200,9 +208,10 @@ def ios6_launchd_conf(content):
     token = b'bsexec .. /private/var/aquila/aquila\n'
     if content.count(token) != 1:
         raise ValueError('Unrecognized Kit iOS 6 launchd configuration')
-    return (b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/keybag-init.sh\n' +
-            content.replace(token, b'bsexec .. /aquila\n').rstrip(b'\n') +
-            b'\nbsexec .. /bin/sh /usr/local/libexec/olsn0w/finish-data.sh\n')
+    # Preserve the package's proven iOS 6 contract. Data is populated before
+    # boot and Aquila, its AMFI shim, and its writable log all stay together
+    # under /private/var/aquila.
+    return content
 
 
 def keybag_tool():
@@ -239,8 +248,8 @@ def early_keybag_job(launchd):
     return True
 
 
-def uses_legacy_job_loader(release):
-    """The qualified iOS 7/8 untethers both use the guarded batch loader."""
+def uses_legacy_job_loader(release, untether=None):
+    """The qualified iOS 7/8 untethers use the guarded batch loader."""
     return version(release)[0] in (7, 8)
 
 
@@ -294,7 +303,61 @@ def cydia_startup_job(data):
     return plistlib.dumps(job)
 
 
-def move_daemons(image, major=7):
+def untether_jetsam_properties(data, label):
+    """Give the selected iOS 7 untether enough memory to patch and remount."""
+    document = plistlib.loads(data)
+    defaults = document.get('Defaults')
+    if document.get('Version') != 3 or not isinstance(defaults, dict):
+        raise ValueError('Unrecognized iOS 7 jetsam properties')
+    properties = copy.deepcopy(defaults.get(label, {}))
+    if not isinstance(properties, dict):
+        raise ValueError('Unrecognized untether jetsam properties')
+    properties.update(JetsamPriority=18, JetsamMemoryLimit=128)
+    defaults[label] = properties
+    return plistlib.dumps(document)
+
+
+def configure_untether_jetsam(image, product, label):
+    if product not in MODELS:
+        raise ValueError('Expected an iOS 7 jetsam board identity')
+    system = '/System/Library/LaunchDaemons'
+    board = MODELS[product][0]
+    path = system+'/com.apple.jetsamproperties.'+board[:-2].upper()+'.plist'
+    configured = untether_jetsam_properties(image.read(path), label)
+    image.add(path, configured)
+    if image.read(path) != configured:
+        raise ValueError('Untether jetsam properties readback differs')
+
+
+def pangu_startup_job(data):
+    """Retain Pangu's established launch contract while recording diagnostics."""
+    job = plistlib.loads(data)
+    if (job.get('Label') != 'io.pangu.axe.untether' or
+            job.get('ProgramArguments') != ['/panguaxe'] or
+            job.get('RunAtLoad') is not True or
+            job.get('LaunchOnlyOnce') is not True or
+            job.get('UserName') != 'root'):
+        raise ValueError('Unrecognized Pangu untether job')
+    job['StandardOutPath'] = '/var/logs/AppleSupport/olsn0w-untether.log'
+    job['StandardErrorPath'] = job['StandardOutPath']
+    return plistlib.dumps(job)
+
+
+def prepare_pangu_daemon(image, product):
+    """Keep the Kit's proven stock-daemon layout for the iOS 7.1 untether."""
+    system = '/System/Library/LaunchDaemons'
+    for name in ('com.apple.mobile.softwareupdated.plist',
+                 'com.apple.softwareupdateservicesd.plist'):
+        if any(r['name'] == name for r in image.ls(system)):
+            image.command('rm', system+'/'+name)
+    path = system+'/io.pangu.axe.untether.plist'
+    configured = pangu_startup_job(image.read(path))
+    image.add(path, configured)
+    configure_untether_jetsam(image, product, 'io.pangu.axe.untether')
+    return configured
+
+
+def move_daemons(image, major=7, product=None, untether=None):
     """Apply the Kit's daemon ordering while retaining the native DNS service."""
     system, library = '/System/Library/LaunchDaemons', '/Library/LaunchDaemons'
     if {r['name'] for r in image.ls(library)} != {'com.saurik.Cydia.Startup.plist'}:
@@ -313,26 +376,30 @@ def move_daemons(image, major=7):
             image.command('rm', system+'/'+name)
         elif name not in keep and not name.startswith('com.apple.jetsamproperties.'):
             image.command('mv', system+'/'+name, library+'/'+name)
-    # A same-parent rename in hfsplus also increments the parent's item count.
-    # Copy and remove the original explicitly, checking the replacement bytes.
+    if untether not in {'aquila', 'everuntether'}:
+        raise ValueError('Expected a qualified untether trigger')
+    # A same-parent rename in hfsplus also increments the parent's item
+    # count. Copy and remove explicitly, checking the replacement bytes.
     original = '/usr/libexec/CrashHousekeeping'
-    mode = next(r['mode'] for r in image.ls('/usr/libexec') if r['name'] == 'CrashHousekeeping')
+    mode = next(r['mode'] for r in image.ls('/usr/libexec')
+                if r['name'] == 'CrashHousekeeping')
     image.add(original+'.backup', image.read(original), stat.S_IMODE(mode))
     image.command('rm', original)
-    program='/everuntether' if major==8 else '/aquila'
-    image.command('symlink', '/usr/libexec/CrashHousekeeping', program)
-    if image.readlink('/usr/libexec/CrashHousekeeping') != program:
-        raise ValueError('Aquila startup symlink readback mismatch')
-    if major == 8:
-        job_path = system + '/com.apple.CrashHousekeeping.plist'
-        job = plistlib.loads(image.read(job_path))
-        if (job.get('Label') != 'com.apple.CrashHousekeeping' or
-                job.get('Program') != '/usr/libexec/CrashHousekeeping'):
-            raise ValueError('Unrecognized CrashHousekeeping job')
-        job['AbandonProcessGroup'] = True
-        job['StandardOutPath'] = '/var/logs/AppleSupport/olsn0w-untether.log'
-        job['StandardErrorPath'] = job['StandardOutPath']
-        image.add(job_path, plistlib.dumps(job))
+    program = '/everuntether' if untether == 'everuntether' else '/aquila'
+    image.command('symlink', original, program)
+    if image.readlink(original) != program:
+        raise ValueError('Untether startup symlink readback mismatch')
+    job_path = system + '/com.apple.CrashHousekeeping.plist'
+    job = plistlib.loads(image.read(job_path))
+    if (job.get('Label') != 'com.apple.CrashHousekeeping' or
+            job.get('Program') != original):
+        raise ValueError('Unrecognized CrashHousekeeping job')
+    job['AbandonProcessGroup'] = True
+    job['StandardOutPath'] = '/var/logs/AppleSupport/olsn0w-untether.log'
+    job['StandardErrorPath'] = job['StandardOutPath']
+    image.add(job_path, plistlib.dumps(job))
+    if major == 7:
+        configure_untether_jetsam(image, product, 'com.apple.CrashHousekeeping')
 
 
 def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/disk0s1s2'):
@@ -351,6 +418,9 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
         raise ValueError('Selected devices do not match this relay partition recipe')
     payload, provenance = jailbreak_payload(source['version'])
     major = version(source['version'])[0]
+    untether_name=('everuntether' if major==8 else
+                   'panguaxe' if major==7 and version(source['version'])>=version('7.1') else 'aquila')
+    data_payload_checks = {}
     stock = HFS(firmware/'rootfs.hfs')
     system_version = plistlib.loads(stock.read('/System/Library/CoreServices/SystemVersion.plist'))
     if system_version['ProductBuildVersion'] != source['build'] or version(system_version['ProductVersion']) != version(source['version']):
@@ -362,6 +432,16 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     if destination.exists():
         raise ValueError('Prepared target filesystem already exists: '+str(destination))
     out = Path(tempfile.mkdtemp(prefix='system-pending-', dir=firmware.parent))
+    # iOS 6's shipped launchd contract executes Aquila from Data. Retarget the
+    # qualified binary before Data entries are split out of the root overlay.
+    if major == 6:
+        aquila_path = 'private/var/aquila/aquila'
+        untether_item, original = payload[aquila_path]
+        untether = out/'aquila'
+        signature = prepare_ios6_payload(original, root_device, untether)
+        prepared = untether.read_bytes()
+        payload[aquila_path] = entry(aquila_path, prepared, untether_item.mode)
+        data_payload_checks['aquila/aquila'] = hashlib.sha256(prepared).hexdigest()
     generation = str(uuid.uuid4())
     data_entries = seed_data(stock)
     merge_data_payload(data_entries, payload)
@@ -378,24 +458,21 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     else:
         write_tar(out/'data-seed.tar', data_entries.values())
 
-    untether_name='everuntether' if major==8 else 'aquila'
-    aquila_item, original = payload[untether_name]
-    aquila = out/untether_name
-    signature = (prepare_ios8_payload if major==8 else prepare_payload)(original, root_device, aquila)
-    payload[untether_name] = entry(untether_name, aquila.read_bytes(), aquila_item.mode)
-    if uses_legacy_job_loader(source['version']):
+    if major != 6:
+        untether_item, original = payload[untether_name]
+        untether = out/untether_name
+        prepare_untether={'everuntether':prepare_ios8_payload,
+                          'panguaxe':prepare_pangu71_payload,
+                          'aquila':prepare_payload}[untether_name]
+        signature=prepare_untether(original,root_device,untether)
+        payload[untether_name]=entry(untether_name,untether.read_bytes(),untether_item.mode)
+    if uses_legacy_job_loader(source['version'], untether_name):
         loader, wrapper = job_loader()
         payload['olsn0w/load-jobs'] = entry('olsn0w/load-jobs', loader, 0o755)
         payload['olsn0w/lctl'] = entry('olsn0w/lctl', wrapper, 0o755)
     if major == 6:
         item, conf = payload['private/etc/launchd.conf']
         payload['private/etc/launchd.conf'] = entry(item.name, ios6_launchd_conf(conf), item.mode)
-        payload['usr/local/libexec/olsn0w/keybag-init'] = entry(
-            'usr/local/libexec/olsn0w/keybag-init', ios6_keybag_payload(), 0o755)
-        payload['usr/local/libexec/olsn0w/keybag-init.sh'] = entry(
-            'usr/local/libexec/olsn0w/keybag-init.sh', (TARGET_SCRIPTS/'keybag-init.sh').read_bytes(), 0o755)
-        payload['usr/local/libexec/olsn0w/finish-data.sh'] = entry(
-            'usr/local/libexec/olsn0w/finish-data.sh', (TARGET_SCRIPTS/'finish-data.sh').read_bytes(), 0o755)
 
     for name in ('ssh_host_rsa_key', 'ssh_client_rsa'):
         run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048', '-m', 'PEM', '-N', '', '-f', out/name])
@@ -517,13 +594,22 @@ Subsystem sftp /usr/libexec/sftp-server
             if image.read(socket_job) != after:
                 raise ValueError('Local socket configuration readback differs')
     if major in (7,8):
-        move_daemons(image,major)
-        if major==7:defer_profile_service(image)
+        if untether_name == 'panguaxe':
+            configured = prepare_pangu_daemon(image, source['product'])
+            name = 'System/Library/LaunchDaemons/io.pangu.axe.untether.plist'
+            item, _ = payload[name]
+            payload[name] = entry(name, configured, item.mode)
+        else:
+            move_daemons(image,major,source['product'],untether_name)
+        if major == 7:
+            if untether_name != 'panguaxe':
+                defer_profile_service(image)
         else:
             from ios8_cache import prepare as prepare_cache
-            cache_path='/System/Library/Caches/com.apple.dyld/dyld_shared_cache_armv7s'
+            architecture=profile(source['product'])['cache_arch']
+            cache_path='/System/Library/Caches/com.apple.dyld/dyld_shared_cache_'+architecture
             stock_cache=stock.read(cache_path)
-            cache,cache_report=prepare_cache(stock_cache)
+            cache,cache_report=prepare_cache(stock_cache,architecture)
             needed=max(0,len(cache)-len(stock_cache))+16*1024**2
             geometry=image.info()
             if geometry['free_bytes']<needed:
@@ -544,16 +630,23 @@ Subsystem sftp /usr/libexec/sftp-server
                            protect_data=protected_data)
     image.command('rm', '/private/etc/fstab')
     image.add('/private/etc/fstab', fstab)
+    from kernelcache import prepare as prepare_kernelcache
+    kernel_path, kernel_patch = prepare_kernelcache(
+        source, firmware, out/'kernelcache.patched.img3')
     for name, path, expected_type in [('applelogo',firmware/'AppleLogo.img3','logo'),
                                       ('devicetree',relay/'devicetree','dtre'),
-                                      ('kernelcache',firmware/'Kernelcache.img3','krnl')]:
+                                      ('kernelcache',kernel_path,'krnl')]:
         blob = path.read_bytes()
         kind, tags, _ = img3(blob)
         if kind != expected_type or 'KBAG' in tags:
             raise ValueError('Wrong or encrypted target boot component: '+name)
         image.add('/'+name, blob)
+    if kernel_patch is not None:
+        kernel_path.unlink()
     if major in (7,8):
-        job_path = '/Library/LaunchDaemons/com.apple.mobile.keybagd.plist'
+        daemon_root = ('/System/Library/LaunchDaemons' if untether_name == 'panguaxe'
+                       else '/Library/LaunchDaemons')
+        job_path = daemon_root+'/com.apple.mobile.keybagd.plist'
         job = plistlib.loads(image.read(job_path))
         if job['ProgramArguments'][0] != '/usr/libexec/keybagd':
             raise ValueError('Unrecognized native keybag daemon job')
@@ -577,7 +670,7 @@ Subsystem sftp /usr/libexec/sftp-server
     # finished image. Keep the source provenance in the manifest, not another
     # copy of payload bytes already embedded in system.hfs.
     for temporary in ('root-overlay.tar','data-firstboot.tar.gz','overlay-directories.tar',
-                      'aquila','everuntether','fixkeybag'):
+                      'aquila','panguaxe','everuntether','fixkeybag'):
         path=out/temporary
         if path.exists():path.unlink()
     report = dict(recipe_version=RECIPE_VERSION,
@@ -588,8 +681,12 @@ Subsystem sftp /usr/libexec/sftp-server
                   data_seed_entries=len(metadata if protected_data else data_entries), volume=image.info(),
                   data_initialization=('native-newfs-hfs-P-cprotect-v4-metadata-only-then-target-firstboot'
                                        if protected_data else 'offline-seed'),
-                  packages=provenance, aquila_signature=signature, payload_readback=checks,
-                  service_loading='skip-registered-jobs-before-creating-sockets',
+                  packages=provenance, untether=untether_name,
+                  untether_signature=signature, payload_readback=checks,
+                  data_payload_readback=data_payload_checks,
+                  kernel_patch=kernel_patch,
+                  service_loading=('stock-daemon-layout' if untether_name == 'panguaxe'
+                                   else 'skip-registered-jobs-before-creating-sockets'),
                   activation='official activation required for the selected device',
                   restore_ready=False, filesystem_check_required=True, physical_boot_validated=False,
                   files={n:digest(out/n) for n in ('system.hfs','data-seed.tar')})

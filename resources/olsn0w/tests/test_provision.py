@@ -1,4 +1,5 @@
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -7,7 +8,8 @@ import unittest
 import zipfile
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from provision import HANDOFF, copy_ipsw, handoff_sleep, reboot_hook, require_completed_restore
+from provision import (HANDOFF, copy_ipsw, handoff_sleep, multipatch_manifest,
+                       reboot_hook, require_completed_restore)
 from provision_run import record_failed_restore
 
 class ProvisionHandoff(unittest.TestCase):
@@ -77,3 +79,28 @@ class ProvisionHandoff(unittest.TestCase):
             with zipfile.ZipFile(original,'w') as z:z.writestr('../ramdisk',b'x')
             with self.assertRaises(ValueError):copy_ipsw(original,directory/'out',{'../ramdisk':b'y'})
             with self.assertRaises(ValueError):copy_ipsw(original,directory/'out',{'missing':b'y'})
+
+    def test_explicit_downgrade_members_are_added_without_changing_stock_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory=Path(directory);original=directory/'original.zip';target=directory/'target.zip'
+            with zipfile.ZipFile(original,'w') as archive:archive.writestr('BuildManifest.plist',b'old')
+            replacements={'BuildManifest.plist':b'new','Downgrade/RestoreDeviceTree':b'tree'}
+            copy_ipsw(original,target,replacements,{'Downgrade/RestoreDeviceTree'})
+            with zipfile.ZipFile(target) as archive:
+                self.assertEqual(archive.namelist(),['BuildManifest.plist','Downgrade/RestoreDeviceTree'])
+                self.assertEqual(archive.read('Downgrade/RestoreDeviceTree'),b'tree')
+
+    def test_4s_multipatch_routes_only_erase_restore_components(self):
+        def identity(behavior):
+            return {'Info':{'DeviceClass':'n94ap','RestoreBehavior':behavior},
+                    'ApChipID':0x8940,'ApBoardID':8,
+                    'Manifest':{'RestoreDeviceTree':{'Info':{'Path':'stock-tree'}},
+                                'RestoreKernelCache':{'Info':{'Path':'stock-kernel'}}}}
+        source=plistlib.dumps({'ProductBuildVersion':'12H321','SupportedProductTypes':['iPhone4,1'],
+                               'BuildIdentities':[identity('Erase'),identity('Update')]})
+        result=plistlib.loads(multipatch_manifest(source,'iPhone4,1'))['BuildIdentities']
+        self.assertEqual(result[0]['Manifest']['RestoreDeviceTree']['Info']['Path'],
+                         'Downgrade/RestoreDeviceTree')
+        self.assertEqual(result[0]['Manifest']['RestoreKernelCache']['Info']['Path'],
+                         'Downgrade/RestoreKernelCache')
+        self.assertEqual(result[1]['Manifest']['RestoreDeviceTree']['Info']['Path'],'stock-tree')

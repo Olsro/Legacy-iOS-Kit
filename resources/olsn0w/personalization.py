@@ -6,13 +6,14 @@ from pathlib import Path
 import plistlib
 import zipfile
 
-from common import digest, version
+from common import baseband_files, digest, version
 from hfs import HFS
 from system import entry, add_parents, PREPARABLE_MAJORS, uses_protected_data
 from archives import write_tar
 
 
-def prepare(technical, target_version, destination, *, has_baseband=True, activate_on_target=False):
+def prepare(technical, target_version, destination, *, has_baseband=True,
+            baseband_family='Mav5', activate_on_target=False):
     technical, destination = Path(technical), Path(destination)
     if destination.exists():
         raise ValueError('Preserve existing personalization output')
@@ -20,6 +21,8 @@ def prepare(technical, target_version, destination, *, has_baseband=True, activa
         raise ValueError('Activation destination needs a qualified version recipe')
     if type(has_baseband) is not bool:
         raise ValueError('Expected an explicit modem capability')
+    if not isinstance(baseband_family,str) or not baseband_family.isalnum():
+        raise ValueError('Expected a safe modem family')
     activation_path = technical/'activation-files.json'
     activation = json.loads(activation_path.read_text()) if activation_path.exists() else {}
     record_name = 'activation_record.plist' if has_baseband else 'pod_record.plist'
@@ -59,8 +62,8 @@ def prepare(technical, target_version, destination, *, has_baseband=True, activa
     if not has_baseband and modem:
         raise ValueError('Modem artifacts supplied for a device without a baseband')
     if has_baseband:
-        base='usr/local/standalone/firmware/Baseband/Mav5/'
-        expected={'apps.mbn','bbticket.der','dsp1.mbn','dsp2.mbn','dsp3.mbn','rpm.mbn','sbl1.mbn','sbl2.mbn'}
+        base='usr/local/standalone/firmware/Baseband/'+baseband_family+'/'
+        expected=set(baseband_files(baseband_family))
         if set(modem)!={base+n for n in expected}:
             raise ValueError('Unqualified modem component set')
         packed=io.BytesIO()
@@ -71,7 +74,8 @@ def prepare(technical, target_version, destination, *, has_baseband=True, activa
                     raise ValueError('Modem artifact checksum mismatch')
                 content=source.read_bytes();root_entries[name]=entry(name,content)
                 archive.writestr(name[len(base):],content)
-        root_entries[base+'Mav5-personalized.zip']=entry(base+'Mav5-personalized.zip',packed.getvalue())
+        root_entries[base+baseband_family+'-personalized.zip']=entry(
+            base+baseband_family+'-personalized.zip',packed.getvalue())
     add_parents(root_entries)
     destination.mkdir(parents=True)
     write_tar(destination/'data-personalization.tar',data_entries.values())

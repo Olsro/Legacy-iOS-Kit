@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 
-from common import KIT, MODELS, integer, tools
+from common import KIT, MODELS, integer, profile, tools
 from device import same_hardware
 from provision import read_handoff, require_completed_restore
 from rescue import prepare_dfu, connect
@@ -29,7 +29,7 @@ def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=N
         executable=KIT/'bin/macos/futurerestore_old'
     if not executable.is_file():raise ValueError('Kit legacy restore tool is missing')
     argv=[str(executable), '--use-pwndfu', '-t', str(Path(ticket).resolve())]
-    if identity['product']=='iPad3,4':
+    if not profile(identity['product'])['has_baseband']:
         if baseband or baseband_manifest:raise ValueError('Wi-Fi product has no baseband')
         argv+=['--no-baseband']
     else:
@@ -90,7 +90,11 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     report=checked_manifest(bundle)
     if not erase or report.get('kind')!='signed-base-restore-handoff' or not same_hardware(record['identity'],report['identity']):
         raise ValueError('Explicit erase and matching provisioning identity required')
-    if report.get('asr_source') != 'original-udif-without-filevault-envelope' or report.get('handoff_storage') != 'nvram' or report.get('asr_patch',{}).get('method') != 'kit-asr-failure-to-success':
+    expected_asr=('legacy-kit-multipatch-asr' if report.get('multipatch')
+                  else 'kit-asr-failure-to-success')
+    if (report.get('asr_source') != 'original-udif-without-filevault-envelope'
+            or report.get('handoff_storage') != 'nvram'
+            or report.get('asr_patch',{}).get('method') != expected_asr):
         raise ValueError('Prepare the current plaintext ASR/NVRAM handoff recipe first')
     if Path(report['rescue_session']).resolve()!=session:
         raise ValueError('Provisioning RAM belongs to another session')

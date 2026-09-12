@@ -7,7 +7,7 @@ import tempfile
 import zipfile
 
 from archives import members, write_tar
-from common import KIT, MODELS, digest, run, tools
+from common import KIT, MODELS, digest, profile, run, tools
 from firmware import acquire, extract
 from hfs import HFS
 from img3 import img3
@@ -15,7 +15,7 @@ from restore import checkpoint
 from signing import resign, verify
 from system import entry, add_parents
 
-RECIPE_VERSION = 3
+RECIPE_VERSION = 5
 RAM_VOLUME_BYTES = 64000000
 MAINTENANCE = '/olsn0w-maintenance'
 DISK_ENTITLEMENTS = {'com.apple.private.security.disk-device-access': True,
@@ -24,6 +24,10 @@ START_SERVICE = b'#!/bin/sh\n/sbin/sshd\nexec /usr/local/bin/restored_external_o
 # rc.boot must return before launchd can register the stock restore jobs.
 # The service wrapper is entered through com.apple.restored_external.plist.
 RC_BOOT = b'#!/bin/sh\nexit 0\n'
+# The 6.1.3 restore environment has no launchd job for restored_external:
+# its Mach-O rc.boot directly execs that program.  Preserve that contract
+# while routing through our SSH/service wrapper.
+RC_BOOT_MULTIPATCH = b'#!/bin/sh\nexec /usr/local/bin/restored_external\n'
 
 
 def unmount_payload():
@@ -60,6 +64,23 @@ Subsystem sftp /usr/libexec/sftp-server
 '''
 
 
+def decrypt_restore_ramdisk(source, metadata, identity, output, stem):
+    """Extract one firmware-bound restore ramdisk into a regular HFS image."""
+    output=Path(output)
+    with zipfile.ZipFile(source) as archive:
+        component=identity['Manifest']['RestoreRamDisk']['Info']['Path']
+        matching=[k for k in metadata['keys'] if k['image']=='RestoreRamdisk']
+        if (len(matching)!=1 or Path(component).name!=matching[0]['filename'] or
+                archive.namelist().count(component)!=1):
+            raise ValueError('Restore ramdisk key/component identity mismatch')
+        key=matching[0]
+        (output/(stem+'.orig')).write_bytes(archive.read(component))
+    run([tools()/'xpwntool',output/(stem+'.orig'),output/(stem+'.dec'),
+         '-iv',key['iv'],'-k',key['key'],'-decrypt'])
+    run([tools()/'xpwntool',output/(stem+'.dec'),output/(stem+'.hfs')])
+    return output/(stem+'.hfs')
+
+
 def prepare(session, ipsw=None, keys=None, port=6414):
     session = Path(session).resolve()
     record = json.loads((session/'device.json').read_text())
@@ -72,20 +93,38 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     if (session/'rescue-preparation.json').exists():
         raise ValueError('Preserve the existing rescue before preparing another')
     inputs, metadata, manifest, identity = acquire(selected['product'], '8.4.1', ipsw, keys, '12H321')
-    firmware, _ = extract(selected['product'], '8.4.1', inputs, keys, '12H321')
+    base_firmware, _ = extract(selected['product'], '8.4.1', inputs, keys, '12H321')
+    selected_profile=profile(selected['product'])
+    if selected_profile.get('multipatch'):
+        # Legacy iOS Kit's 4S gas-gauge recipe deliberately restores 8.4.1
+        # through the 6.1.3 restore environment.  Keep the signed base and
+        # ticket at 8.4.1, but use that proven older RAM/boot component set.
+        ram_inputs, ram_metadata, _, ram_identity = acquire(
+            selected['product'],'6.1.3',build='10B329')
+        firmware, _ = extract(selected['product'],'6.1.3',ram_inputs,
+                              build='10B329')
+    else:
+        ram_inputs,ram_metadata,ram_identity=inputs,metadata,identity
+        firmware=base_firmware
     out = Path(tempfile.mkdtemp(prefix='rescue-pending-', dir=session))
     # Failed preparation stays private for inspection; nothing is sent to USB.
-    with zipfile.ZipFile(inputs) as archive:
-        component = identity['Manifest']['RestoreRamDisk']['Info']['Path']
-        matching = [k for k in metadata['keys'] if k['image'] == 'RestoreRamdisk']
-        if len(matching) != 1 or Path(component).name != matching[0]['filename'] or archive.namelist().count(component) != 1:
-            raise ValueError('Restore ramdisk key/component identity mismatch')
-        key = matching[0]
-        (out/'RestoreRamdisk.orig').write_bytes(archive.read(component))
-    run([tools()/'xpwntool', out/'RestoreRamdisk.orig', out/'RestoreRamdisk.dec',
-         '-iv', key['iv'], '-k', key['key'], '-decrypt'])
-    run([tools()/'xpwntool', out/'RestoreRamdisk.dec', out/'rescue-ram.hfs'])
+    decrypt_restore_ramdisk(ram_inputs,ram_metadata,ram_identity,out,'RestoreRamdisk')
+    (out/'RestoreRamdisk.hfs').rename(out/'rescue-ram.hfs')
     image = HFS(out/'rescue-ram.hfs')
+    donor_rc = (image.read('/private/etc/rc.boot')
+                if selected_profile.get('multipatch') else None)
+    if selected_profile.get('multipatch'):
+        base_ram=HFS(decrypt_restore_ramdisk(inputs,metadata,identity,out,'BaseRestoreRamdisk'))
+        library=base_ram.read('/usr/lib/libutil.dylib')
+        (out/'bootstrap-libutil.dylib').write_bytes(library)
+        options='/usr/local/share/restore/options.'+board[:-2]+'.plist'
+        option_data=base_ram.read(options)
+        plistlib.loads(option_data)
+        if any(item['name']==Path(options).name for item in image.ls(str(Path(options).parent))):
+            image.command('rm',options)
+        image.add(options,option_data,0o644)
+        if image.read(options)!=option_data:
+            raise ValueError('Multipatch target restore options readback differs')
     # Keep the allocation size qualified with the stock 8.4.1 boot chain.
     # Growing to 64 MiB can load successfully yet panic before RAM services.
     if image.info()['bytes'] > RAM_VOLUME_BYTES:
@@ -97,9 +136,11 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     sysctls = [data for m, data in members(freeze) if m.name == 'usr/sbin/sysctl' and m.isfile()]
     if len(sysctls) != 1:
         raise ValueError('Kit sysctl utility missing or ambiguous')
+    mount_path=('/sbin/mount_hfs' if any(item['name']=='mount_hfs' for item in image.ls('/sbin'))
+                else '/System/Library/Filesystems/hfs.fs/Contents/Resources/mount_hfs')
     utilities = {'sysctl':sysctls[0], 'dd':payload['bin/dd'][1],
                  'gptfdisk':payload['usr/bin/gptfdisk'][1],
-                 'mount_hfs':image.read('/System/Library/Filesystems/hfs.fs/Contents/Resources/mount_hfs')}
+                 'mount_hfs':image.read(mount_path)}
     utilities['unmount'] = unmount_payload()
     for name, data in utilities.items():
         path = out/name
@@ -116,7 +157,9 @@ def prepare(session, ipsw=None, keys=None, port=6414):
         ('private/etc/ssh/sshd_config',ssh_config(),0o600),
         ('private/etc/ssh/ssh_host_rsa_key',(out/'ssh_host_rsa_key').read_bytes(),0o600),
         ('private/etc/ssh/olsn0w_authorized_keys',(out/'rescue-client.pub').read_bytes(),0o600),
-        ('private/etc/rc.boot',RC_BOOT,0o755)]:
+        ('private/etc/rc.boot',
+         RC_BOOT_MULTIPATCH if selected_profile.get('multipatch') else RC_BOOT,
+         0o755)]:
         payload[name] = entry(name,data,mode)
     # The Kit's generic rc.boot writes NVRAM and removes files. Replace it
     # with a returning stub, then let Apple's launchd job start the wrapper.
@@ -124,11 +167,26 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     write_tar(out/'rescue-overlay.tar',payload.values())
     image.command('untar',out/'rescue-overlay.tar')
     original = image.read('/usr/local/bin/restored_external')
-    service = plistlib.loads(image.read('/System/Library/LaunchDaemons/com.apple.restored_external.plist'))
-    if (service.get('Label') != 'com.apple.restored_external' or
-            service.get('ProgramArguments') != ['/usr/local/bin/restored_external'] or
-            service.get('RunAtLoad') is not True):
-        raise ValueError('Stock restore service launch definition differs')
+    if selected_profile.get('multipatch'):
+        # This is the exact Legacy iOS Kit restored_external replacement used
+        # by --multipatch for the iPhone 4S gas-gauge path.
+        original = (KIT/'resources/patch/re').read_bytes()
+        if original[:4] != b'\xce\xfa\xed\xfe':
+            raise ValueError('Kit multipatch restore service is not ARM Mach-O')
+    if selected_profile.get('multipatch'):
+        # iOS 6 rc.boot is the service launcher.  Reject a donor whose launch
+        # contract no longer contains the expected executable before relying
+        # on the small shell replacement above.
+        if (donor_rc[:4] != b'\xce\xfa\xed\xfe' or
+                donor_rc.count(b'/usr/local/bin/restored_external\0') != 1):
+            raise ValueError('Multipatch rc.boot launch contract differs')
+    else:
+        service = plistlib.loads(image.read(
+            '/System/Library/LaunchDaemons/com.apple.restored_external.plist'))
+        if (service.get('Label') != 'com.apple.restored_external' or
+                service.get('ProgramArguments') != ['/usr/local/bin/restored_external'] or
+                service.get('RunAtLoad') is not True):
+            raise ValueError('Stock restore service launch definition differs')
     image.add('/usr/local/bin/restored_external_o',original,0o755)
     image.command('rm','/usr/local/bin/restored_external')
     image.add('/usr/local/bin/restored_external',START_SERVICE,0o755)
@@ -144,13 +202,22 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     if image.read('/usr/local/bin/restored_external') != START_SERVICE or image.read('/usr/local/bin/restored_external_o') != original:
         raise ValueError('Restore service wrapper readback differs')
     run([tools()/'xpwntool',out/'rescue-ram.hfs',out/'Ramdisk.img3','-t',out/'RestoreRamdisk.dec'])
-    run([tools()/'iBoot32Patcher',firmware/'iBSS.raw',out/'pwnediBSS','--rsa'],out/'ibss-patch.log',patcher=True)
+    # Initial external A5 pwnDFU always receives the signed-base 8.4.1 iBSS,
+    # matching Legacy iOS Kit's patch_ibss default.  The multipatch restore
+    # components themselves remain the checked 6.1.3 set below.
+    run([tools()/'iBoot32Patcher',base_firmware/'iBSS.raw',out/'pwnediBSS','--rsa'],out/'ibss-patch.log',patcher=True)
+    restore_bootargs='rd=md0 -v nand-enable-reformat=1 amfi=0xff amfi_get_out_of_my_way=1 cs_enforcement_disable=1 pio-error=0'
+    run([tools()/'iBoot32Patcher',firmware/'iBSS.raw',out/'restore-iBSS.patched',
+         '--rsa','--debug','-b',restore_bootargs],
+        out/'restore-ibss-patch.log',patcher=True)
+    run([tools()/'xpwntool',out/'restore-iBSS.patched',out/'iBSS.img3','-t',firmware/'iBSS.orig'])
     run([tools()/'iBoot32Patcher',firmware/'iBEC.raw',out/'iBEC.patched','--rsa','--debug','-b',
-         'rd=md0 -v amfi=0xff cs_enforcement_disable=1'],out/'ibec-patch.log',patcher=True)
+         restore_bootargs,
+         *(['--ticket'] if selected_profile.get('multipatch') else [])],out/'ibec-patch.log',patcher=True)
     run([tools()/'xpwntool',out/'iBEC.patched',out/'iBEC.img3','-t',firmware/'iBEC.orig'])
     run([tools()/'xpwntool',firmware/'DeviceTree.raw',out/'DeviceTree.img3','-t',firmware/'DeviceTree.orig'])
     shutil.copyfile(firmware/'Kernelcache.img3',out/'Kernelcache.img3')
-    for name, kind in [('Ramdisk.img3','rdsk'),('iBEC.img3','ibec'),('DeviceTree.img3','dtre'),('Kernelcache.img3','krnl')]:
+    for name, kind in [('Ramdisk.img3','rdsk'),('iBSS.img3','ibss'),('iBEC.img3','ibec'),('DeviceTree.img3','dtre'),('Kernelcache.img3','krnl')]:
         actual,tags,data = img3((out/name).read_bytes())
         if actual != kind or 'KBAG' in tags:raise ValueError('Unexpected encrypted rescue component: '+name)
         if name == 'Ramdisk.img3' and data != image.path.read_bytes():raise ValueError('RAM image packing differs')
@@ -158,8 +225,9 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     # target_prefix pins the standard key filenames, so publish a dedicated
     # rescue key under that name without sharing it with the target image.
     shutil.copyfile(out/'rescue-client',out/'ssh_client_rsa')
-    published = ['iBEC.img3','DeviceTree.img3','Kernelcache.img3','Ramdisk.img3','rescue-ram.hfs',
+    published = ['iBSS.img3','iBEC.img3','DeviceTree.img3','Kernelcache.img3','Ramdisk.img3','rescue-ram.hfs',
                  'ssh_client_rsa','ssh_host_rsa_key.pub','pwnediBSS']
+    if selected_profile.get('multipatch'):published.append('bootstrap-libutil.dylib')
     if any((session/name).exists() for name in published):
         raise ValueError('Session contains earlier rescue artifacts; preserve them first')
     for name in published: shutil.copyfile(out/name,session/name)
@@ -168,6 +236,9 @@ def prepare(session, ipsw=None, keys=None, port=6414):
     record['rescue_maintenance'] = MAINTENANCE
     checkpoint(session/'device.json',record)
     report = dict(recipe_version=RECIPE_VERSION,product=selected['product'],build='12H321',
+                  restore_environment_build=('10B329' if selected_profile.get('multipatch') else '12H321'),
+                  multipatch=bool(selected_profile.get('multipatch')),
+                  bootstrap_library_build='12H321',
                   ram_root='md0',automatic_disk_mounts=False,device_modified=False,physical_boot_verified=False,
                   files={name:digest(session/name) for name in published},
                   packages={str(p.relative_to(KIT)):digest(p) for p in (ssh_package,freeze)},

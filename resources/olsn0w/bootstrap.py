@@ -10,7 +10,7 @@ import tarfile
 from archives import members, write_tar
 from bootstrap_registry import configure, jobs
 from compact_cache import write_sparse
-from common import KIT, MODELS, digest, run, tools
+from common import KIT, MODELS, digest, profile, run, tools
 from hfs import HFS
 from img3 import img3
 from signing import resign, verify
@@ -50,6 +50,7 @@ def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
             compact_cache, root_template, var_template, destination):
     """Inputs are already selected/verified by the caller; no device I/O occurs."""
     board = MODELS[product][0]
+    architecture=profile(product)['cache_arch']
     firmware, native, destination = map(Path, (firmware, native, destination))
     if destination.exists():
         raise ValueError('Preserve existing bootstrap output')
@@ -137,11 +138,16 @@ UsePrivilegeSeparation no
     for name in ('com.apple.notifyd.plist','com.apple.powerd.plist'):
         path='olsn0w/disabled/'+name
         payload[path] = entry(path,stock.read('/System/Library/LaunchDaemons/'+name))
-    recipe = json.loads((Path(__file__).parent/'recipes/dyld-armv7s-12H321.recipe').read_text())
     cache = Path(compact_cache).read_bytes()
-    if hashlib.sha256(cache).hexdigest() != recipe['output_sha256']:
-        raise ValueError('Compact cache differs from qualified output')
-    region=recipe['registry']
+    if architecture == 'armv7s':
+        recipe = json.loads((Path(__file__).parent/'recipes/dyld-armv7s-12H321.recipe').read_text())
+        expected=recipe['output_sha256'];region=recipe['registry']
+    else:
+        from compact_cache import qualified_source
+        source=qualified_source(architecture)
+        expected=source['prepared_sha256'];region=source['registry']
+    if hashlib.sha256(cache).hexdigest() != expected:
+        raise ValueError('Bootstrap cache differs from qualified output')
     configured = configure(cache,region['address'],region['bytes'],launch_jobs)
     cache_path=destination/'bootstrap.cache';write_sparse(configured,cache_path)
     for name,target in {'etc':'private/etc','var':'private/var','tmp':'private/var/tmp','bin/sh':'bash',
@@ -158,7 +164,7 @@ UsePrivilegeSeparation no
     root=destination/'root8.hfs';shutil.copyfile(root_template,root)
     image=HFS(root);image.command('untar',archive)
     image.command('chmod','040755','/');image.command('chown','0:0','/')
-    image.add_compressed('/System/Library/Caches/com.apple.dyld/dyld_shared_cache_armv7s',cache_path)
+    image.add_compressed('/System/Library/Caches/com.apple.dyld/dyld_shared_cache_'+architecture,cache_path)
     cache_path.unlink()
     var=destination/'data8.hfs';shutil.copyfile(var_template,var)
     var_image=HFS(var)
@@ -177,7 +183,8 @@ UsePrivilegeSeparation no
             record = records['/'+path]
             if (stat.S_IMODE(record['mode']), record['uid'], record['gid']) != (item.mode, item.uid, item.gid):
                 raise ValueError('Bootstrap permissions readback mismatch: '+path)
-    report=dict(product=product,base_build='12H321',autoboot_policy='persistent-enable',
+    report=dict(product=product,base_build='12H321',cache_architecture=architecture,
+        autoboot_policy='persistent-enable',
         target_rearm_required=False,source_packages=provenance,root=image.info(),var=var_image.info(),
         files={p.name:digest(p) for p in (root,var,archive)},physical_boot_verified=False)
     (destination/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')

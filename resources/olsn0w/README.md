@@ -1,6 +1,6 @@
 # olsn0w
 
-Start `./restore.sh`, connect an iPhone 5 or iPad 4, and open **Restore →
+Start `./restore.sh`, connect an iPhone 4S, iPhone 5 or iPad 4, and open **Restore →
 olsn0w (choose iOS version)**. Select the desired release by its menu number or version; olsn0w prepares and
 checks its firmware, Apple signing ticket, modem, restore environment and compact
 bootstrap automatically. No developer paths or build tools for the ARM helpers
@@ -13,8 +13,10 @@ After preparation, confirm the erase and follow the instructions for the initial
 manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate downloads.
 The signed 8.4.1 restore, RAM handoff, compact installation,
 target boot and official activation verification then run automatically. Only
-one manual DFU entry is intended for a successful run; recovery after a failure
-can require another. The current pipeline still restores the full signed base
+one manual DFU entry is intended for a successful A6 run; recovery after a failure
+can require another. The iPhone 4S additionally requires A5Mate's A5_8940
+`PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
+the completed firmware preparation. The current pipeline still restores the full signed base
 before reducing it to the 30 MiB + 2 MiB bootstrap.
 
 The intended target range is every iOS 6, 7, 8, 9 and 10 release published for
@@ -69,9 +71,9 @@ is read back before the partition layout is calculated.
 The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
 bootstrap, formats fresh target Data with the selected iOS formatter, seeds it,
-and checks every filesystem before requesting normal boot. iOS 6 protection
-metadata is initialized offline; its regular Data files are deferred until the
-target initializes its keybag. No host disk mounts or Docker are needed for this
+and checks every filesystem before requesting normal boot. iOS 6 keeps its stock
+unprotected Data mount and is populated completely before boot. iOS 7 and 8 use
+the protected first-boot path. No host disk mounts or Docker are needed for this
 installation path. The same RAM connection covers all installation stages.
 
 `installation.json` records completed writes and failures; `qualification.json`
@@ -105,7 +107,9 @@ before any disk access; the unmount helper only permits explicit rescue mount
 points and never forces an unmount. Build provenance and hardware qualification
 are recorded separately in the private session.
 The startup stub returns immediately so launchd can register Apple's restore
-services; the stock restore job starts the SSH/restore wrapper.
+services; the stock iOS 8 restore job starts the SSH/restore wrapper. The iPhone
+4S multipatch rescue instead preserves the iOS 6 contract in which `rc.boot`
+directly enters `restored_external`.
 
 ## Initial provisioning status
 
@@ -130,6 +134,16 @@ executable retains its disk-access entitlement and its code hashes are checked;
 the installed stock system is unchanged. Unknown or ambiguous instruction
 patterns stop preparation. A successful metadata check or transfer alone does
 not qualify the entire restoration.
+
+The experimental iPhone4,1 path always follows Legacy iOS Kit's battery-safe
+`multipatch` policy. It keeps the signed 8.4.1 base and ticket, but restores it
+through the checked 6.1.3 iBSS, iBEC, DeviceTree, kernel and restore ramdisk;
+the target 8.4.1 restore options and library are copied into that environment.
+The Kit's checked multipatch ASR and `restored_external` replacements are used,
+and only the erase BuildIdentity is routed to the added `Downgrade` components.
+The Trek modem donor is 9.3.6 (Trek 6.7.00). A complete 4S provisioning IPSW
+and 32 MiB ARMv7 bootstrap reproduce successfully on the host; physical restore
+qualification is deliberately deferred to the connected-device test.
 
 After a successful signed restore, the held RAM can collect its personalized
 kernel, modem and partition table, then install the selected target. Official
@@ -224,20 +238,19 @@ Replacing these with package defaults can prevent system services from traversin
 the mobile user's Library, even when their resource files are present. New
 package directories and file replacements retain their package metadata.
 
-On iOS 6 and 7, Aquila's post-patch service load goes through an idempotent job loader. It reads
+On iOS 7 and 8, the untether's post-patch service load goes through an idempotent job loader. It reads
 each XML or binary plist's actual `Label` and queries launchd before loading it;
 registered jobs are left intact even when they have no running PID. Legacy
 `launchctl load` can unlink a live Unix socket before rejecting a duplicate job,
 breaking local activation queries and DNS while USB access still works. Query
 failures are reported without attempting another load. The firmware's
-`/bin/launchctl` remains unchanged. Activation records and Setup Assistant
+`/bin/launchctl` remains unchanged. Pangu's `launchctl load -D all` is narrowed
+to newly installed `/Library/LaunchDaemons` jobs, because PID 1 has already
+registered the stock system jobs. Activation records and Setup Assistant
 completion flags are not modified by this correction.
 
-Every iOS 8 release retains EverUntether's physically qualified direct call to
-Apple's `/bin/launchctl`. The compatibility helper used for iOS 6 and 7 is not
-installed: its per-job `GetJob` queries can block indefinitely against iOS 8
-launchd after EverUntether prints `DONE`. iOS 8 likewise keeps the stock early
-`/usr/libexec/keybagd`, matching the validated iOS 8.3 boot path.
+Every iOS 8 release keeps the stock early `/usr/libexec/keybagd`, matching the
+validated iOS 8.3 boot path.
 
 On iOS 8, an active `datamigrator` does not postpone official activation once
 SpringBoard, Cydia, the selected identity and the personalized baseband are
@@ -247,6 +260,10 @@ Official activation is also attempted through the selected lockdownd USB identit
 independently of diagnostic SSH. A missing or rejected per-image SSH key still
 fails final boot qualification, but can no longer leave Setup Assistant waiting
 for an activation that the connected computer was already able to perform.
+Likewise, iOS 7 may expose SSH before protected Data has atomically published its
+generation marker. That transient state is polled rather than treated as a wrong
+installation; lockdownd still strictly verifies product, version and build before
+activation, and final success still requires the selected Data generation.
 The Cydia preparation diversion also restores the generated `sshd_config` at its
 canonical path. Legacy `dpkg-divert` can move that file even without `--rename`;
 without the restoration, a restarted sshd ignores the per-image authorized key.
@@ -263,22 +280,41 @@ job options are preserved. This avoids starting them against the incomplete
 implementation during early boot. Cydia preparation retries unsuccessful runs
 with a 30-second launchd throttle, then stops retrying after successful completion;
 its output is retained under `/var/logs/AppleSupport/olsn0w-cydia.log`.
+For iOS 7.1.x, the restore recipe uses the Pangu untether already bundled and used
+by Legacy iOS Kit, selecting its checked ARMv7 slice and retargeting it to the
+chosen root volume. Its original launch service and the stock daemon layout are
+retained, matching the Kit's A5X/A6X fallback instead of applying Aquila's daemon
+relocation. Its bulk launchd request is routed through the same guarded loader so
+it cannot invalidate lockdownd's live local socket. Earlier iOS 7 releases retain Aquila. The board-specific iOS 7 jetsam
+policy gives the selected untether an explicit 128 MiB ceiling; the stock fallback
+ceiling of 5 MiB can terminate the exploit before it remounts the selected root
+read-write, leaving Cydia preparation unable to finish.
 
 The small ARMv7 helper is shipped with source/build checksums in
 `target/load-jobs.json`. `native/target/build.sh` rebuilds it with Clang, an ARM
 Mach-O linker and stock iOS libraries on Linux or macOS; sign the result with
 the existing `signing.resign` function and update the checksums together. Its
-minimum deployment target is iOS 6. Image integration covers iOS 6 and 7;
-the new iOS 6 image recipe still requires physical qualification. Existing prepared system images must
-be rebuilt to acquire this change.
+minimum deployment target is iOS 6. Image integration covers iOS 6 and 7.
+The iOS 6.1.3 recipe is physically qualified on iPad3,4: the stock unprotected
+Data mount policy and package-provided Aquila launch route reach SpringBoard,
+official activation, Wi-Fi and a working Cydia first start. This p101 build also
+uses one exact, hash-pinned kernel fix after the TriStar System-ID retry. A
+successful retry retains the real identifier; only a repeated
+`kIOReturnBadMessageID` enters Apple's existing `0xffff` fallback. The fix is
+restricted to iPad3,4 / 6.1.3 / 10B329 and its packed kernel is read back before
+being embedded. Existing prepared system images must be rebuilt to acquire
+this change.
 
-The compact bootstrap currently has one qualified stock-cache recipe. Its exact
-reconstruction source is the iPhone5,2 iOS 8.4.1 (12H321) cache; the resulting
-shared armv7s bootstrap cache was also physically exercised on iPad3,4. Guided
-preparation therefore obtains that verified donor firmware when the selected
-device has a different product-specific stock cache. It never treats an unknown
-cache hash as equivalent merely because its architecture and build match. The
-model catalog is not a claim that this bootstrap covers every device.
+The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
+ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is
+reconstructed from the iPhone5,2 cache and its resulting shared cache was also
+physically exercised on iPad3,4. Both variants retain the same 30 MiB system plus
+2 MiB Data geometry; the verified host-built iPhone4,1 image leaves more than
+1 MiB free on its system volume. Guided preparation obtains a donor only where
+the exact recipe requires one and never treats an unknown cache hash as equivalent
+merely because its architecture and build match. ARMv7 device qualification is
+still pending; the model catalog is not a claim that this bootstrap covers every
+device.
 
 The restore completion check waits for Cydia preparation to exit successfully,
 for deferred iOS 7 services to be registered, and for the modem on cellular
@@ -288,7 +324,7 @@ connection before reporting success. SpringBoard alone is not sufficient.
 ## Firmware selection and qualification
 
 The catalog follows releases available for each supported product type:
-`iPhone5,1`, `iPhone5,2`, `iPad3,4`, `iPad3,5`, and `iPad3,6`. It has no upper iOS
+`iPhone4,1`, `iPhone5,1`, `iPhone5,2`, `iPad3,4`, `iPad3,5`, and `iPad3,6`. It has no upper iOS
 version cutoff. A catalog entry does not by itself establish that its complete
 restore/boot path is supported.
 
@@ -324,14 +360,13 @@ The result still requires a filesystem check, device-specific personalization,
 and the compact bootstrap installation before restoration. Existing output is
 preserved rather than overwritten.
 
-The iOS 6 recipe initializes a missing target keybag before Aquila, only after
-checking the target mounts and the no-effaceable-storage DeviceTree property.
-Existing keybags are retained. `native/target/build-keybag.sh` builds the helper
-with the same Linux/macOS toolchain. Wi-Fi products explicitly select activation
-personalization without modem artifacts; cellular products still require their
-qualified modem component set.
+The iOS 6 recipe follows the firmware's stock unprotected HFS Data contract and
+uses its native Aquila payload. Its complete Data seed and personalization are
+written and checked before the first boot. Wi-Fi products explicitly select
+activation personalization without modem artifacts; cellular products still
+require their qualified modem component set.
 
-Fresh iOS 6 through iOS 8 Data volumes require the native `newfs_hfs -P` format,
+Fresh iOS 7 and iOS 8 Data volumes require the native `newfs_hfs -P` format,
 `HFS.initialize_protection_v4()`, and a protected mount from the target kernel.
 The initializer writes Apple's version-4 root protection attribute at CNID 1
 and rejects existing attributes or regular payload files. The version must be
@@ -339,10 +374,9 @@ present before the kernel first opens the protected root directory.
 Their offline seed contains only directories and
 symlinks. File contents and the selected device's activation archive are staged
 on the system volume, written after keybag initialization, and committed with
-the generation marker. The iOS 6 staging archives are removed after Aquila
-remounts the system. Do not unpack `data-personalization.tar` onto an unprotected
-iOS 6, iOS 7, or iOS 8 Data image or mount the fresh Data volume with protection
-under a newer kernel.
+the generation marker. Do not unpack `data-personalization.tar` onto an
+unprotected iOS 7 or iOS 8 Data image or mount the fresh Data volume with
+protection under a newer kernel.
 This initialization path is not a conversion procedure for existing user data.
 
 The iOS 8 cache preparer preserves executable bytes and changes only the
@@ -351,8 +385,11 @@ The HFS writer preserves the cache catalog entry and emits overflow extents
 with logical block keys, big-endian descriptors and zero-filled unused slots.
 Full content readback and filesystem verification remain required.
 
-The iOS 6/7 recipes read their Aquila device binary from the
-[upstream 2.1.1 release](https://github.com/staturnzz/aquila/releases/tag/2.1.1).
+The iOS 6 recipe uses the native Aquila binary already bundled by Legacy iOS Kit
+and retains its stock `/bin/launchctl` contract. The iOS 7 Aquila recipe reads its
+device binary from the
+[upstream 2.1.1 release](https://github.com/staturnzz/aquila/releases/tag/2.1.1)
+and routes its bulk load through the guarded `/olsn0w/lctl` endpoint.
 The downloaded release executable is only a data container and is never run.
 Python verifies both its checksum and the embedded ARM component's checksum and
 code signature. Extraction is identical on Linux and macOS and does not require

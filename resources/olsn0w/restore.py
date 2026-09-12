@@ -13,7 +13,7 @@ import struct
 import subprocess
 
 from archives import members
-from common import MODELS, clone_or_copy, digest, version
+from common import MODELS, clone_or_copy, digest, profile, version
 from hfs import HFS
 from hfs_extents import allocated_ranges
 from hfs_policy import require_reserve
@@ -74,8 +74,11 @@ def prepare(session, system, relay, base, destination):
         raise ValueError('Regenerate the target relay with the current recipe')
     if destination.exists():raise ValueError('Preserve the previous restore bundle')
     destination.mkdir(parents=True,mode=0o700)
+    selected_profile=profile(source['product'])
     personalize(base/'technical',source['version'],destination/'personalization',
-                has_baseband=source['product']!='iPad3,4',activate_on_target=fresh)
+                has_baseband=selected_profile['has_baseband'],
+                baseband_family=selected_profile.get('baseband_family','Mav5'),
+                activate_on_target=fresh)
     for name, source_path in [('system.hfs',system/'system.hfs'),('root8.hfs',base/'root8.hfs'),
                               ('data8.hfs',base/'data8.hfs'),('data-seed.tar',system/'data-seed.tar')]:
         (clone_or_copy if name.endswith('.hfs') else shutil.copyfile)(source_path,destination/name)

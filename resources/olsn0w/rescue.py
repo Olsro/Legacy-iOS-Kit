@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 
-from common import KIT, digest, tools
+from common import KIT, digest, profile, tools
 from device import recheck_recovery
 from restore import Rescue, checkpoint
 
@@ -69,8 +69,18 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
             return result.stdout.decode(errors='replace')
     if recheck_recovery(session)['mode']!='DFU':raise ValueError('The selected device must be in DFU')
     unique_usb_target(identity['ecid'])
+    selected_profile=profile(identity['product'])
     if pwned:
         progress('Checking software-entered pwned iBSS')
+    elif selected_profile.get('external_pwndfu'):
+        progress('Checking the external A5 pwnDFU marker')
+        query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'a5-pwndfu-ready')
+        if 'PWND: [checkm8]' not in query and 'PWND:[checkm8]' not in query:
+            raise RuntimeError('A5 requires PWND:[checkm8] from A5Mate before the host can send iBSS')
+        # Match Legacy iOS Kit's device_send_unpacked_ibss path for A5.  The
+        # raw RSA-patched 8.4.1 iBSS is sent only after the external exploit
+        # marker and remains a retryable, pre-erase transition.
+        run([tools()/'primepwn',session/'pwnediBSS'],'a5-ibss-upload',60)
     elif platform.system()=='Darwin' and platform.machine()=='arm64':
         # The native arm64 ipwnder can exit without leaving A6/A6X in the
         # required pwned-iBSS state. The qualified Apple Silicon sequence is
@@ -85,7 +95,9 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
     time.sleep(2)
     recheck_recovery(session)
     query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'ibss-ready')
-    if 'SRTG: N/A' not in query or 'IBFL: 0x1b' not in query:
+    ready=('SRTG: N/A' in query and
+           (selected_profile['soc']=='a5' or 'IBFL: 0x1b' in query))
+    if not ready:
         raise RuntimeError('The Kit did not return the required pwned iBSS state')
 
 

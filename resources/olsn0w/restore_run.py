@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 
-from common import tools
+from common import profile, tools
 from device import same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
@@ -44,6 +44,15 @@ def startup_status(text):
     return 'Waiting for the target interface and services.'
 
 
+def startup_failure(text):
+    """Return a terminal first-start failure instead of polling to timeout."""
+    cydia = startup_jobs(text).get('com.saurik.Cydia.Startup')
+    if cydia and cydia[0] == '-' and cydia[1] not in {'-', '0'}:
+        return ('Cydia first-start initialization failed with status '+cydia[1]+'. '
+                'Inspect /var/logs/AppleSupport/olsn0w-cydia.log on the target.')
+    return None
+
+
 def services_ready(text, release):
     jobs = startup_jobs(text)
     # On iOS 8 datamigrator can remain alive while Setup Assistant waits for
@@ -62,6 +71,12 @@ def services_ready(text, release):
     return True
 
 
+def target_identity_ready(lines, report):
+    """Require the selected root and Data generation without failing early boot."""
+    expected=[report['identity']['board'].upper(),report['build'],report['generation']]
+    return lines[:3] == expected
+
+
 def qualify(bundle, prefix, udid, timeout=360, progress=print):
     report=checked_manifest(bundle)
     started=time.monotonic();deadline=started+timeout;last_notice=started
@@ -77,10 +92,18 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print):
             text=r.stdout.decode(errors='replace')
             lines=text.splitlines()
             if r.returncode==0:
-                if lines[:3]!=[report['identity']['board'].upper(),report['build'],report['generation']]:
-                    raise ValueError('Booted target identity or Data generation differs')
-                status=startup_status(text)
-                services=services_ready(text, report['version'])
+                if target_identity_ready(lines,report):
+                    failure=startup_failure(text)
+                    if failure:
+                        raise RuntimeError(failure)
+                    status=startup_status(text)
+                    services=services_ready(text, report['version'])
+                else:
+                    # iOS 7 can expose SSH before protected Data first boot has
+                    # atomically published its generation marker.  Lockdown
+                    # below remains the strict hardware/firmware identity gate;
+                    # keep polling SSH until the selected Data is also proven.
+                    status='Target SSH is reachable; waiting for the selected Data generation to finish initializing.'
             elif b'Permission denied' in r.stderr:
                 status='Target SSH rejected the prepared key; activation is being checked independently.'
         except subprocess.TimeoutExpired:
@@ -94,7 +117,8 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print):
             values=plistlib.loads(output.stdout)
             if (values.get('ProductType'),values.get('ProductVersion'),values.get('BuildVersion'))!=(report['product'],report['version'],report['build']):
                 raise ValueError('Lockdown reports a different target')
-            baseband_ready=report['product']=='iPad3,4' or bool(values.get('BasebandVersion'))
+            baseband_ready=(not profile(report['product'])['has_baseband']
+                            or bool(values.get('BasebandVersion')))
             if baseband_ready and values.get('ActivationState')!='Activated' and report.get('activation_mode')=='official-on-target':
                 from activation import activate
                 progress('Completing official activation through the connected computer.')

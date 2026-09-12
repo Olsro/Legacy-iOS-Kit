@@ -20,20 +20,16 @@ class PrepareCydia(unittest.TestCase):
         self.assertIn('StrictModes no',source)
         self.assertIn('PasswordAuthentication no',source)
 
-    def test_diversion_cannot_remove_active_sshd_config(self):
+    def test_read_only_system_validation_performs_no_root_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             active=root/'etc/ssh/sshd_config'
             reference=root/'usr/local/share/olsn0w/sshd_config'
             active.parent.mkdir(parents=True);reference.parent.mkdir(parents=True)
-            active.write_text('AuthorizedKeysFile wrong\n')
+            active.write_text('AuthorizedKeysFile /etc/ssh/olsn0w_authorized_keys\n')
             reference.write_text('AuthorizedKeysFile /etc/ssh/olsn0w_authorized_keys\n')
             bag=root/'systembag.kb';bag.write_text('keybag')
             events=root/'events'
-            divert=root/'dpkg-divert'
-            divert.write_text('#!/bin/sh\ncase "$*" in *'+shlex.quote(str(active))+'*) '
-                              'mv '+shlex.quote(str(active))+' '+shlex.quote(str(active)+'.distrib')+';; esac\n')
-            divert.chmod(0o755)
             no_op=root/'no-op'
             no_op.write_text('#!/bin/sh\necho "$0 $*" >> '+shlex.quote(str(events))+'\n')
             no_op.chmod(0o755)
@@ -44,16 +40,16 @@ class PrepareCydia(unittest.TestCase):
                 '/private/var/keybags/systembag.kb':str(bag),
                 '/usr/local/share/olsn0w/sshd_config':str(reference),
                 '/etc/ssh/sshd_config':str(active),
-                '/Library/LaunchDaemons/com.openssh.sshd.plist':str(root/'openssh.plist'),
-                '/usr/share/olsn0w/com.openssh.sshd.plist':str(root/'openssh.plist.diverted'),
-                'mkdir -p /usr/share/olsn0w':':',
-                'dpkg-divert':str(divert), 'chown':str(no_op), 'chmod':str(no_op), 'sync':str(no_op),
+                'sync':str(no_op),
             }
             for before,after in replacements.items():script=script.replace(before,shlex.quote(after))
             command=root/'prepare-cydia.sh';command.write_text(script);command.chmod(0o755)
             result=subprocess.run(['/bin/sh',str(command)],capture_output=True)
             self.assertEqual(result.returncode,0,(result.stdout+result.stderr).decode()+script)
-            self.assertEqual(active.read_bytes(),reference.read_bytes())
+            self.assertEqual(active.read_text(),'AuthorizedKeysFile /etc/ssh/olsn0w_authorized_keys\n')
+            self.assertFalse((root/'etc/ssh/sshd_config.distrib').exists())
+            self.assertNotIn('dpkg-divert',script)
+            self.assertNotIn('mkdir -p /usr/share',script)
 
 
 if __name__ == '__main__':

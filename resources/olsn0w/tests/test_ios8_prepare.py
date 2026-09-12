@@ -4,8 +4,8 @@ import struct
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from bootchain import literal_ibss, skip_ramdisk, SECOND
-from ios8_cache import prepare, encode, export_slot
+from bootchain import literal_ibss, memory_layout, skip_ramdisk
+from ios8_cache import prepare, protect_registry, encode, export_slot
 from logo import bl
 from system import jailbreak_payload
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB
@@ -36,15 +36,16 @@ class BootVariants(unittest.TestCase):
         code=bytes.fromhex('1f48')+bl(0x102,0x500)+bytes.fromhex('1f484ff400110690cdf81480')+bl(0x112,0x600)+bytes.fromhex('0546002df4db')
         data[0x100:0x100+len(code)]=code
         struct.pack_into('<I',data,0x184,0x9fe00000)
-        patched,report=literal_ibss(bytes(data))
+        second=memory_layout('iPhone5,2')[1]
+        patched,report=literal_ibss(bytes(data),second)
         uc=Uc(UC_ARCH_ARM,UC_MODE_THUMB);uc.mem_map(BASE,4096);uc.mem_write(BASE,patched)
         uc.mem_map(0x20000000,4096);uc.reg_write(UC_ARM_REG_SP,0x20000800)
         uc.emu_start(BASE+0x107,BASE+0x11c,count=20)
         self.assertEqual(uc.reg_read(UC_ARM_REG_R5),0x200000)
-        self.assertEqual(struct.unpack('<I',uc.mem_read(0x20000818,4))[0],SECOND)
+        self.assertEqual(struct.unpack('<I',uc.mem_read(0x20000818,4))[0],second)
         self.assertEqual(report['usb_call'],0x112)
         struct.pack_into('<I',data,0x184,123)
-        with self.assertRaises(ValueError):literal_ibss(bytes(data))
+        with self.assertRaises(ValueError):literal_ibss(bytes(data),second)
 
     def test_ramdisk_failure_branch_can_fall_through(self):
         data=firmware(b'/boot/ramdisk\0')
@@ -65,8 +66,9 @@ class BootVariants(unittest.TestCase):
         with self.assertRaises(ValueError):skip_ramdisk(bytes(data))
 
 class CacheRemap(unittest.TestCase):
-    def fixture(self):
-        data=bytearray(0x1d00c);data[:15]=b'dyld_v1  armv7s\0'
+    def fixture(self, architecture='armv7s'):
+        data=bytearray(0x1d00c)
+        data[:16]=b'dyld_v1'+b' '*(8-len(architecture))+architecture.encode()+b'\0'
         struct.pack_into('<4I',data,16,0x80,3,0x200,1)
         maps=[(0x20000000,0x10000,0,5,5),(0x20010000,0x1000,0x10000,3,3),(0x20011000,0xc000,0x11000,1,1)]
         for i,m in enumerate(maps):struct.pack_into('<QQQII',data,0x80+i*32,*m)
@@ -101,3 +103,21 @@ class CacheRemap(unittest.TestCase):
             data=bytearray(stock);data[offset]^=1
             with self.assertRaises(ValueError):prepare(bytes(data))
         with self.assertRaisesRegex(ValueError,'Cyclic'):export_slot(b'\0\1x\0\0',b'x')
+
+    def test_armv7_uses_the_same_checked_mapping_transform(self):
+        stock,_=self.fixture('armv7')
+        patched,report=prepare(stock,'armv7')
+        self.assertTrue(patched.startswith(b'dyld_v1   armv7\0'))
+        self.assertEqual(report['architecture'],'armv7')
+        with self.assertRaises(ValueError):prepare(stock,'armv7s')
+
+    def test_registry_prefix_becomes_read_only_without_changing_loaded_bytes(self):
+        stock,_=self.fixture('armv7')
+        patched,report=prepare(stock,'armv7')
+        before=b''.join(patched[m[2]:m[2]+m[1]] for m in report['mappings'])
+        protected,mappings=protect_registry(patched,0x20008800,0x800)
+        after=b''.join(protected[m[2]:m[2]+m[1]] for m in mappings)
+        self.assertEqual(after,before)
+        self.assertEqual(mappings[0][0:2],(0x20000000,0x9000))
+        self.assertEqual(mappings[0][3:],(1,1))
+        self.assertEqual(mappings[1][0],0x20009000)

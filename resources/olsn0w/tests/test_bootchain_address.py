@@ -7,7 +7,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bootchain import movt, relay_address_register
+from bootchain import (dualboot_patcher_marker, movt, relay_address_register,
+                       uses_tristar_soft_reset)
 
 
 @unittest.skipUnless(importlib.util.find_spec('unicorn'), 'Unicorn unavailable')
@@ -45,3 +46,20 @@ class RelayAddressTests(unittest.TestCase):
             relay_address_register(bytes.fromhex('002000bf'), 0)
         with self.assertRaises(ValueError):
             relay_address_register(b'', 0)
+
+    def test_patcher_markers_keep_distinct_a5_and_a6_contracts(self):
+        self.assertEqual(
+            dualboot_patcher_marker('iPhone4,1',4,0xbfd00000),
+            movt(4,0xbfd0))
+        # The A6/A6X patcher marker is intentionally r4 even when the source
+        # firmware carries the image pointer in r10. olsn0w replaces it only
+        # after validating this exact output.
+        self.assertEqual(
+            dualboot_patcher_marker('iPad3,4',10,0xbfe00000),
+            bytes.fromhex('c7f6d074'))
+
+    def test_tristar_reset_stays_on_the_qualified_n42_release(self):
+        self.assertTrue(uses_tristar_soft_reset('iPhone5,2', '6.1.3'))
+        self.assertFalse(uses_tristar_soft_reset('iPhone5,2', '7.1.2'))
+        self.assertFalse(uses_tristar_soft_reset('iPad3,4', '6.1.3'))
+        self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))

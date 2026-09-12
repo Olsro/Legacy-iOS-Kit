@@ -19,13 +19,14 @@ class EarlyKeybag(unittest.TestCase):
             self.assertTrue(uses_protected_keybag_start(release), release)
         self.assertFalse(uses_protected_keybag_start('6.1.3'))
 
-    def test_ios8_uses_batch_loader_and_early_keybagd(self):
+    def test_supported_untethers_use_batch_loader_and_ios8_uses_early_keybagd(self):
         job = dict(Program='/usr/libexec/keybagd', ProgramArguments=['keybagd', '--init'])
         launchd = plistlib.dumps(dict(Boot=dict(keybag=job)))
         for release in ('8.0', '8.1.3', '8.3', '8.4.1'):
             self.assertTrue(uses_legacy_job_loader(release))
             self.assertFalse(wraps_early_keybag(release, launchd))
         self.assertTrue(uses_legacy_job_loader('7.1.2'))
+        self.assertFalse(uses_legacy_job_loader('6.1.3'))
         self.assertTrue(wraps_early_keybag('7.1.2', launchd))
 
     def test_embedded_boot_job_is_distinct_from_normal_services(self):

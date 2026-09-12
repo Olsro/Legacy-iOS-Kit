@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import struct
 
 from common import STATE, digest
 from firmware import fetch
@@ -12,6 +13,29 @@ URL = 'https://github.com/staturnzz/aquila/releases/download/' + RELEASE + '/aqu
 ARCHIVE_SHA256 = '42a50f5e1ec40e547d2013ad9f7e7af9fe3381fce7ba8672e7360e59929a2290'
 IOS7_SHA256 = 'a10c700b7f0ff38121326c65be4543162459dec8fb8e2f90a6602a0383e25f49'
 IOS7_SIZE = 91056
+IOS6_SHA256 = '5b358f7edc80a49fd9b13322a239e63af6c39d763e6e29670b063c1fa6193a86'
+PANGU71_FAT_SHA256 = 'f010e13d4153dad7021ab106da055e54757ad704f3b1326e3a42cc58dbec8e64'
+PANGU71_ARMV7_SHA256 = '69eddb2ba7dbd83aae4d41f3face8f526befddb1c29ce2eaede01dff86c007ea'
+
+
+def armv7_slice(data):
+    """Select one checked ARMv7 slice from a universal Mach-O payload."""
+    if len(data) < 8 or data[:4] != bytes.fromhex('cafebabe'):
+        raise ValueError('Expected a universal Mach-O payload')
+    count = struct.unpack_from('>I', data, 4)[0]
+    if not 0 < count <= 8 or 8 + count*20 > len(data):
+        raise ValueError('Invalid universal Mach-O header')
+    matches = []
+    for index in range(count):
+        cpu, subtype, offset, size, alignment = struct.unpack_from(
+            '>IIIII', data, 8 + index*20)
+        if offset + size > len(data) or alignment > 30 or offset % (1 << alignment):
+            raise ValueError('Invalid universal Mach-O slice')
+        if cpu == 12 and subtype & 0xffffff == 9:
+            matches.append(data[offset:offset + size])
+    if len(matches)!=1:
+        raise ValueError('Missing or ambiguous ARMv7 payload slice')
+    return matches[0]
 
 
 def job_loader():
@@ -47,6 +71,28 @@ def prepare_payload(original, root_device, output):
     return resign(output, signature['entitlements'])
 
 
+def prepare_ios6_payload(original, root_device, output):
+    """Retarget the Kit's native iOS 6 Aquila payload only to the new root.
+
+    The iOS 6 package has its own kernel recipe and deliberately keeps the
+    stock /bin/launchctl contract.  Replacing it with the iOS 7 component or
+    routing it through the later guarded loader regresses A6/A6X boot.
+    """
+    if hashlib.sha256(original).hexdigest() != IOS6_SHA256:
+        raise ValueError('Unqualified iOS 6 Aquila payload')
+    signature = verify(original)
+    before = b'/dev/disk0s1s1\0'
+    after = root_device.encode('ascii') + b'\0'
+    if original.count(before) != 1 or len(after) > len(before):
+        raise ValueError('Unrecognized iOS 6 Aquila root or oversized replacement')
+    if original.count(b'/bin/launchctl\0') != 1:
+        raise ValueError('Unrecognized iOS 6 Aquila launchctl contract')
+    data = original.replace(before, after.ljust(len(before), b'\0'))
+    output = Path(output)
+    output.write_bytes(data)
+    return resign(output, signature['entitlements'])
+
+
 def prepare_ios8_payload(original, root_device, output):
     """Retarget EverUntether to the physically qualified iOS 8 loader path."""
     if hashlib.sha256(original).hexdigest() != '7f602f8e8e96fd6cbe2d313187ccade85de253ab1db21696ba7402c12ef8495c':
@@ -71,6 +117,28 @@ def prepare_ios8_payload(original, root_device, output):
         data[offset:offset+len(before)] = after
     Path(output).write_bytes(data)
     return resign(Path(output),signature['entitlements'])
+
+
+def prepare_pangu71_payload(original, root_device, output):
+    """Retarget the Kit's established iOS 7.1 untether to the selected root."""
+    if hashlib.sha256(original).hexdigest()!=PANGU71_FAT_SHA256:
+        raise ValueError('Unqualified Pangu 7.1 payload')
+    data = armv7_slice(original)
+    if hashlib.sha256(data).hexdigest()!=PANGU71_ARMV7_SHA256:
+        raise ValueError('Unqualified Pangu ARMv7 payload')
+    signature = verify(data)
+    edits = [(b'/dev/disk0s1s1\0', root_device.encode('ascii')+b'\0'),
+             # Pangu invokes `launchctl load -D all` after installing its
+             # payload. Route that call through the guarded batch loader so
+             # already registered jobs cannot lose their live Unix sockets.
+             (b'/bin/launchctl\0', b'/olsn0w/lctl\0')]
+    for before, after in edits:
+        if data.count(before) != 1 or len(after) > len(before):
+            raise ValueError('Unrecognized Pangu path or oversized replacement')
+        data = data.replace(before, after.ljust(len(before), b'\0'))
+    output = Path(output)
+    output.write_bytes(data)
+    return resign(output, signature['entitlements'])
 
 
 def embedded_payload(container, size, expected):

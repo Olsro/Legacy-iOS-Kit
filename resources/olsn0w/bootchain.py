@@ -1,20 +1,34 @@
-"""Build the A6/A6X in-memory iBSS/iBEC relay from selected firmware inputs."""
+"""Build a model-qualified 32-bit in-memory iBSS/iBEC relay."""
 import json
 import re
 import struct
 import tempfile
 from pathlib import Path
 
-from common import tools, run, save, digest
+from common import profile, tools, run, save, digest
 from img3 import img3
 import devicetree
 import logo
 from validation import display
 
-FIRST = 0xbfe00000
-SECOND = 0xbfe20000
 WINDOW = 1048576
-RECIPE_VERSION = 9
+RECIPE_VERSION = 12
+
+
+def memory_layout(product):
+    """Return the kloader window used by the Kit's dualboot patch."""
+    family = profile(product)['soc']
+    if family == 'a5':
+        # iBoot32Patcher's A5_8940 dualboot recipe selects 0xbfd00000.
+        return 0xbfd00000, 0xbfd20000
+    if family in ('a6', 'a6x'):
+        return 0xbfe00000, 0xbfe20000
+    raise ValueError('No relay memory layout for selected product')
+
+
+def uses_tristar_soft_reset(product, release):
+    """Limit the Lightning reset property to physically qualified targets."""
+    return release in profile(product).get('tristar_soft_reset_versions', ())
 
 
 def movt(register, immediate):
@@ -24,6 +38,20 @@ def movt(register, immediate):
     first = 0xf2c0 | (immediate >> 12) | (((immediate >> 11) & 1) << 10)
     second = (((immediate >> 8) & 7) << 12) | (register << 8) | (immediate & 255)
     return struct.pack('<HH', first, second)
+
+
+def dualboot_patcher_marker(product, register, first):
+    """Return the exact address instruction emitted by iBoot32Patcher.
+
+    Its A5_8940 recipe encodes the A5 kloader window in the discovered
+    register.  The A6/A6X default recipe instead emits a historic fixed-r4
+    marker, which olsn0w must validate before restoring the firmware's real
+    register and selected relay address.
+    """
+    family=profile(product)['soc']
+    if family=='a5':return movt(register,first >> 16)
+    if family in ('a6','a6x'):return bytes.fromhex('c7f6d074')
+    raise ValueError('No dualboot patcher contract for selected product')
 
 
 def relay_address_register(original, offset):
@@ -95,7 +123,7 @@ def skip_ramdisk(data):
     return bytes(result),dict(offset=at,before=data[at:at+2].hex(),after=replacement.hex())
 
 
-def literal_ibss(data):
+def literal_ibss(data, second):
     """Handle the literal-buffer form of the Kit's iBSS dualboot patch."""
     from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
     from capstone.arm import ARM_OP_MEM, ARM_REG_PC
@@ -126,17 +154,19 @@ def literal_ibss(data):
             matches.append((location,tail[4].address,branch.address))
     if len(matches)!=1:raise ValueError('Unrecognized literal iBSS receive loop')
     location,call,branch=matches[0];out=bytearray(data)
-    struct.pack_into('<I',out,location,SECOND)
+    struct.pack_into('<I',out,location,second)
     # The preloaded image occupies the receive buffer; keep the parser's bound.
     out[call:call+4]=bytes.fromhex('084600bf') # mov r0,r1; nop
     out[branch:branch+2]=bytes.fromhex('00bf')
     return bytes(out),dict(form='literal',literal=location,usb_call=call,branch=branch,
-                           before=hex(0x9fe00000),physical=SECOND)
+                           before=hex(0x9fe00000),physical=second)
 
 
 def prepare(firmware, *, verbose=False):
     firmware=Path(firmware)
     source=json.loads((firmware/'manifest.json').read_text())
+    selected_profile=profile(source['product'])
+    first,second=memory_layout(source['product'])
     for name,value in source['files'].items():
         if digest(firmware/name)!=value:
             raise ValueError('Firmware input changed: '+name)
@@ -151,7 +181,10 @@ def prepare(firmware, *, verbose=False):
     for name in ('iBSS','iBEC'):
         raw=(firmware/(name+'.raw')).read_bytes()
         patched=out/(name+'.patched.raw')
-        use_literal=name=='iBSS' and source['version'].startswith('8.')
+        # A6 iOS 8 changed the receive loop to a literal form.  The A5
+        # dualboot patcher has its own 8940 recipe and must keep using it.
+        use_literal=(name=='iBSS' and source['version'].startswith('8.')
+                     and selected_profile['soc']!='a5')
         argv=[tools()/'iBoot32Patcher',firmware/(name+'.raw'),patched,'--rsa']
         if not use_literal:argv+=['--dualboot']
         # Match the Kit's iBEC boot path: image RSA admission and the
@@ -161,22 +194,26 @@ def prepare(firmware, *, verbose=False):
         data=patched.read_bytes()
         if len(data)!=len(raw):raise ValueError('Bootloader length changed')
         if use_literal:
-            data,patches['relay_address']=literal_ibss(data)
+            data,patches['relay_address']=literal_ibss(data,second)
         elif name=='iBSS':
             matches=re.findall(r'patch_dualboot_ibss: Found kloader MOV at (0x[0-9a-f]+)',log)
             if len(matches)!=1:raise ValueError('Ambiguous relay address instruction')
             at=int(matches[0],16)
-            if data[at:at+4]!=bytes.fromhex('c7f6d074'):
-                raise ValueError('Unexpected A6/A6X relay address instruction')
             register=relay_address_register(raw,at)
-            replacement=movt(register,SECOND >> 16)
+            expected=dualboot_patcher_marker(source['product'],register,first)
+            if data[at:at+4]!=expected:
+                raise ValueError('Dualboot patch selected an unexpected relay address')
+            replacement=movt(register,second >> 16)
             if len(replacement)!=4:raise ValueError('Invalid MOVT encoding')
             data=data[:at]+replacement+data[at+4:]
-            patches['relay_address']=dict(offset=at,before='c7f6d074',after=replacement.hex(),physical=SECOND,register=register,original=raw[at:at+4].hex())
+            patches['relay_address']=dict(offset=at,before=expected.hex(),after=replacement.hex(),
+                                          physical=second,register=register,
+                                          original=raw[at:at+4].hex())
         else:
             data,patches['optional_ramdisk']=skip_ramdisk(data)
-            if verbose:
-                save(out/'display-validation.json',dict(mode='verbose',logo_hook=False))
+            if verbose or selected_profile['soc']=='a5':
+                save(out/'display-validation.json',dict(
+                    mode='verbose' if verbose else 'stock',logo_hook=False))
             else:
                 params=logo.discover(data,logo.digest(data),0x2a0)
                 code=logo.trampoline(params)
@@ -192,22 +229,25 @@ def prepare(firmware, *, verbose=False):
     if kind!='ibec' or 'KBAG' in tags or payload!=(out/'iBEC.patched.raw').read_bytes():
         raise ValueError('iBEC container readback mismatch')
     ibss=(out/'iBSS.patched.raw').read_bytes()
-    if len(ibss)>SECOND-FIRST:raise ValueError('iBSS overlaps iBEC')
-    relay=ibss+bytes(SECOND-FIRST-len(ibss))+container
+    if len(ibss)>second-first:raise ValueError('iBSS overlaps iBEC')
+    relay=ibss+bytes(second-first-len(ibss))+container
     if len(relay)>WINDOW:raise ValueError('Relay exceeds loader memory window')
     (out/'relay.bin').write_bytes(relay)
     raw=(firmware/'DeviceTree.raw').read_bytes();nodes=devicetree.parse(raw)
     root=next(n for n in nodes if n['path']=='/device-tree')
     value=next(p['value'] for p in root['properties'] if p['name']=='firmware-min-capacity')
     raw,_=devicetree.add_property(raw,'/device-tree/defaults','no-effaceable-storage',value)
-    paths=[n['path'] for n in nodes if n['path'].endswith('/tristar')]
-    if len(paths)==1:
+    if uses_tristar_soft_reset(source['product'], source['version']):
+        paths=[n['path'] for n in nodes if n['path'].endswith('/tristar')]
+        if len(paths)!=1:
+            raise ValueError('Qualified TriStar node is missing or ambiguous')
         raw,_=devicetree.add_property(raw,paths[0],'soft-reset',b'')
     (out/'DeviceTree.raw').write_bytes(raw)
     run([tools()/'xpwntool',out/'DeviceTree.raw',out/'devicetree','-t',firmware/'DeviceTree.orig'],out/'tree-pack.log')
     if img3((out/'devicetree').read_bytes())[2]!=raw:raise ValueError('DeviceTree readback mismatch')
     report=dict(recipe_version=RECIPE_VERSION,product=source['product'],version=source['version'],build=source['build'],
-                bootargs=bootargs,patches=patches,physical_boot_validated=False,
+                bootargs=bootargs,relay_memory=dict(first=first,second=second,window=WINDOW),
+                patches=patches,physical_boot_validated=False,
                 files={n:digest(out/n) for n in ['relay.bin','devicetree','iBSS.patched.raw','iBEC.patched.raw','display-validation.json']})
     save(out/'manifest.json',report)
     out.rename(destination)

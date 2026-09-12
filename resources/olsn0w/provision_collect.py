@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import plistlib
 
-from common import digest
+from common import baseband_files, digest, profile
 from device import same_hardware
 from img3 import img3
 from layout import HFS_TYPE, inspect
@@ -11,8 +11,13 @@ from provision import read_handoff, require_completed_restore
 from restore import checked_manifest, checkpoint
 
 KERNEL='System/Library/Caches/com.apple.kernelcaches/kernelcache'
-MODEM='usr/local/standalone/firmware/Baseband/Mav5/'
-MODEM_FILES=('apps.mbn','bbticket.der','dsp1.mbn','dsp2.mbn','dsp3.mbn','rpm.mbn','sbl1.mbn','sbl2.mbn')
+
+
+def modem_components(product):
+    selected=profile(product)
+    if not selected['has_baseband']:return None,()
+    family=selected['baseband_family']
+    return 'usr/local/standalone/firmware/Baseband/'+family+'/',baseband_files(family)
 
 
 def collect(bundle, ram, destination):
@@ -44,7 +49,8 @@ def collect(bundle, ram, destination):
            for name in ('gpt-primary.bin','gpt-secondary.bin')}
     try:
         names=['System/Library/CoreServices/SystemVersion.plist',KERNEL]
-        if report['product']!='iPad3,4':names += [MODEM+name for name in MODEM_FILES]
+        modem,modem_files=modem_components(report['product'])
+        if modem:names += [modem+name for name in modem_files]
         for name in names:
             data=ram.run('cat /mnt1/'+name)
             if not data:raise ValueError('Empty signed-base artifact: '+name)
@@ -60,7 +66,8 @@ def collect(bundle, ram, destination):
         ram.run(ram.tool('unmount')+' /mnt1')
     ram.guard()
     if ram.table()!=(primary,secondary):raise ValueError('Partition table changed during collection')
-    checkpoint(destination/'modem-files.json',{n:v for n,v in files.items() if n.startswith(MODEM)})
+    checkpoint(destination/'modem-files.json',
+               {n:v for n,v in files.items() if modem and n.startswith(modem)})
     checkpoint(destination/'collection.json',dict(identity=ram.identity,source='completed-signed-base-restore',
         build='12H321',activation_collected=False,files=files))
     return destination
