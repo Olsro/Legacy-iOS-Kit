@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 
-from common import profile, tools
+from common import profile, tools, version
 from device import same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
@@ -58,13 +58,14 @@ def services_ready(text, release):
     # On iOS 8 datamigrator can remain alive while Setup Assistant waits for
     # activation. Requiring it to exit before activating creates a deadlock.
     # SpringBoard plus the completed jailbreak job is the qualified iOS 8 gate.
-    if release.split('.')[0] != '8' and jobs.get('com.apple.datamigrator', ['-'])[0].isdigit():
+    major=version(release)[0]
+    if major != 8 and jobs.get('com.apple.datamigrator', ['-'])[0].isdigit():
         return False
     if not jobs.get('com.apple.SpringBoard', ['-'])[0].isdigit():
         return False
     if jobs.get('com.saurik.Cydia.Startup') != ['-', '0']:
         return False
-    if release.split('.')[0] == '7':
+    if major == 7:
         from system import LATE_MIS_SERVICES
         if any(label not in jobs for label in LATE_MIS_SERVICES):
             return False

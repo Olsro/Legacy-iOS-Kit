@@ -96,7 +96,7 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
     recheck_recovery(session)
     query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'ibss-ready')
     ready=('SRTG: N/A' in query and
-           (selected_profile['soc']=='a5' or 'IBFL: 0x1b' in query))
+           (selected_profile['soc'].startswith('a5') or 'IBFL: 0x1b' in query))
     if not ready:
         raise RuntimeError('The Kit did not return the required pwned iBSS state')
 

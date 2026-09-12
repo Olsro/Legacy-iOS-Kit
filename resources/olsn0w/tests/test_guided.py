@@ -23,6 +23,16 @@ class GuidedTest(unittest.TestCase):
                 cached,10,lambda _:dict(recipe_version=10)))
             self.assertTrue((cached/'current').is_file())
 
+    def test_system_cache_is_bound_to_the_exact_relay_inputs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cached=Path(folder)/'system';cached.mkdir();(cached/'image').write_bytes(b'x')
+            report=dict(recipe_version=24, relay_recipe_version=15,
+                        relay_devicetree_sha256='old-tree', relay_binary_sha256='relay')
+            required=dict(relay_recipe_version=15,
+                          relay_devicetree_sha256='new-tree', relay_binary_sha256='relay')
+            self.assertFalse(guided.reusable_recipe(cached,24,lambda _:report,required))
+            self.assertFalse(cached.exists())
+
     def test_disk_estimate_shrinks_when_firmware_and_system_are_cached(self):
         records={
             'iPad3,4':[dict(version='8.3',buildid='12F69',filesize=1800),
@@ -73,6 +83,14 @@ class GuidedTest(unittest.TestCase):
 
     def test_ios8_release_is_selectable(self):
         self.assertEqual(guided.choose([IOS8_RELEASE],lambda _:'1',lambda _:None),IOS8_RELEASE)
+
+    def test_every_ios7_and_ios8_point_release_is_supported_by_major(self):
+        releases=('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
+                  '7.1', '7.1.1', '7.1.2',
+                  '8.0', '8.0.1', '8.0.2', '8.1', '8.1.1', '8.1.2',
+                  '8.1.3', '8.2', '8.3', '8.4', '8.4.1')
+        for release in releases:
+            self.assertIsNone(guided.support_reason(release), release)
 
     def test_back_does_not_prepare(self):
         with patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'prepare') as prepare:

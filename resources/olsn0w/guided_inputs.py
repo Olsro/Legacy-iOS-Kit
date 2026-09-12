@@ -5,7 +5,7 @@ import platform
 import plistlib
 import subprocess
 
-from common import KIT, MODELS, digest, integer, profile, tools
+from common import KIT, MODELS, baseband_strategy, digest, integer, profile, tools
 from firmware import releases, select_release
 from tickets import binding
 
@@ -38,6 +38,7 @@ def ticket(identity, destination):
 def modem(identity, destination):
     selected_profile=profile(identity['product'])
     if not selected_profile['has_baseband']:return None,None
+    if baseband_strategy(identity['product'])=='preserve':return None,None
     destination=Path(destination);destination.mkdir(mode=0o700)
     product=identity['product'];board,chip,board_id=MODELS[product]
     specification=selected_profile.get('baseband',dict(

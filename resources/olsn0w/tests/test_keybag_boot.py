@@ -15,14 +15,18 @@ from system import (early_keybag_job, uses_legacy_job_loader,
 
 class EarlyKeybag(unittest.TestCase):
     def test_ios7_and_ios8_run_protected_seed_from_keybag_job(self):
-        for release in ('7.0', '7.1.2', '8.0', '8.1.3', '8.3', '8.4.1'):
+        for release in ('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
+                        '7.1', '7.1.1', '7.1.2',
+                        '8.0', '8.0.1', '8.0.2', '8.1', '8.1.1', '8.1.2',
+                        '8.1.3', '8.2', '8.3', '8.4', '8.4.1'):
             self.assertTrue(uses_protected_keybag_start(release), release)
         self.assertFalse(uses_protected_keybag_start('6.1.3'))
 
     def test_supported_untethers_use_batch_loader_and_ios8_uses_early_keybagd(self):
         job = dict(Program='/usr/libexec/keybagd', ProgramArguments=['keybagd', '--init'])
         launchd = plistlib.dumps(dict(Boot=dict(keybag=job)))
-        for release in ('8.0', '8.1.3', '8.3', '8.4.1'):
+        for release in ('8.0', '8.0.1', '8.0.2', '8.1', '8.1.1', '8.1.2',
+                        '8.1.3', '8.2', '8.3', '8.4', '8.4.1'):
             self.assertTrue(uses_legacy_job_loader(release))
             self.assertFalse(wraps_early_keybag(release, launchd))
         self.assertTrue(uses_legacy_job_loader('7.1.2'))

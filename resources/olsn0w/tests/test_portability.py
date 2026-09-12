@@ -12,7 +12,8 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
 from bootchain import movt
-from common import KIT, tools, target
+from common import (KIT, MODELS, MODEL_PROFILES, SIGNED_841_PRODUCTS,
+                    baseband_strategy, tools, target)
 from firmware import identity, select_release
 import firmware
 import logo
@@ -37,8 +38,34 @@ class HostTools(unittest.TestCase):
 
 
 class CatalogIdentity(unittest.TestCase):
+    def test_catalog_exactly_matches_the_kits_signed_841_manifests(self):
+        manifests={path.name[len('BuildManifest_'):-len('_8.4.1.plist')]
+                   for path in (KIT/'resources/manifest').glob('BuildManifest_*_8.4.1.plist')}
+        self.assertEqual(SIGNED_841_PRODUCTS,manifests)
+        self.assertEqual(set(MODEL_PROFILES),manifests)
+        for product in manifests:
+            document=plistlib.loads((KIT/'resources/manifest'/
+                ('BuildManifest_'+product+'_8.4.1.plist')).read_bytes())
+            board,chip,board_id=MODELS[product]
+            matches=[item for item in document['BuildIdentities']
+                     if item['Info']['DeviceClass']==board
+                     and int(item['ApChipID'],0)==chip
+                     and int(item['ApBoardID'],0)==board_id]
+            self.assertTrue(matches,product)
+            self.assertIn(baseband_strategy(product),('none','preserve','update'))
+
+    def test_restore_menu_delegates_olsn0w_availability_to_catalog(self):
+        script=(KIT/'restore.sh').read_text()
+        self.assertIn('olsn0w.py supports --product "$device_type"',script)
+        self.assertNotIn('iPhone5,[12] | iPad3,[456] ) menu_items+=("olsn0w',script)
+
+    def test_old_cellular_ipads_preserve_their_modem(self):
+        preserved={'iPad2,2','iPad2,3','iPad3,2','iPad3,3'}
+        self.assertEqual({product for product in SIGNED_841_PRODUCTS
+                          if baseband_strategy(product)=='preserve'},preserved)
+
     def test_no_upper_version_cutoff(self):
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPad3,4', 'iPad3,5', 'iPad3,6'):
+        for product in SIGNED_841_PRODUCTS:
             for release in ('6.0.0', '7.1.2', '8.4.1', '9.3.5', '10.3.4'):
                 self.assertTrue(target(product, release))
 

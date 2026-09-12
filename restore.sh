@@ -9185,10 +9185,9 @@ menu_restore() {
             iPhone3,* | iPad1,1 | iPod3,1 )
                 menu_items+=("powdersn0w (any iOS)");;
         esac
-        if [[ $1 != "ipsw" ]]; then
-            case $device_type in
-                iPhone5,[12] | iPad3,[456] ) menu_items+=("olsn0w (choose iOS version)");;
-            esac
+        if [[ $1 != "ipsw" ]] &&
+           python3 ../resources/olsn0w/olsn0w.py supports --product "$device_type" >/dev/null 2>&1; then
+            menu_items+=("olsn0w (choose iOS version)")
         fi
         if [[ $device_can_drav6 == 1 ]]; then
             menu_items+=("DRA v6 (any iOS)")

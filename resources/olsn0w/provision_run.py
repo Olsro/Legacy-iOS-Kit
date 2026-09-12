@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 
-from common import KIT, MODELS, integer, profile, tools
+from common import KIT, MODELS, baseband_strategy, integer, profile, tools
 from device import same_hardware
 from provision import read_handoff, require_completed_restore
 from rescue import prepare_dfu, connect
@@ -29,8 +29,10 @@ def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=N
         executable=KIT/'bin/macos/futurerestore_old'
     if not executable.is_file():raise ValueError('Kit legacy restore tool is missing')
     argv=[str(executable), '--use-pwndfu', '-t', str(Path(ticket).resolve())]
-    if not profile(identity['product'])['has_baseband']:
-        if baseband or baseband_manifest:raise ValueError('Wi-Fi product has no baseband')
+    strategy=baseband_strategy(identity['product'])
+    if strategy!='update':
+        if baseband or baseband_manifest:
+            raise ValueError('Selected modem policy does not accept a baseband update')
         argv+=['--no-baseband']
     else:
         if not baseband or not baseband_manifest:raise ValueError('Selected cellular firmware and manifest required')

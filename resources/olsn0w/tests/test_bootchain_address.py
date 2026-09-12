@@ -7,8 +7,9 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bootchain import (dualboot_patcher_marker, movt, relay_address_register,
+from bootchain import (dualboot_patcher_marker, memory_layout, movt, relay_address_register,
                        uses_tristar_soft_reset)
+from common import MODEL_PROFILES
 
 
 @unittest.skipUnless(importlib.util.find_spec('unicorn'), 'Unicorn unavailable')
@@ -58,8 +59,29 @@ class RelayAddressTests(unittest.TestCase):
             dualboot_patcher_marker('iPad3,4',10,0xbfe00000),
             bytes.fromhex('c7f6d074'))
 
-    def test_tristar_reset_stays_on_the_qualified_n42_release(self):
-        self.assertTrue(uses_tristar_soft_reset('iPhone5,2', '6.1.3'))
-        self.assertFalse(uses_tristar_soft_reset('iPhone5,2', '7.1.2'))
-        self.assertFalse(uses_tristar_soft_reset('iPad3,4', '6.1.3'))
+    def test_every_a5_variant_uses_the_a5_relay_contract(self):
+        products=[product for product,selected in MODEL_PROFILES.items()
+                  if selected['soc'].startswith('a5')]
+        self.assertIn('iPod5,1',products)
+        self.assertIn('iPad3,1',products)
+        for product in products:
+            with self.subTest(product=product):
+                self.assertEqual(memory_layout(product),(0xbfd00000,0xbfd20000))
+                self.assertEqual(dualboot_patcher_marker(product,4,0xbfd00000),
+                                 movt(4,0xbfd0))
+                self.assertFalse(uses_tristar_soft_reset(product,'6.1.3'))
+
+    def test_tristar_reset_stays_on_explicitly_qualified_releases(self):
+        releases = {
+            'iPhone5,1': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
+            'iPhone5,2': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
+            'iPad3,4': ('6.0', '6.0.1', '6.1', '6.1.2', '6.1.3'),
+            'iPad3,5': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
+            'iPad3,6': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
+        }
+        for product, versions in releases.items():
+            for release in versions:
+                self.assertTrue(uses_tristar_soft_reset(product, release),
+                                (product, release))
+            self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
         self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))

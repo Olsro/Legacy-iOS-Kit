@@ -115,11 +115,14 @@ def check_space(required):
     return required
 
 
-def reusable_recipe(path, expected, checker):
+def reusable_recipe(path, expected, checker, required=None):
     """Retain a reproducible cache only when its recipe is current."""
     path=Path(path)
     if not path.exists():return False
-    if checker(path).get('recipe_version')==expected:return True
+    report=checker(path)
+    if (report.get('recipe_version')==expected and
+            all(report.get(key)==value for key,value in (required or {}).items())):
+        return True
     shutil.rmtree(path)
     return False
 
@@ -175,8 +178,12 @@ def _prepare(session, release, display):
         relay=firmware.parent/'relay'
         if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest):
             relay_prepare(firmware)
+        relay_report=checked_manifest(relay)
         system=firmware.parent/'system'
-        if not reusable_recipe(system,SYSTEM_RECIPE,checked_manifest):
+        system_inputs=dict(relay_recipe_version=relay_report['recipe_version'],
+                           relay_devicetree_sha256=relay_report['files']['devicetree'],
+                           relay_binary_sha256=relay_report['files']['relay.bin'])
+        if not reusable_recipe(system,SYSTEM_RECIPE,checked_manifest,system_inputs):
             # Both caches are generated solely from verified firmware and
             # payload inputs. Rebuild an obsolete recipe in place so a safety
             # correction never requires manual cache surgery.
@@ -233,7 +240,7 @@ def enter_dfu(identity, read=input, show=print):
     while not ready():
         show('Keep the selected device connected by USB. Prepared files are retained across every DFU attempt.')
         if profile(identity['product']).get('external_pwndfu'):
-            show('Put the iPhone 4S in DFU, run the A5_8940 A5Mate profile, eject it cleanly with A, then reconnect it to this computer. The host requires PWND:[checkm8].')
+            show('Put the device in DFU, run the matching A5/A5X A5Mate profile, eject it cleanly with A, then reconnect it to this computer. The host requires PWND:[checkm8].')
             prompt='Press Enter once the externally pwned DFU device is reconnected (Ctrl+C to cancel): '
         else:
             show('Hold Power + Home for 10 seconds, then release Power while continuing to hold Home for about 10 seconds. The screen must remain black.')

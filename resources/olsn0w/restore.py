@@ -13,7 +13,7 @@ import struct
 import subprocess
 
 from archives import members
-from common import MODELS, clone_or_copy, digest, profile, version
+from common import MODELS, baseband_strategy, clone_or_copy, digest, profile, version
 from hfs import HFS
 from hfs_extents import allocated_ranges
 from hfs_policy import require_reserve
@@ -78,6 +78,7 @@ def prepare(session, system, relay, base, destination):
     personalize(base/'technical',source['version'],destination/'personalization',
                 has_baseband=selected_profile['has_baseband'],
                 baseband_family=selected_profile.get('baseband_family','Mav5'),
+                include_modem=baseband_strategy(source['product'])=='update',
                 activate_on_target=fresh)
     for name, source_path in [('system.hfs',system/'system.hfs'),('root8.hfs',base/'root8.hfs'),
                               ('data8.hfs',base/'data8.hfs'),('data-seed.tar',system/'data-seed.tar')]:

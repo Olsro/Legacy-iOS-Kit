@@ -5,21 +5,21 @@ import struct
 import tempfile
 from pathlib import Path
 
-from common import profile, tools, run, save, digest
+from common import profile, tools, run, save, digest, version
 from img3 import img3
 import devicetree
 import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 12
+RECIPE_VERSION = 16
 
 
 def memory_layout(product):
     """Return the kloader window used by the Kit's dualboot patch."""
     family = profile(product)['soc']
-    if family == 'a5':
-        # iBoot32Patcher's A5_8940 dualboot recipe selects 0xbfd00000.
+    if family.startswith('a5'):
+        # iBoot32Patcher's A5-family dualboot recipe selects 0xbfd00000.
         return 0xbfd00000, 0xbfd20000
     if family in ('a6', 'a6x'):
         return 0xbfe00000, 0xbfe20000
@@ -27,8 +27,8 @@ def memory_layout(product):
 
 
 def uses_tristar_soft_reset(product, release):
-    """Limit the Lightning reset property to physically qualified targets."""
-    return release in profile(product).get('tristar_soft_reset_versions', ())
+    """Apply the reset to every iOS 6 release on an explicit Lightning profile."""
+    return version(release)[0] in profile(product).get('tristar_soft_reset_majors', ())
 
 
 def movt(register, immediate):
@@ -49,7 +49,7 @@ def dualboot_patcher_marker(product, register, first):
     register and selected relay address.
     """
     family=profile(product)['soc']
-    if family=='a5':return movt(register,first >> 16)
+    if family.startswith('a5'):return movt(register,first >> 16)
     if family in ('a6','a6x'):return bytes.fromhex('c7f6d074')
     raise ValueError('No dualboot patcher contract for selected product')
 
@@ -181,10 +181,10 @@ def prepare(firmware, *, verbose=False):
     for name in ('iBSS','iBEC'):
         raw=(firmware/(name+'.raw')).read_bytes()
         patched=out/(name+'.patched.raw')
-        # A6 iOS 8 changed the receive loop to a literal form.  The A5
-        # dualboot patcher has its own 8940 recipe and must keep using it.
-        use_literal=(name=='iBSS' and source['version'].startswith('8.')
-                     and selected_profile['soc']!='a5')
+        # A6 iOS 8 changed the receive loop to a literal form. The A5-family
+        # dualboot patcher has its own SoC recipe and must keep using it.
+        use_literal=(name=='iBSS' and version(source['version'])[0] == 8
+                     and not selected_profile['soc'].startswith('a5'))
         argv=[tools()/'iBoot32Patcher',firmware/(name+'.raw'),patched,'--rsa']
         if not use_literal:argv+=['--dualboot']
         # Match the Kit's iBEC boot path: image RSA admission and the
@@ -211,7 +211,7 @@ def prepare(firmware, *, verbose=False):
                                           original=raw[at:at+4].hex())
         else:
             data,patches['optional_ramdisk']=skip_ramdisk(data)
-            if verbose or selected_profile['soc']=='a5':
+            if verbose or selected_profile['soc'].startswith('a5'):
                 save(out/'display-validation.json',dict(
                     mode='verbose' if verbose else 'stock',logo_hook=False))
             else:

@@ -13,7 +13,7 @@ from archives import write_tar
 
 
 def prepare(technical, target_version, destination, *, has_baseband=True,
-            baseband_family='Mav5', activate_on_target=False):
+            baseband_family='Mav5', include_modem=None, activate_on_target=False):
     technical, destination = Path(technical), Path(destination)
     if destination.exists():
         raise ValueError('Preserve existing personalization output')
@@ -21,6 +21,10 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
         raise ValueError('Activation destination needs a qualified version recipe')
     if type(has_baseband) is not bool:
         raise ValueError('Expected an explicit modem capability')
+    if include_modem is None:
+        include_modem=has_baseband
+    if type(include_modem) is not bool or (include_modem and not has_baseband):
+        raise ValueError('Expected a compatible modem payload policy')
     if not isinstance(baseband_family,str) or not baseband_family.isalnum():
         raise ValueError('Expected a safe modem family')
     activation_path = technical/'activation-files.json'
@@ -59,9 +63,11 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
             if name in ('root','root/Library/Lockdown'):item.mode=0o700
     modem=json.loads((technical/'modem-files.json').read_text())
     root_entries = {}
-    if not has_baseband and modem:
-        raise ValueError('Modem artifacts supplied for a device without a baseband')
-    if has_baseband:
+    if not include_modem and modem:
+        reason=('a device without a baseband' if not has_baseband
+                else 'a device whose baseband is preserved')
+        raise ValueError('Modem artifacts supplied for '+reason)
+    if include_modem:
         base='usr/local/standalone/firmware/Baseband/'+baseband_family+'/'
         expected=set(baseband_files(baseband_family))
         if set(modem)!={base+n for n in expected}:
@@ -86,6 +92,7 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
     write_tar(destination/'root-personalization.tar',root_entries.values())
     report=dict(source='selected-device-activated-8.4.1' if activation else 'fresh-signed-base',
         activate_on_target=activate_on_target and not activation,target_version=target_version,has_baseband=has_baseband,
+        modem_payload_included=include_modem,
         missing_optional_activation_files=missing,activation_on_target_verified=False,
         files={n:digest(destination/n) for n in ('data-personalization.tar','root-personalization.tar')})
     (destination/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')

@@ -73,6 +73,18 @@ class RadioCapability(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'modem component'):
                 prepare(root, '7.1.2', root / 'output')
 
+    def test_preserved_cellular_modem_needs_no_injected_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            self.technical(root,{})
+            result=prepare(root,'7.1.2',root/'output',has_baseband=True,
+                           include_modem=False)
+            self.assertTrue(result['has_baseband'])
+            self.assertFalse(result['modem_payload_included'])
+            with tarfile.open(root/'output/root-personalization.tar') as archive:
+                self.assertNotIn('usr/local/standalone/firmware/Baseband',
+                                 archive.getnames())
+
     def test_wifi_rejects_unexpected_modem_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

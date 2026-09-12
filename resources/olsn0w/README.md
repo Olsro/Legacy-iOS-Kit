@@ -72,9 +72,12 @@ The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
 bootstrap, formats fresh target Data with the selected iOS formatter, seeds it,
 and checks every filesystem before requesting normal boot. iOS 6 keeps its stock
-unprotected Data mount and is populated completely before boot. iOS 7 and 8 use
-the protected first-boot path. No host disk mounts or Docker are needed for this
-installation path. The same RAM connection covers all installation stages.
+unprotected Data mount and is populated completely before boot. A checked target
+helper creates only a missing Apple system keybag before Aquila, after verifying
+the selected build, board, mounts and Data generation; an existing keybag is
+never replaced. iOS 7 and 8 use the protected first-boot path. No host disk
+mounts or Docker are needed for this installation path. The same RAM connection
+covers all installation stages.
 
 `installation.json` records completed writes and failures; `qualification.json`
 is published only after the target's version, Data generation, and SpringBoard
@@ -298,12 +301,25 @@ minimum deployment target is iOS 6. Image integration covers iOS 6 and 7.
 The iOS 6.1.3 recipe is physically qualified on iPad3,4: the stock unprotected
 Data mount policy and package-provided Aquila launch route reach SpringBoard,
 official activation, Wi-Fi and a working Cydia first start. This p101 build also
-uses one exact, hash-pinned kernel fix after the TriStar System-ID retry. A
+uses an exact, hash-pinned kernel fix after the TriStar System-ID retry. A
 successful retry retains the real identifier; only a repeated
 `kIOReturnBadMessageID` enters Apple's existing `0xffff` fallback. The fix is
-restricted to iPad3,4 / 6.1.3 / 10B329 and its packed kernel is read back before
-being embedded. Existing prepared system images must be rebuilt to acquire
-this change.
+also hash-pinned for every released iPad3,4 iOS 6 kernel: 6.0, 6.0.1, 6.1,
+6.1.2 and 6.1.3. All five contain the same complete retry/fallback function;
+6.0 and 6.0.1 place it at the earlier prelink address, while every 6.1 build
+has byte-identical code at the 6.1.3 address. iOS 6.1.2 is physically qualified
+through normal boot, official activation, SSH and a successful Cydia
+first-start job. Unknown products, releases, builds or kernel hashes retain
+their stock kernel instead of inheriting the workaround. Every patched
+container is read back before being embedded. Every iOS 6 release on the
+explicit Lightning profiles N41, N42, P101, P102 and P103 receives the TriStar
+DeviceTree reset; this major-version rule includes the phone-only 6.0.2 and
+6.1.4 releases without maintaining an incomplete point-release list. For p101,
+6.1.2 is physically qualified, the 6.0/6.0.1 and 6.1 DeviceTrees were
+separately extracted, decrypted and parsed, and the 6.1, 6.1.2 and 6.1.3
+DeviceTrees are byte-identical. This reset policy is not inherited by other
+SoCs and does not extend into iOS 7 or 8. Existing prepared relay images must
+be rebuilt to acquire this change.
 
 The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
 ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is
@@ -323,10 +339,17 @@ connection before reporting success. SpringBoard alone is not sufficient.
 
 ## Firmware selection and qualification
 
-The catalog follows releases available for each supported product type:
-`iPhone4,1`, `iPhone5,1`, `iPhone5,2`, `iPad3,4`, `iPad3,5`, and `iPad3,6`. It has no upper iOS
-version cutoff. A catalog entry does not by itself establish that its complete
-restore/boot path is supported.
+The catalog follows releases available for the complete 32-bit iOS 8.4.1 OTA
+signing set: iPhone 4S and 5, every iPad 2/3/4 variant, iPad mini 1, and iPod
+touch 5. The Restore menu asks the Python catalog directly whether olsn0w
+supports a product, so its entry cannot silently omit one of these profiles.
+The catalog has no upper iOS version cutoff. A catalog entry does not by itself
+establish that its complete restore/boot path has been physically validated.
+
+Cellular iPad2,2, iPad2,3, iPad3,2 and iPad3,3 profiles preserve the installed
+baseband, matching the Kit's established OTA policy. Other cellular profiles
+use their explicitly qualified Trek or Mav5 donor; no model silently inherits a
+different modem recipe.
 
 Select `--build` when a version has multiple releases. The interactive menu shows
 both version and build. A local `--ipsw` also identifies the build through its

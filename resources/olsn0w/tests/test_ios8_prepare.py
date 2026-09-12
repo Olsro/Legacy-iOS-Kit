@@ -16,7 +16,8 @@ BASE=0x10000000
 
 class IOS8Payload(unittest.TestCase):
     def test_every_ios8_release_uses_validated_patcyh_payload(self):
-        for release in ('8.0', '8.1.3', '8.3', '8.4.1'):
+        for release in ('8.0', '8.0.1', '8.0.2', '8.1', '8.1.1', '8.1.2',
+                        '8.1.3', '8.2', '8.3', '8.4', '8.4.1'):
             payload, provenance = jailbreak_payload(release)
             self.assertIn('usr/lib/libpatcyh.dylib', payload)
             self.assertIn('Library/MobileSubstrate/DynamicLibraries/patcyh.plist', payload)

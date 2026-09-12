@@ -4,7 +4,7 @@
   "files": {
     "native/target/keybag_init.c": "a9593bd96fdfa9efa188382bf13b8b20fda4f1b26769cce0f4c615b98db0e6f1",
     "target/keybag-init": "0767e5cacefb5a5f067b59629d30d7efec84d6bbf48ffb80afa2e9c866e7e254",
-    "target/keybag-init.sh": "e3761c1842c4e93b4afdfdf2e41a2bd3b7a612726a078fb671d0ca71ae284251",
+    "target/keybag-init.sh": "c4084c05b448e908388b5db182145cc7986cba3204ed7f070fbf79dbf2f8ad05",
     "native/target/build-keybag.sh": "cb696baa19477f4d123861e162c94b4a74e5b359f0d580d6239d76446be19fa8"
   }
 }

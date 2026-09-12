@@ -25,7 +25,7 @@ def parse_recovery(output, expected_ecid=None):
         fields[key] = value
     product = fields.get('PRODUCT')
     if product not in MODELS:
-        raise ValueError('Recovery device is not a supported A6/A6X product')
+        raise ValueError('Recovery device is not in the signed iOS 8.4.1 product set')
     board, chip, board_id = MODELS[product]
     if (fields.get('MODEL', '').lower() != board or integer(fields['CPID']) != chip
             or integer(fields['BDID']) != board_id):

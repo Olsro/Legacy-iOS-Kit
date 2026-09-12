@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import plistlib
 
-from common import baseband_files, digest, profile
+from common import baseband_files, baseband_strategy, digest, profile
 from device import same_hardware
 from img3 import img3
 from layout import HFS_TYPE, inspect
@@ -16,6 +16,7 @@ KERNEL='System/Library/Caches/com.apple.kernelcaches/kernelcache'
 def modem_components(product):
     selected=profile(product)
     if not selected['has_baseband']:return None,()
+    if baseband_strategy(product)=='preserve':return None,()
     family=selected['baseband_family']
     return 'usr/local/standalone/firmware/Baseband/'+family+'/',baseband_files(family)
 

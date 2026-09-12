@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare olsn0w firmware and reinstall a provisioned A6/A6X device."""
+"""Prepare olsn0w firmware for a 32-bit device with signed iOS 8.4.1."""
 import argparse
 import json
 from pathlib import Path
@@ -15,7 +15,7 @@ def main():
     if not __debug__:
         raise RuntimeError('Run without Python optimization; binary validation is required')
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','prepare-provision','provision-restore','menu'])
+    parser.add_argument('action',choices=['supports','list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','prepare-provision','provision-restore','menu'])
     parser.add_argument('--product',required=True,choices=sorted(MODELS))
     parser.add_argument('--version')
     parser.add_argument('--udid',help='Connected normal-mode device from the Kit menu')
@@ -36,6 +36,8 @@ def main():
     parser.add_argument('--erase',action='store_true',help='Erase the selected device during restoration')
     parser.add_argument('--ram-ready',action='store_true',help='Resume from an already authenticated RAM rescue')
     args=parser.parse_args()
+    if args.action=='supports':
+        return
     if args.action == 'provision-restore' and not all((args.session,args.bundle,args.bootstrap,args.ticket,args.base_keys,args.version,args.erase)):
         parser.error('provision-restore requires --session, --bundle, --bootstrap, --ticket, --base-keys, --version and --erase')
     if args.action == 'select':

@@ -24,7 +24,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 21
+RECIPE_VERSION = 24
 
 
 def uses_protected_data(release):
@@ -208,10 +208,14 @@ def ios6_launchd_conf(content):
     token = b'bsexec .. /private/var/aquila/aquila\n'
     if content.count(token) != 1:
         raise ValueError('Unrecognized Kit iOS 6 launchd configuration')
-    # Preserve the package's proven iOS 6 contract. Data is populated before
-    # boot and Aquila, its AMFI shim, and its writable log all stay together
-    # under /private/var/aquila.
-    return content
+    initializer = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/keybag-init.sh\n'
+    if initializer in content:
+        raise ValueError('iOS 6 keybag initializer is already present')
+    # Data is populated offline on iOS 6, but Apple's native keybagd still
+    # requires a system bag on a freshly formatted volume. Create only that
+    # missing bag before launchd starts Aquila; retain the historical Data
+    # path and every package command unchanged.
+    return initializer + content
 
 
 def keybag_tool():
@@ -473,6 +477,10 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     if major == 6:
         item, conf = payload['private/etc/launchd.conf']
         payload['private/etc/launchd.conf'] = entry(item.name, ios6_launchd_conf(conf), item.mode)
+        payload['usr/local/libexec/olsn0w/keybag-init'] = entry(
+            'usr/local/libexec/olsn0w/keybag-init', ios6_keybag_payload(), 0o755)
+        payload['usr/local/libexec/olsn0w/keybag-init.sh'] = entry(
+            'usr/local/libexec/olsn0w/keybag-init.sh', (TARGET_SCRIPTS/'keybag-init.sh').read_bytes(), 0o755)
 
     for name in ('ssh_host_rsa_key', 'ssh_client_rsa'):
         run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048', '-m', 'PEM', '-N', '', '-f', out/name])
@@ -675,6 +683,9 @@ Subsystem sftp /usr/libexec/sftp-server
         if path.exists():path.unlink()
     report = dict(recipe_version=RECIPE_VERSION,
                   product=source['product'], version=source['version'], build=source['build'],
+                  relay_recipe_version=chain['recipe_version'],
+                  relay_devicetree_sha256=chain['files']['devicetree'],
+                  relay_binary_sha256=chain['files']['relay.bin'],
                   generation=generation, root_device=root_device, data_device=data_device,
                   early_keybag_initialization=early_keybag,
                   data_attributes=0x3000000000000 if major == 6 else 0,
