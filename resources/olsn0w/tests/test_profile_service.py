@@ -3,7 +3,10 @@ import plistlib
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from system import defer_profile_service, LATE_MIS_SERVICES, cydia_startup_job
+from system import (cydia_startup_job, cydia_startup_script,
+                    CYDIA_DEFAULT_SOURCES, data_backed_cydia_sources,
+                    defer_profile_service, entry, LATE_MIS_SERVICES,
+                    seed_cydia_source_cache, symlink_entry)
 
 class Image:
     def __init__(self):
@@ -42,3 +45,58 @@ class ProfileService(unittest.TestCase):
         self.assertGreaterEqual(result['ThrottleInterval'],30)
         job['ProgramArguments']=['/another']
         with self.assertRaises(ValueError):cydia_startup_job(plistlib.dumps(job))
+
+    def test_cydia_completion_marker_is_atomic_and_generation_bound(self):
+        original=(b'#!/bin/bash\n/usr/libexec/cydia/firmware.sh\n'
+                  b'    sbdidlaunch\n')
+        result=cydia_startup_script(original)
+        self.assertIn(b'prepare-cydia.sh || exit 1',result)
+        self.assertIn(b'/usr/libexec/cydia/firmware.sh || exit 1',result)
+        self.assertIn(b'wait-graphics.sh || exit 1',result)
+        self.assertIn(b'/bin/cp /var/lib/olsn0w/generation '
+                      b'/var/lib/olsn0w/cydia-ready.new || exit 1',result)
+        self.assertIn(b'/bin/mv -f /var/lib/olsn0w/cydia-ready.new '
+                      b'/var/lib/olsn0w/cydia-ready || exit 1',result)
+        self.assertLess(result.index(b'wait-graphics.sh'),result.index(b'cydia-ready.new'))
+        with self.assertRaises(ValueError):cydia_startup_script(result)
+
+    def test_cydia_user_link_is_installed_offline(self):
+        item,data=symlink_entry('User','/var/mobile')
+        self.assertTrue(item.issym())
+        self.assertEqual(item.linkname,'/var/mobile')
+        self.assertIsNone(data)
+
+    def test_cydia_source_link_uses_real_private_etc_catalog_path(self):
+        name='private/etc/apt/sources.list.d/cydia.list'
+        payload={name:entry(name,b'',0o644)}
+        data_backed_cydia_sources(payload)
+        item,data=payload[name]
+        self.assertTrue(item.issym())
+        self.assertEqual(item.linkname,
+                         '/var/mobile/Library/Caches/com.saurik.Cydia/sources.list')
+        self.assertIsNone(data)
+        self.assertNotIn('etc/apt/sources.list.d/cydia.list',payload)
+        with self.assertRaisesRegex(ValueError,'placeholder'):
+            data_backed_cydia_sources({name:entry(name,b'changed',0o644)})
+
+    def test_cydia_source_target_is_seeded_with_mobile_ownership(self):
+        data={'mobile':entry('mobile',mode=0o755,uid=501,gid=501,directory=True)}
+        seed_cydia_source_cache(data)
+        directory='mobile/Library/Caches/com.saurik.Cydia'
+        item,content=data[directory]
+        self.assertTrue(item.isdir())
+        self.assertEqual((item.uid,item.gid,item.mode),(501,501,0o755))
+        item,content=data[directory+'/sources.list']
+        self.assertEqual(content,CYDIA_DEFAULT_SOURCES)
+        self.assertEqual((item.uid,item.gid,item.mode),(501,501,0o644))
+        self.assertIn(b'apt.thebigboss.org',content)
+        with self.assertRaisesRegex(ValueError,'mobile directory'):
+            seed_cydia_source_cache({})
+
+    def test_cydia_waits_for_ios7_and_ios8_untether_completion(self):
+        script=(Path(__file__).resolve().parents[1]/'target/prepare-cydia.sh').read_bytes()
+        self.assertIn(b'[ -x /olsn0w/lctl ]',script)
+        self.assertIn(b'/var/run/olsn0w-untether-ready',script)
+        self.assertIn(b'$AG_ROOT_DEVICE on / (hfs,',script)
+        self.assertIn(b'read-only',script)
+        self.assertIn(b'[ "$attempts" -lt 300 ] || exit 1',script)

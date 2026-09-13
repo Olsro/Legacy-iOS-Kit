@@ -28,11 +28,36 @@ class IOS7Jetsam(unittest.TestCase):
         payload, provenance = jailbreak_payload('7.1.2')
         self.assertIn('panguaxe', payload)
         self.assertNotIn('aquila', payload)
+        self.assertNotIn('usr/lib/libmis.dylib', payload)
+        self.assertNotIn('System/Library/Caches/com.apple.dyld/enable-dylibs-to-override-cache',
+                         payload)
+        self.assertNotIn('System/Library/Caches/com.apple.xpcd/xpcd_cache.dylib', payload)
+        self.assertNotIn('System/Library/Caches/com.apple.xpcd/xpcd_cache.ipod.dylib', payload)
         self.assertIn('resources/jailbreak/panguaxe.tar',
                       {item['path'] for item in provenance})
         payload, provenance = jailbreak_payload('7.0.6')
         self.assertIn('aquila', payload)
         self.assertNotIn('panguaxe', payload)
+
+    def test_bundled_pangu_admission_overrides_are_intentionally_excluded(self):
+        archive=Path(__file__).resolve().parents[2]/'jailbreak/panguaxe.tar'
+        with tarfile.open(archive) as payload:
+            mis=payload.extractfile('usr/lib/libmis.dylib').read()
+            cache=payload.extractfile(
+                'System/Library/Caches/com.apple.xpcd/xpcd_cache.dylib').read()
+            marker=payload.extractfile(
+                'System/Library/Caches/com.apple.dyld/enable-dylibs-to-override-cache').read()
+        self.assertIn(b'/usr/lib/libmis.dylib\0', mis)
+        self.assertNotIn(b'_MISEnumerateInstalledProvisioningProfiles', mis)
+        self.assertIn(b'__xpcd_cache', cache)
+        self.assertIn(b'io.pangu.axe.untether', cache)
+        self.assertEqual(marker, b'')
+        prepared, _ = jailbreak_payload('7.1.2')
+        for name in ('usr/lib/libmis.dylib',
+                     'System/Library/Caches/com.apple.xpcd/xpcd_cache.dylib',
+                     'System/Library/Caches/com.apple.xpcd/xpcd_cache.ipod.dylib',
+                     'System/Library/Caches/com.apple.dyld/enable-dylibs-to-override-cache'):
+            self.assertNotIn(name, prepared)
 
     def test_pangu_keeps_native_job_and_uses_guarded_loader(self):
         archive=Path(__file__).resolve().parents[2]/'jailbreak/panguaxe.tar'

@@ -72,16 +72,27 @@ class RelayAddressTests(unittest.TestCase):
                 self.assertFalse(uses_tristar_soft_reset(product,'6.1.3'))
 
     def test_tristar_reset_stays_on_explicitly_qualified_releases(self):
-        releases = {
+        ios6_releases = {
             'iPhone5,1': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
             'iPhone5,2': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
             'iPad3,4': ('6.0', '6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPad3,5': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPad3,6': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
         }
-        for product, versions in releases.items():
+        for product, versions in ios6_releases.items():
             for release in versions:
                 self.assertTrue(uses_tristar_soft_reset(product, release),
                                 (product, release))
+        ios7_releases = ('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
+                         '7.1', '7.1.1', '7.1.2')
+        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
+            for release in ios7_releases:
+                self.assertTrue(uses_tristar_soft_reset(product, release),
+                                (product, release))
+        for product in ('iPhone5,1', 'iPhone5,2'):
             self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
+            self.assertFalse(uses_tristar_soft_reset(product, '7.1.2'))
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPad3,4', 'iPad3,5', 'iPad3,6'):
+            self.assertFalse(uses_tristar_soft_reset(product, '8.0'))
+            self.assertFalse(uses_tristar_soft_reset(product, '8.4.1'))
         self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))

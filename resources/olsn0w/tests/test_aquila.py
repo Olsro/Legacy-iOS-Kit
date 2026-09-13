@@ -18,6 +18,8 @@ class ReleasePayload(unittest.TestCase):
         self.assertEqual(binary[:4], b'\xce\xfa\xed\xfe')
         self.assertIn(b'/olsn0w/load-jobs "$@"', wrapper)
         self.assertIn(b'[ "$2" = -D ]', wrapper)
+        self.assertIn(b'drwxr-xr-x*', wrapper)
+        self.assertIn(b'/var/run/olsn0w-untether-ready', wrapper)
 
     def test_unknown_untether_is_not_patched(self):
         with self.assertRaisesRegex(ValueError, 'Unqualified'):

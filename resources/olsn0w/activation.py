@@ -10,6 +10,10 @@ from pathlib import Path
 from common import tools
 
 
+class ActivationPending(RuntimeError):
+    """The selected target is valid, but Apple's activation is not ready yet."""
+
+
 def activate(udid, identity, log):
     """Ask the Kit to perform official activation on the installed target."""
     if not re.fullmatch(r'[0-9a-fA-F]{40}',udid):raise ValueError('Invalid USB identity')
@@ -23,9 +27,15 @@ def activate(udid, identity, log):
     if query().get('ActivationState') == 'Activated':return
     result=subprocess.run([str(tools()/'ideviceactivation'),'activate','-u',udid,'-b'],
                           capture_output=True,timeout=120)
-    Path(log).write_bytes(result.stdout+result.stderr)
+    # Keep every response: early iOS first boots can expose lockdownd shortly
+    # before it is able to create an activation request, and a later retry can
+    # then succeed without any change to the installed system.
+    path=Path(log)
+    with path.open('ab') as stream:
+        if stream.tell():stream.write(b'\n')
+        stream.write(result.stdout+result.stderr)
     if result.returncode or query().get('ActivationState') != 'Activated':
-        raise RuntimeError('Official target activation did not complete; inspect activation.log')
+        raise ActivationPending('Official target activation is not ready yet')
 
 
 def library(name):

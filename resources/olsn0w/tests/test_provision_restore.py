@@ -4,7 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import ANY, patch, Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import provision_restore as pipeline
 
@@ -82,7 +82,31 @@ class ProvisionSequence(unittest.TestCase):
     def test_no_normal_reboot_when_target_installation_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             args,reports=self.fixture(Path(tmp));ram=Mock()
-            with patch.object(pipeline,'checked_manifest',side_effect=reports),patch.object(pipeline,'provision',return_value=ram),patch.object(pipeline,'collect'),patch.object(pipeline,'bind'),patch.object(pipeline,'prepare'),patch.object(pipeline,'install',side_effect=RuntimeError('readback differs')),patch.object(pipeline,'qualify') as qualify:
+            with patch.object(pipeline,'checked_manifest',side_effect=reports),patch.object(pipeline,'provision',return_value=ram),patch.object(pipeline,'collect'),patch.object(pipeline,'bind'),patch.object(pipeline,'prepare'),patch.object(pipeline,'install',side_effect=RuntimeError('readback differs')),patch.object(pipeline,'qualify_installed_target') as qualify:
                 with self.assertRaisesRegex(RuntimeError,'readback differs'):pipeline.run(*args,erase=True)
                 ram.run.assert_not_called();qualify.assert_not_called()
             state=json.loads((args[1]/'pipeline.json').read_text());self.assertFalse(state['complete'])
+
+    def test_menu_pipeline_uses_central_pangu_post_install_qualification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args,reports=self.fixture(Path(tmp));ram=Mock()
+            target=args[1]/'target'
+            def prepare_target(*unused):target.mkdir(parents=True)
+            qualified={'forced_reset_verified':True}
+            cleanup={'bytes_reclaimed':0}
+            with patch.object(pipeline,'checked_manifest',side_effect=reports), \
+                 patch.object(pipeline,'provision',return_value=ram), \
+                 patch.object(pipeline,'collect'),patch.object(pipeline,'bind'), \
+                 patch.object(pipeline,'prepare',side_effect=prepare_target), \
+                 patch.object(pipeline,'install'), \
+                 patch.object(pipeline,'target_prefix',return_value=['ssh']) as target_prefix, \
+                 patch.object(pipeline,'qualify_installed_target',return_value=qualified) as qualify, \
+                 patch.object(pipeline,'cleanup_completed',return_value=cleanup):
+                result=pipeline.run(*args,erase=True,progress=lambda _:None)
+            self.assertIs(result,qualified)
+            target_prefix.assert_called_once_with(target,2200)
+            qualify.assert_called_once_with(
+                target,['ssh'],'a'*40,'7.1.2',timeout=480,progress=ANY)
+            state=json.loads((args[1]/'pipeline.json').read_text())
+            self.assertEqual(state['stage'],'qualified')
+            self.assertTrue(state['complete'])

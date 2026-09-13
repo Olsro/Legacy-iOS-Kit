@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from activation import activate
+from activation import ActivationPending, activate
 
 class OfficialActivation(unittest.TestCase):
     identity={'product':'iPhone5,1','ecid':1}
@@ -32,3 +32,25 @@ class OfficialActivation(unittest.TestCase):
                         with self.assertRaises(RuntimeError):activate(self.udid,self.identity,Path(d)/'activation.log')
                     command=run.call_args_list[1].args[0]
                     self.assertEqual(command[1:],['activate','-u',self.udid,'-b'])
+
+    def test_transient_failure_is_retryable_and_preserves_both_responses(self):
+        with tempfile.TemporaryDirectory() as d:
+            log=Path(d)/'activation.log'
+            replies=[
+                self.response('Unactivated'),
+                subprocess.CompletedProcess([],1,b'',b'Failed to create activation request.\n'),
+                self.response('Unactivated'),
+            ]
+            with patch('activation.subprocess.run',side_effect=replies):
+                with self.assertRaises(ActivationPending):
+                    activate(self.udid,self.identity,log)
+            replies=[
+                self.response('Unactivated'),
+                subprocess.CompletedProcess([],0,b'Successfully activated device.\n',b''),
+                self.response('Activated'),
+            ]
+            with patch('activation.subprocess.run',side_effect=replies):
+                activate(self.udid,self.identity,log)
+            text=log.read_text()
+            self.assertIn('Failed to create activation request.',text)
+            self.assertIn('Successfully activated device.',text)

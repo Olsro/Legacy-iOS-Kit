@@ -175,9 +175,14 @@ The phone's base-restore bar may stay unchanged while the target is installed.
 Sparse Data progress counts bytes actually transferred, not the last disk
 position. Waiting messages do not claim progress or a successful boot; target
 services and official activation must still be observed within the timeout.
-Startup observation never reboots the device automatically. If initialization
-does not finish, the script preserves the logs and reports the observed stage
-for diagnosis before another attempt.
+Startup observation never reboots a device whose initialization did not finish.
+On the iOS 7.1 Pangu path, its launchctl call is only an intermediate signal:
+Pangu still has to finish its kernel work and remount the selected System
+partition. The host therefore stays on that first boot, never restarts it at the
+intermediate marker, and requires the real root mount to be read-write before
+Cydia initialization or successful qualification. This is necessary for `dpkg`
+and Cydia package upgrades. Failures preserve the logs and report the observed
+stage without reinstalling the device.
 
 ## Hosts and dependencies
 
@@ -263,6 +268,9 @@ Official activation is also attempted through the selected lockdownd USB identit
 independently of diagnostic SSH. A missing or rejected per-image SSH key still
 fails final boot qualification, but can no longer leave Setup Assistant waiting
 for an activation that the connected computer was already able to perform.
+Early lockdownd availability can precede Apple's ability to create the activation
+request. That response is now treated as transient and retried within the normal
+startup deadline; every attempt is appended to `activation.log` for diagnosis.
 Likewise, iOS 7 may expose SSH before protected Data has atomically published its
 generation marker. That transient state is polled rather than treated as a wrong
 installation; lockdownd still strictly verifies product, version and build before
@@ -275,14 +283,29 @@ disables `StrictModes`, avoiding first-boot HFS ancestor-mode rejection. It stay
 bound to loopback, disables password authentication and accepts only the
 per-image key.
 
-For iOS 7, the Apple `profiled` and `accountsd` jobs are kept in `/olsn0w/late-jobs` and registered
-by Aquila's post-patch loader. Early amfid admission still uses the Kit's limited
-MIS library; after Aquila restores shared-cache selection, these services use
-the complete Apple implementation. Their executables, Mach services, users and
-job options are preserved. This avoids starting them against the incomplete
-implementation during early boot. Cydia preparation retries unsuccessful runs
+For iOS 7 releases using Aquila, the Apple `profiled` and `accountsd` jobs are
+kept in `/olsn0w/late-jobs` and registered by Aquila's post-patch loader. Their
+executables, Mach services, users and job options are preserved. This avoids
+starting them against Aquila's early admission environment. Cydia preparation retries unsuccessful runs
 with a 30-second launchd throttle, then stops retrying after successful completion;
-its output is retained under `/var/logs/AppleSupport/olsn0w-cydia.log`.
+its output is retained under `/var/logs/AppleSupport/olsn0w-cydia.log`. A
+launchd `- 0` status alone is not accepted as completion because it also
+describes a registered job that has never run. The final startup command
+atomically publishes a marker containing the selected Data generation, and
+qualification starts an idle uninitialized job and waits for that exact marker.
+An intermediate nonzero launchd status is diagnostic rather than terminal:
+launchd's configured retry can still complete successfully after protected Data
+and the root remount settle, as observed on the iPad3,4. The timeout retains the
+last failure and its log path if no generation marker is ever published.
+This prevents the first Cydia launch from preceding its firmware and default
+source initialization. The image also contains Cydia's `/User` compatibility
+link and its Data-backed default-source link at the real `/private/etc` HFS
+catalog path before first boot. The link's mobile-owned cache target is seeded
+with the five default Cydia repositories as well; Cydia returning status 0
+without creating that cache can therefore no longer yield an empty source list.
+This is prepared offline because the Pangu
+path can still have a read-only System volume when `firmware.sh` runs. A failed
+`firmware.sh` no longer publishes a successful Cydia marker.
 For iOS 7.1.x, the restore recipe uses the Pangu untether already bundled and used
 by Legacy iOS Kit, selecting its checked ARMv7 slice and retargeting it to the
 chosen root volume. Its original launch service and the stock daemon layout are
@@ -292,6 +315,17 @@ it cannot invalidate lockdownd's live local socket. Earlier iOS 7 releases retai
 policy gives the selected untether an explicit 128 MiB ceiling; the stock fallback
 ceiling of 5 MiB can terminate the exploit before it remounts the selected root
 read-write, leaving Cydia preparation unable to finish.
+The guarded Pangu launch wrapper accepts `/private` only when its existing
+read-only metadata is already exactly safe, then publishes an untether-completion
+gate after all payload jobs have been registered. Cydia waits for that gate on
+iOS 7 and 8. Pangu's stock-jailbreak admission files are deliberately excluded:
+olsn0w's boot relay already supplies `amfi=0xff cs_enforcement_disable=1`, so the
+ordinary Pangu LaunchDaemon can start without its reduced loose libmis, global
+dyld marker or system-only xpcd cache. Keeping those redundant overrides would
+remove MIS APIs used by Apple applications and make the mobile-user xpcd crash,
+which in turn blocks Messages and FaceTime. The Pangu untether itself and its
+checked launch job remain installed; Apple services and Cydia use the firmware's
+complete shared-cache implementations.
 
 The small ARMv7 helper is shipped with source/build checksums in
 `target/load-jobs.json`. `native/target/build.sh` rebuilds it with Clang, an ARM
@@ -317,9 +351,16 @@ DeviceTree reset; this major-version rule includes the phone-only 6.0.2 and
 6.1.4 releases without maintaining an incomplete point-release list. For p101,
 6.1.2 is physically qualified, the 6.0/6.0.1 and 6.1 DeviceTrees were
 separately extracted, decrypted and parsed, and the 6.1, 6.1.2 and 6.1.3
-DeviceTrees are byte-identical. This reset policy is not inherited by other
-SoCs and does not extend into iOS 7 or 8. Existing prepared relay images must
-be rebuilt to acquire this change.
+DeviceTrees are byte-identical. The same reset is required by iPad3,4 on
+iOS 7: without it, 7.1.2 panics before launchd and loops between the Apple logo
+and a black screen. Adding only the TriStar `soft-reset` property was physically
+qualified through two normal boots, official activation, the selected Data
+generation and SpringBoard. The iPad3,5 and iPad3,6 profiles inherit this iOS 7
+rule from the same A6X iPad 4 platform, but still need their own hardware
+qualification. The iPhone 5 remains on the iOS 6-only rule because iPhone5,2
+7.1.2 was physically qualified without the property. This reset policy is not
+inherited by other SoCs and does not extend into iOS 8. Existing prepared relay
+images are rebuilt automatically by the guided flow to acquire recipe changes.
 
 The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
 ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is

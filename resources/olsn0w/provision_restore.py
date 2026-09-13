@@ -9,7 +9,7 @@ from provision_run import DfuPreparationError, run as provision
 from provision_collect import collect
 from provisioned_base import prepare as bind
 from restore import checked_manifest, checkpoint, prepare, install
-from restore_run import target_prefix, qualify
+from restore_run import target_prefix, qualify_installed_target
 from common import version
 
 
@@ -92,7 +92,9 @@ def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
             # still has to prove the selected generation actually started.
             pass
         device=json.loads((session/'device.json').read_text())
-        result=qualify(target,next_prefix,device['ram_udid'],timeout=480,progress=progress)
+        result=qualify_installed_target(
+            target,next_prefix,device['ram_udid'],reports[2]['version'],
+            timeout=480,progress=progress)
         state.update(stage='qualified',complete=True,qualification=result)
         checkpoint(journal,state)
         try:

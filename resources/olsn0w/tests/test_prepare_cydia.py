@@ -51,6 +51,13 @@ class PrepareCydia(unittest.TestCase):
             self.assertNotIn('dpkg-divert',script)
             self.assertNotIn('mkdir -p /usr/share',script)
 
+    def test_pangu_gate_requires_the_selected_root_to_be_writable(self):
+        script=(ROOT/'target/prepare-cydia.sh').read_text()
+        self.assertIn('. /usr/local/libexec/olsn0w/target.conf',script)
+        self.assertIn('$AG_ROOT_DEVICE on / (hfs,',script)
+        self.assertIn('read-only',script)
+        self.assertIn('[ "$marker" = ready ] && break',script)
+
 
 if __name__ == '__main__':
     unittest.main()

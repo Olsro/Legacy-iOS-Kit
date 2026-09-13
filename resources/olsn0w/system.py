@@ -24,7 +24,15 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 24
+RECIPE_VERSION = 30
+
+CYDIA_DEFAULT_SOURCES = (
+    b'deb http://apt.saurik.com/ ios/847.27 main\n'
+    b'deb http://repo666.ultrasn0w.com/ ./\n'
+    b'deb http://apt.thebigboss.org/repofiles/cydia/ stable main\n'
+    b'deb http://modmyi.saurik.com/ stable main\n'
+    b'deb http://zodttd.saurik.com/repo/cydia/ stable main\n'
+)
 
 
 def uses_protected_data(release):
@@ -81,6 +89,39 @@ def entry(name, data=None, mode=0o644, uid=0, gid=0, directory=False):
     else:
         item.size = len(data)
     return item, data
+
+
+def symlink_entry(name, target, uid=0, gid=0):
+    item = tarfile.TarInfo(name)
+    item.type, item.linkname = tarfile.SYMTYPE, target
+    item.mode, item.uid, item.gid = 0o777, uid, gid
+    return item, None
+
+
+def data_backed_cydia_sources(entries):
+    """Replace Cydia's empty package file at its canonical HFS path."""
+    name = 'private/etc/apt/sources.list.d/cydia.list'
+    try:
+        item, data = entries[name]
+    except KeyError as error:
+        raise ValueError('Cydia source placeholder is missing') from error
+    if not item.isfile() or data != b'':
+        raise ValueError('Unrecognized Cydia source placeholder')
+    entries[name] = symlink_entry(
+        name, '/var/mobile/Library/Caches/com.saurik.Cydia/sources.list',
+        item.uid, item.gid)
+
+
+def seed_cydia_source_cache(entries):
+    """Create Cydia's mobile-owned source target instead of trusting its UI cache."""
+    mobile=entries.get('mobile')
+    if mobile is None or not mobile[0].isdir():
+        raise ValueError('Stock Data seed is missing the mobile directory')
+    uid,gid=mobile[0].uid,mobile[0].gid
+    directory='mobile/Library/Caches/com.saurik.Cydia'
+    entries[directory]=entry(directory,mode=0o755,uid=uid,gid=gid,directory=True)
+    name=directory+'/sources.list'
+    entries[name]=entry(name,CYDIA_DEFAULT_SOURCES,0o644,uid,gid)
 
 
 def seed_data(image):
@@ -156,6 +197,45 @@ SUPPORTED_MAJORS = (6, 7, 8)
 PREPARABLE_MAJORS = SUPPORTED_MAJORS
 
 
+def remove_pangu_admission_overrides(entries):
+    """Discard Pangu's stock-jailbreak admission files after validating them.
+
+    The olsn0w relay already supplies the target AMFI boot arguments, so the
+    signed Pangu untether can start from its ordinary LaunchDaemon. Retaining
+    Pangu's global dyld overrides would replace the complete stock MIS API and
+    make every mobile-user xpcd load a system-only launchd cache.
+    """
+    names = (
+        'usr/lib/libmis.dylib',
+        'System/Library/Caches/com.apple.xpcd/xpcd_cache.dylib',
+        'System/Library/Caches/com.apple.xpcd/xpcd_cache.ipod.dylib',
+        'System/Library/Caches/com.apple.dyld/enable-dylibs-to-override-cache',
+    )
+    try:
+        removed = {name: entries.pop(name) for name in names}
+    except KeyError as error:
+        raise ValueError('Pangu admission override is missing: ' + error.args[0]) from error
+    macho_magics = {
+        b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca',
+        b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xce',
+        b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf',
+    }
+    item, data = removed['usr/lib/libmis.dylib']
+    if (not item.isfile() or data is None or data[:4] not in macho_magics or
+            b'/usr/lib/libmis.dylib\0' not in data or
+            b'_MISEnumerateInstalledProvisioningProfiles' in data):
+        raise ValueError('Unrecognized Pangu reduced MIS library')
+    for name in names[1:3]:
+        item, data = removed[name]
+        if (not item.isfile() or data is None or data[:4] not in macho_magics or
+                b'__xpcd_cache' not in data or
+                b'io.pangu.axe.untether' not in data):
+            raise ValueError('Unrecognized Pangu xpcd admission cache')
+    item, data = removed[names[3]]
+    if not item.isfile() or data != b'':
+        raise ValueError('Unrecognized Pangu dyld override marker')
+
+
 def jailbreak_payload(release):
     major = version(release)[0]
     if major not in PREPARABLE_MAJORS:
@@ -185,6 +265,8 @@ def jailbreak_payload(release):
             if not name.startswith('private/var/'):
                 item.uid = item.gid = 0
             entries[name] = (item, data)
+    if pangu71:
+        remove_pangu_admission_overrides(entries)
     if major != 6 and major != 8 and not pangu71:
         aquila, origin = ios7_payload()
         entries.pop('private/var/aquila/aquila', None)
@@ -305,6 +387,32 @@ def cydia_startup_job(data):
     job['StandardOutPath'] = '/var/logs/AppleSupport/olsn0w-cydia.log'
     job['StandardErrorPath'] = job['StandardOutPath']
     return plistlib.dumps(job)
+
+
+def cydia_startup_script(content):
+    """Prepare Cydia and publish completion for the selected Data generation."""
+    token = b'/usr/libexec/cydia/firmware.sh\n'
+    if content.count(token) != 1:
+        raise ValueError('Unrecognized kit Cydia startup script')
+    content = content.replace(
+        token,
+        b'cd /\n/usr/local/libexec/olsn0w/prepare-cydia.sh || exit 1\n'
+        b'/usr/libexec/cydia/firmware.sh || exit 1\n')
+    content = content.replace(
+        b'    sbdidlaunch\n',
+        b'    /usr/local/libexec/olsn0w/wait-graphics.sh || exit 1\n')
+    marker = b'/var/lib/olsn0w/cydia-ready'
+    if marker in content:
+        raise ValueError('Cydia startup completion marker already exists')
+    # launchctl reports an unstarted on-demand job as "- 0", which is
+    # indistinguishable from a successful run. Publish an atomic, generation-
+    # bound marker only after the complete script reaches its final command.
+    content += (
+        b'\n/bin/cp /var/lib/olsn0w/generation /var/lib/olsn0w/cydia-ready.new || exit 1\n'
+        b'/bin/chmod 644 /var/lib/olsn0w/cydia-ready.new || exit 1\n'
+        b'/bin/mv -f /var/lib/olsn0w/cydia-ready.new /var/lib/olsn0w/cydia-ready || exit 1\n'
+        b'/bin/sync\n')
+    return content
 
 
 def untether_jetsam_properties(data, label):
@@ -449,6 +557,7 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     generation = str(uuid.uuid4())
     data_entries = seed_data(stock)
     merge_data_payload(data_entries, payload)
+    seed_cydia_source_cache(data_entries)
     data_entries['lib/olsn0w/generation'] = entry('lib/olsn0w/generation', (generation+'\n').encode(), 0o600)
     for directory in ('logs/AppleSupport', 'run', 'lib/olsn0w'):
         data_entries.setdefault(directory, entry(directory, mode=0o755, directory=True))
@@ -541,12 +650,16 @@ Subsystem sftp /usr/libexec/sftp-server
     provenance.append(origin)
     payload['usr/local/libexec/olsn0w/fixkeybag'] = entry('usr/local/libexec/olsn0w/fixkeybag', fixkeybag, 0o755)
     payload['.cydia_no_stash'] = entry('.cydia_no_stash', b'')
+    # firmware.sh creates this compatibility link at runtime. The iOS 7 Pangu
+    # path keeps System read-only at that point, so include it in the image.
+    payload['User'] = symlink_entry('User', '/var/mobile')
+    # Cydia normally replaces its empty package-owned source file with this
+    # Data-backed cache link on first launch. Use /private/etc, the real HFS
+    # directory: /etc is a symbolic link that the offline catalog editor must
+    # not be expected to traverse.
+    data_backed_cydia_sources(payload)
     startup, content = payload['usr/libexec/cydia/startup']
-    token = b'/usr/libexec/cydia/firmware.sh\n'
-    if content.count(token) != 1:
-        raise ValueError('Unrecognized kit Cydia startup script')
-    content = content.replace(token, b'cd /\n/usr/local/libexec/olsn0w/prepare-cydia.sh || exit 1\n'+token)
-    content = content.replace(b'    sbdidlaunch\n', b'    /usr/local/libexec/olsn0w/wait-graphics.sh || exit 1\n')
+    content = cydia_startup_script(content)
     payload['usr/libexec/cydia/startup'] = entry('usr/libexec/cydia/startup', content, startup.mode)
     startup_path = 'Library/LaunchDaemons/com.saurik.Cydia.Startup.plist'
     item, job_data = payload[startup_path]
@@ -579,6 +692,11 @@ Subsystem sftp /usr/libexec/sftp-server
                 raise ValueError('Payload would replace a system directory: '+name)
             image.command('rm', '/'+name)
     image.command('untar', out/'root-overlay.tar')
+    if image.readlink('/User') != '/var/mobile':
+        raise ValueError('Cydia User compatibility symlink readback differs')
+    if image.readlink('/private/etc/apt/sources.list.d/cydia.list') != \
+            '/var/mobile/Library/Caches/com.saurik.Cydia/sources.list':
+        raise ValueError('Cydia source cache symlink readback differs')
     # SSH StrictModes checks every ancestor of the authorized-keys file.
     # Stock / can be group-writable too, despite safe /private/etc metadata.
     image.command('chown', '0:0', '/')

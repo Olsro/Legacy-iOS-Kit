@@ -12,7 +12,7 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 16
+RECIPE_VERSION = 17
 
 
 def memory_layout(product):
@@ -27,7 +27,7 @@ def memory_layout(product):
 
 
 def uses_tristar_soft_reset(product, release):
-    """Apply the reset to every iOS 6 release on an explicit Lightning profile."""
+    """Apply the reset only to release families selected by the model profile."""
     return version(release)[0] in profile(product).get('tristar_soft_reset_majors', ())
 
 
