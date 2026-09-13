@@ -8,7 +8,7 @@ import subprocess
 import time
 
 from common import profile, tools, version
-from device import same_hardware
+from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
 
@@ -82,6 +82,26 @@ def target_identity_ready(lines, report):
     return lines[:3] == expected
 
 
+def target_recovery_mode(report):
+    """Return the selected device's DFU/Recovery mode, if one is present."""
+    identity=report['identity']
+    ecid=identity.get('ecid')
+    if not isinstance(ecid,int):
+        return None
+    try:
+        result=subprocess.run(
+            [str(tools()/'irecovery'),'-i',hex(ecid),'-q'],
+            capture_output=True,timeout=10)
+    except (OSError,subprocess.TimeoutExpired):
+        return None
+    if result.returncode:
+        return None
+    try:
+        return parse_recovery(result.stdout.decode(errors='replace'),ecid)['mode']
+    except (KeyError,ValueError):
+        return None
+
+
 def cydia_initialization_ready(lines, generation):
     """Prove that Cydia startup completed on this exact Data generation."""
     return len(lines) > 3 and lines[3] == 'CYDIA_READY:' + generation
@@ -139,11 +159,13 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
     while True:
         status='Waiting for the target USB connection.'
         services=False
+        ssh_reachable=False
         try:
             r=subprocess.run(prefix+[command],capture_output=True,timeout=15)
             text=r.stdout.decode(errors='replace')
             lines=text.splitlines()
             if r.returncode==0:
+                ssh_reachable=True
                 if target_identity_ready(lines,report):
                     initialized=cydia_initialization_ready(lines,report['generation'])
                     writable=(not verify_writable_root or
@@ -220,6 +242,16 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 activation_acknowledgement=acknowledge(udid,report['identity'])
             if services and baseband_ready and values.get('ActivationState')=='Activated':
                 break
+        elif not ssh_reachable:
+            mode=target_recovery_mode(report)
+            if mode=='Recovery':
+                checkpoint(bundle/'recovery-detection.json',dict(
+                    product=report['product'],version=report['version'],
+                    build=report['build'],mode=mode))
+                raise RuntimeError(
+                    'The selected target returned to Recovery mode before startup. '
+                    'The boot handoff failed; inspect the preserved panic and boot logs '
+                    'instead of waiting for target USB services.')
         if time.monotonic()>=deadline:
             detail=startup_error or status
             raise RuntimeError('Installation was written and verified, but startup is not yet confirmed. '+detail+' Keep the device connected and inspect its startup logs before retrying the installation.')

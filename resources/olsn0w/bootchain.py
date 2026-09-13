@@ -12,7 +12,7 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 17
+RECIPE_VERSION = 18
 
 
 def memory_layout(product):

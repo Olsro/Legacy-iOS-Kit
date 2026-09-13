@@ -65,6 +65,25 @@ class DistributedState(unittest.TestCase):
             self.assertFalse(any('reboot' in str(item) for item in commands))
             self.assertTrue(any('launchctl list' in item[-1] for item in commands))
 
+    def test_recovery_return_is_reported_as_terminal_boot_failure(self):
+        identity={'board':'p101ap','product':'iPad3,4','chip':0x8955,
+                  'board_id':0,'ecid':123}
+        report=dict(product='iPad3,4',version='8.1.3',build='12B466',
+                    generation='fixture',identity=identity)
+        recovery=(b'PRODUCT: iPad3,4\nMODEL: p101ap\nCPID: 0x8955\n'
+                  b'BDID: 0x00\nECID: 0x7b\nMODE: Recovery\n')
+        replies=[subprocess.CompletedProcess([],1,b'',b''),
+                 subprocess.CompletedProcess([],1,b'',b''),
+                 subprocess.CompletedProcess([],0,recovery,b'')]
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run.subprocess,'run',side_effect=replies):
+            with self.assertRaisesRegex(RuntimeError,'returned to Recovery mode'):
+                restore_run.qualify(Path(work),['ssh'],'fixture',progress=lambda _:None)
+            detection=json.loads((Path(work)/'recovery-detection.json').read_text())
+        self.assertEqual(detection,dict(
+            product='iPad3,4',version='8.1.3',build='12B466',mode='Recovery'))
+
     def test_ssh_rejection_does_not_postpone_official_activation(self):
         identity={'board':'n42ap','product':'iPhone5,2','ecid':123}
         report=dict(product='iPhone5,2',version='8.1.3',build='12B466',generation='fixture',

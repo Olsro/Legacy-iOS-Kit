@@ -358,9 +358,15 @@ qualified through two normal boots, official activation, the selected Data
 generation and SpringBoard. The iPad3,5 and iPad3,6 profiles inherit this iOS 7
 rule from the same A6X iPad 4 platform, but still need their own hardware
 qualification. The iPhone 5 remains on the iOS 6-only rule because iPhone5,2
-7.1.2 was physically qualified without the property. This reset policy is not
-inherited by other SoCs and does not extend into iOS 8. Existing prepared relay
-images are rebuilt automatically by the guided flow to acquire recipe changes.
+7.1.2 and its iOS 8 path were physically qualified without the property. The
+iPad 4 A6X family keeps the reset through iOS 8: an iPad3,4 running 8.1.3 was
+captured panicking in `AppleTriStarBuiltin` with `could not find system ID: bad
+IPC message ID` before launchd when the property was absent. Reinstalling that
+same target DeviceTree with `soft-reset` then completed the physical boot,
+official activation and SpringBoard qualification on the same installation.
+This reset policy is not inherited by other SoCs. Existing prepared relay and
+target-system images are rebuilt automatically by the guided flow to acquire
+recipe changes.
 
 The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
 ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is

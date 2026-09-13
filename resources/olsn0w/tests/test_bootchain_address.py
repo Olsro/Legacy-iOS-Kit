@@ -92,7 +92,11 @@ class RelayAddressTests(unittest.TestCase):
         for product in ('iPhone5,1', 'iPhone5,2'):
             self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '7.1.2'))
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPad3,4', 'iPad3,5', 'iPad3,6'):
+        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
+            self.assertTrue(uses_tristar_soft_reset(product, '8.0'))
+            self.assertTrue(uses_tristar_soft_reset(product, '8.1.3'))
+            self.assertTrue(uses_tristar_soft_reset(product, '8.4.1'))
+        for product in ('iPhone5,1', 'iPhone5,2'):
             self.assertFalse(uses_tristar_soft_reset(product, '8.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '8.4.1'))
         self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))
