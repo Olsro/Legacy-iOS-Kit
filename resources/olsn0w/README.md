@@ -368,6 +368,31 @@ This reset policy is not inherited by other SoCs. Existing prepared relay and
 target-system images are rebuilt automatically by the guided flow to acquire
 recipe changes.
 
+Every selected target also installs a late boot-success job. It waits for
+GraphicsServices and a stable SpringBoard, reruns Apple's `CrashHousekeeping`
+executable (the preserved original where its launch path hosts the untether)
+to acknowledge the PMU boot-failure and panic counters, and then restores
+`auto-boot=true` before publishing a
+generation-bound marker required by host qualification. Apple's stock job is
+launch-once and runs before the olsn0w relay and untether handoff have finished;
+the late invocation prevents failures during that handoff from remaining armed
+after a successful target boot. This keeps the early-crash Recovery safeguard
+intact while ensuring that a later interrupted startup does not consume stale
+failure counts from an earlier, successful boot.
+
+The relay also changes the stock `upgrade` command's pre-boot NVRAM write from
+`auto-boot=false` to `auto-boot=true`. The original write otherwise turns one
+transient selected-system failure into an immediate Recovery stop on the next
+hardware boot. PMU boot and panic counts are not bypassed by this patch, so
+repeated real failures still retain iBoot's Recovery safeguard; a stable target
+boot clears them through the late Apple housekeeping step above.
+
+When iBoot has already stopped in Recovery, the guided menu offers a selected-
+device repair before any firmware is downloaded. It verifies the product,
+board, chip and ECID, sets and saves `auto-boot=true`, then reboots without
+mounting storage, preparing firmware or erasing data. Declining the repair
+continues to the normal restore-version menu.
+
 The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
 ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is
 reconstructed from the iPhone5,2 cache and its resulting shared cache was also

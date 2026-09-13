@@ -24,7 +24,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 31
+RECIPE_VERSION = 33
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -614,11 +614,22 @@ Subsystem sftp /usr/libexec/sftp-server
         'usr/local/share/olsn0w/sshd_config', ssh_config.encode(), 0o600)
     payload['private/etc/ssh/ssh_host_rsa_key'] = entry('private/etc/ssh/ssh_host_rsa_key', (out/'ssh_host_rsa_key').read_bytes(), 0o600)
     payload['private/etc/ssh/olsn0w_authorized_keys'] = entry('private/etc/ssh/olsn0w_authorized_keys', (out/'ssh_client_rsa.pub').read_bytes(), 0o600)
-    for script in ('guard-target.sh', 'keybag-start.sh', 'wait-graphics.sh', 'prepare-cydia.sh'):
+    for script in ('guard-target.sh', 'keybag-start.sh', 'wait-graphics.sh',
+                   'prepare-cydia.sh', 'boot-success.sh'):
         name = 'usr/local/libexec/olsn0w/'+script
         source_script = ('keybag-start-protected.sh'
                          if script == 'keybag-start.sh' and uses_protected_keybag_start(source['version']) else script)
         payload[name] = entry(name, (TARGET_SCRIPTS/source_script).read_bytes(), 0o755)
+    boot_success_job = (TARGET_SCRIPTS/'boot-success.plist').read_bytes()
+    job = plistlib.loads(boot_success_job)
+    if (job.get('Label') != 'org.olsn0w.boot-success' or
+            job.get('ProgramArguments') != [
+                '/bin/sh', '/usr/local/libexec/olsn0w/boot-success.sh'] or
+            job.get('RunAtLoad') is not True or
+            job.get('KeepAlive') != {'SuccessfulExit':False}):
+        raise ValueError('Invalid target boot-success job')
+    payload['Library/LaunchDaemons/org.olsn0w.boot-success.plist'] = entry(
+        'Library/LaunchDaemons/org.olsn0w.boot-success.plist', boot_success_job)
     config = dict(AG_BOARD=MODELS[source['product']][0].upper(), AG_BUILD=source['build'],
                   AG_ROOT_DEVICE=root_device, AG_DATA_DEVICE=data_device, AG_GENERATION=generation)
     # The physically qualified iOS 8 first boot keeps the native daemon at a

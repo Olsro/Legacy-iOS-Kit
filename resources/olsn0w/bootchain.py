@@ -12,7 +12,7 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 18
+RECIPE_VERSION = 19
 
 
 def memory_layout(product):
@@ -123,6 +123,118 @@ def skip_ramdisk(data):
     return bytes(result),dict(offset=at,before=data[at:at+2].hex(),after=replacement.hex())
 
 
+def preserve_upgrade_autoboot(data):
+    """Keep a transient target boot failure retryable by the signed base.
+
+    The dualboot patch selects iBEC's stock ``upgrade`` command. That command
+    persists ``auto-boot=false`` before loading the alternate system, so one
+    failed target attempt makes the following hardware boot stop in Recovery.
+    Retarget only the qualified false-string literal used by that write. The
+    PMU boot/panic counters remain untouched and are still acknowledged only
+    after a stable SpringBoard by the target boot-success job.
+    """
+    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
+    from capstone.arm import (ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_REG_PC,
+                              ARM_REG_R0, ARM_REG_R1, ARM_REG_R2)
+    data=bytes(data)
+    if len(data)<64:
+        raise ValueError('iBEC is too small for the upgrade auto-boot recipe')
+    base=struct.unpack_from('<I',data,32)[0]-64
+    tokens={}
+    for name,token in [('auto_boot',b'auto-boot\0'),('false',b'false\0'),('true',b'true\0')]:
+        locations=[at for at in range(len(data)) if data.startswith(token,at)]
+        if len(locations)!=1:
+            raise ValueError('Ambiguous iBEC '+name.replace('_',' ')+' string')
+        tokens[name]=base+locations[0]
+
+    md=Cs(CS_ARCH_ARM,CS_MODE_THUMB);md.detail=True
+    matches=[]
+    for at in range(0,len(data)-24,2):
+        instructions=list(md.disasm(data[at:at+24],at))
+        if not instructions:
+            continue
+        first=instructions[0]
+        if (first.mnemonic!='ldr' or len(first.operands)!=2
+                or first.operands[0].type!=ARM_OP_REG or first.operands[0].reg!=ARM_REG_R0
+                or first.operands[1].type!=ARM_OP_MEM or first.operands[1].mem.base!=ARM_REG_PC):
+            continue
+        auto_literal=((first.address+4)&~3)+first.operands[1].mem.disp
+        if (not 0<=auto_literal<=len(data)-4
+                or struct.unpack_from('<I',data,auto_literal)[0]!=tokens['auto_boot']):
+            continue
+        persist=False;false_literal=None
+        for instruction in instructions[1:6]:
+            if instruction.mnemonic=='bl':
+                break
+            if (instruction.mnemonic.startswith('mov') and len(instruction.operands)==2
+                    and instruction.operands[0].type==ARM_OP_REG
+                    and instruction.operands[0].reg==ARM_REG_R2
+                    and instruction.operands[1].type==ARM_OP_IMM
+                    and instruction.operands[1].imm==1):
+                persist=True
+            if (instruction.mnemonic=='ldr' and len(instruction.operands)==2
+                    and instruction.operands[0].type==ARM_OP_REG
+                    and instruction.operands[0].reg==ARM_REG_R1
+                    and instruction.operands[1].type==ARM_OP_MEM
+                    and instruction.operands[1].mem.base==ARM_REG_PC):
+                literal=((instruction.address+4)&~3)+instruction.operands[1].mem.disp
+                if (0<=literal<=len(data)-4
+                        and struct.unpack_from('<I',data,literal)[0]==tokens['false']):
+                    false_literal=literal
+        if persist and false_literal is not None:
+            matches.append((at,false_literal))
+    if len(matches)!=1:
+        if matches:
+            raise ValueError('Ambiguous persistent upgrade auto-boot write')
+        # Later iBECs remove the transient boot-command and save the
+        # environment instead of persisting auto-boot=false. Validate that
+        # known handler shape and leave it byte-identical.
+        for name,token in [('upgrade',b'upgrade\0'),('boot_command',b'boot-command\0')]:
+            locations=[at for at in range(len(data)) if data.startswith(token,at)]
+            if len(locations)!=1:
+                raise ValueError('Ambiguous iBEC '+name.replace('_',' ')+' string')
+            tokens[name]=base+locations[0]
+        command_entries=[at for at in range(len(data)-8)
+                         if data.startswith(struct.pack('<I',tokens['upgrade']),at)]
+        if len(command_entries)!=1:
+            raise ValueError('Unrecognized iBEC upgrade command entry')
+        handler_address=struct.unpack_from('<I',data,command_entries[0]+4)[0]
+        if not handler_address&1:
+            raise ValueError('Upgrade command handler is not Thumb code')
+        handler=(handler_address&~1)-base
+        if not 0<=handler<=len(data)-32:
+            raise ValueError('Upgrade command handler is outside iBEC')
+        instructions=list(md.disasm(data[handler:handler+32],handler))
+        boot_load=None
+        for index,instruction in enumerate(instructions[:4]):
+            if (instruction.mnemonic=='ldr' and len(instruction.operands)==2
+                    and instruction.operands[0].type==ARM_OP_REG
+                    and instruction.operands[0].reg==ARM_REG_R0
+                    and instruction.operands[1].type==ARM_OP_MEM
+                    and instruction.operands[1].mem.base==ARM_REG_PC):
+                literal=((instruction.address+4)&~3)+instruction.operands[1].mem.disp
+                if (0<=literal<=len(data)-4
+                        and struct.unpack_from('<I',data,literal)[0]==tokens['boot_command']):
+                    boot_load=index
+                    break
+        calls=[index for index,instruction in enumerate(instructions[:7])
+               if instruction.mnemonic=='bl']
+        if (not instructions or instructions[0].mnemonic!='push' or boot_load is None
+                or len(calls)<2 or calls[0]<=boot_load or calls[1]!=calls[0]+1):
+            raise ValueError('Unrecognized non-disarming upgrade command')
+        return data,dict(instruction=handler,form='transient-boot-command',persistent=False)
+    instruction,literal=matches[0]
+    before=data[literal:literal+4]
+    after=struct.pack('<I',tokens['true'])
+    result=data[:literal]+after+data[literal+4:]
+    if (result[literal:literal+4]!=after or result[:literal]!=data[:literal]
+            or result[literal+4:]!=data[literal+4:]):
+        raise ValueError('Upgrade auto-boot patch changed unexpected bytes')
+    return result,dict(instruction=instruction,literal=literal,
+                       before=before.hex(),after=after.hex(),
+                       form='persistent-auto-boot',persistent=True)
+
+
 def literal_ibss(data, second):
     """Handle the literal-buffer form of the Kit's iBSS dualboot patch."""
     from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
@@ -211,6 +323,7 @@ def prepare(firmware, *, verbose=False):
                                           original=raw[at:at+4].hex())
         else:
             data,patches['optional_ramdisk']=skip_ramdisk(data)
+            data,patches['upgrade_autoboot']=preserve_upgrade_autoboot(data)
             if verbose or selected_profile['soc'].startswith('a5'):
                 save(out/'display-validation.json',dict(
                     mode='verbose' if verbose else 'stock',logo_hook=False))

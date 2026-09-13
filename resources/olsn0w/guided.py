@@ -255,9 +255,29 @@ def enter_dfu(identity, read=input, show=print):
         show('Selected device was not detected in DFU. No erase started; try again with the same prepared files.')
 
 
+def exit_selected_recovery(identity, command=run):
+    """Rearm and start only the selected device; never prepare or erase it."""
+    actual=query_recovery(identity['ecid'])
+    if not same_hardware(identity,actual):
+        raise ValueError('Recovery target differs from the selected device')
+    if actual['mode']!='Recovery':
+        raise ValueError('The selected device is not in Recovery mode')
+    executable=tools()/'irecovery'
+    for value in ('setenv auto-boot true','saveenv','reboot'):
+        command([executable,'-i',hex(identity['ecid']),'-c',value],timeout=15)
+    return dict(product=identity['product'],ecid=identity['ecid'],
+                recovery_repaired=True,device_erased=False)
+
+
 def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     identity,udid=connected(product,ecid,udid)
     show('\nolsn0w — '+product+' — connected in '+identity['mode'])
+    if identity['mode']=='Recovery':
+        show('The selected device can leave Recovery without firmware preparation or data erasure.')
+        if read('Exit Recovery and start the installed system now? [y/N]: ').strip().lower() in ('y','yes'):
+            result=exit_selected_recovery(identity)
+            show('Normal boot rearmed. Keep the cable connected while the installed system starts.')
+            return result
     selected=choose(releases(product,refresh),read,show)
     if selected is None:return
     session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)

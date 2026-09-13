@@ -2,12 +2,20 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore_run import (cydia_initialization_ready, cydia_needs_start,
+from restore_run import (boot_success_ready, cydia_initialization_ready, cydia_needs_start,
                          pangu_needs_writable_root,
                          pangu_writable_root_ready, services_ready,
                          startup_failure, startup_status)
 
 class StartupQualification(unittest.TestCase):
+    def test_boot_success_is_generation_bound_and_required_by_production_gate(self):
+        jobs=('BOOT_SUCCESS:selected\n10 0 com.apple.SpringBoard\n'
+              '- 0 com.saurik.Cydia.Startup\n')
+        self.assertTrue(boot_success_ready(jobs,'selected'))
+        self.assertFalse(boot_success_ready(jobs,'another'))
+        self.assertTrue(services_ready(jobs,'8.1.3',True,'selected'))
+        self.assertFalse(services_ready(jobs,'8.1.3',True,'another'))
+
     def test_pangu_completion_requires_marker_and_writable_selected_root(self):
         report={'layout':{'partitions':[
             {'role':'system','device':'/dev/disk0s1s3'},

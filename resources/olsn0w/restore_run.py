@@ -55,7 +55,12 @@ def startup_failure(text):
     return None
 
 
-def services_ready(text, release, cydia_initialized):
+def boot_success_ready(text, generation):
+    """Require the late target job to have rearmed normal iBoot."""
+    return 'BOOT_SUCCESS:'+generation in text.splitlines()
+
+
+def services_ready(text, release, cydia_initialized, generation=None):
     jobs = startup_jobs(text)
     # On iOS 8 datamigrator can remain alive while Setup Assistant waits for
     # activation. Requiring it to exit before activating creates a deadlock.
@@ -68,6 +73,8 @@ def services_ready(text, release, cydia_initialized):
     if not cydia_initialized:
         return False
     if jobs.get('com.saurik.Cydia.Startup') != ['-', '0']:
+        return False
+    if generation is not None and not boot_success_ready(text,generation):
         return False
     if major == 7:
         from system import LATE_MIS_SERVICES
@@ -155,6 +162,8 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
              + ('if [ -s /var/run/olsn0w-untether-ready ]; then printf "UNTETHER_READY:"; '
                 '/bin/cat /var/run/olsn0w-untether-ready; else printf "UNTETHER_READY:\\n"; fi; '
                 '/sbin/mount; ' if verify_writable_root else '') +
+             'if [ -s /var/lib/olsn0w/boot-success ]; then printf "BOOT_SUCCESS:"; '
+             '/bin/cat /var/lib/olsn0w/boot-success; else printf "BOOT_SUCCESS:\n"; fi; '
              '/bin/launchctl list')
     while True:
         status='Waiting for the target USB connection.'
@@ -192,7 +201,8 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                         else:
                             startup_error=None
                             status=startup_status(text,initialized)
-                        services=services_ready(text,report['version'],initialized)
+                        services=services_ready(
+                            text,report['version'],initialized,report['generation'])
                     if (writable and not cydia_start_attempted and
                             cydia_needs_start(text,initialized) and
                             startup_jobs(text).get('com.apple.SpringBoard',['-'])[0].isdigit()):
@@ -265,7 +275,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 normal_boot_verified=True,activation_state=values.get('ActivationState'),
                 baseband_version=values.get('BasebandVersion'),springboard_verified=True,
                 generation_verified=True,forced_reset_verified=False,
-                writable_root_verified=verify_writable_root)
+                writable_root_verified=verify_writable_root,autoboot_verified=True)
     result['activation_acknowledgement']=activation_acknowledgement
     checkpoint(bundle/'qualification.json',result)
     return result

@@ -4,7 +4,8 @@ import struct
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from bootchain import literal_ibss, memory_layout, skip_ramdisk
+from bootchain import (literal_ibss, memory_layout, preserve_upgrade_autoboot,
+                       skip_ramdisk)
 from ios8_cache import prepare, protect_registry, encode, export_slot
 from logo import bl
 from system import jailbreak_payload
@@ -32,6 +33,39 @@ def firmware(token):
     return data
 
 class BootVariants(unittest.TestCase):
+    def test_upgrade_keeps_persistent_autoboot_rearmed(self):
+        data=firmware(b'auto-boot\0')
+        for at,token in [(0x320,b'false\0'),(0x340,b'true\0')]:
+            data[at:at+len(token)]=token
+        # ldr r0, auto-boot; mov.w r2, #1; ldr r1, false; add r7, sp, #4; bl
+        code=bytes.fromhex('1f484ff001021f4917af')+bl(0x10a,0x500)
+        data[0x100:0x100+len(code)]=code
+        struct.pack_into('<I',data,0x180,BASE+0x300)
+        struct.pack_into('<I',data,0x184,BASE+0x320)
+        patched,report=preserve_upgrade_autoboot(bytes(data))
+        self.assertEqual(report['instruction'],0x100)
+        self.assertEqual(report['literal'],0x184)
+        self.assertEqual(struct.unpack_from('<I',patched,0x184)[0],BASE+0x340)
+        changed=[i for i,(before,after) in enumerate(zip(data,patched)) if before!=after]
+        self.assertEqual(changed,[0x184])
+        with self.assertRaises(ValueError):
+            preserve_upgrade_autoboot(patched)
+
+    def test_newer_upgrade_handler_is_validated_without_modification(self):
+        data=firmware(b'auto-boot\0')
+        for at,token in [(0x320,b'false\0'),(0x340,b'true\0'),
+                         (0x360,b'upgrade\0'),(0x380,b'boot-command\0')]:
+            data[at:at+len(token)]=token
+        # push; ldr r0, boot-command; add r7, sp, #8; bl remove; bl save
+        code=bytes.fromhex('08b51f4802af')+bl(0x106,0x500)+bl(0x10a,0x600)
+        data[0x100:0x100+len(code)]=code
+        struct.pack_into('<I',data,0x180,BASE+0x380)
+        struct.pack_into('<II',data,0x1a0,BASE+0x360,BASE+0x101)
+        patched,report=preserve_upgrade_autoboot(bytes(data))
+        self.assertEqual(patched,bytes(data))
+        self.assertEqual(report,dict(
+            instruction=0x100,form='transient-boot-command',persistent=False))
+
     def test_preloaded_ibss_uses_memory_and_skips_usb(self):
         data=firmware(b'iBSS ready, asking for DFU...\n\0')
         code=bytes.fromhex('1f48')+bl(0x102,0x500)+bytes.fromhex('1f484ff400110690cdf81480')+bl(0x112,0x600)+bytes.fromhex('0546002df4db')

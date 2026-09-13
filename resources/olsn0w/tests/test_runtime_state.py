@@ -127,6 +127,7 @@ class DistributedState(unittest.TestCase):
         activated=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
             BuildVersion='11D257',ActivationState='Activated'))
         jobs=('P101AP\n11D257\nselected\nCYDIA_READY:selected\n'
+              'BOOT_SUCCESS:selected\n'
               '10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n'
               '- 0 com.apple.accountsd\n- 0 com.apple.managedconfiguration.profiled\n')
         replies=[subprocess.CompletedProcess([],0,b'P101AP\n11D257\n',b''),
@@ -153,7 +154,7 @@ class DistributedState(unittest.TestCase):
         failed=('P101AP\n11D257\nselected\nCYDIA_READY:\n'
                 '10 - com.apple.SpringBoard\n- 1 com.saurik.Cydia.Startup\n'
                 '- 0 com.apple.accountsd\n- 0 com.apple.managedconfiguration.profiled\n')
-        ready=failed.replace('CYDIA_READY:','CYDIA_READY:selected').replace(
+        ready=failed.replace('CYDIA_READY:','CYDIA_READY:selected\nBOOT_SUCCESS:selected').replace(
             '- 1 com.saurik.Cydia.Startup','- 0 com.saurik.Cydia.Startup')
         replies=[subprocess.CompletedProcess([],0,failed.encode(),b''),
                  subprocess.CompletedProcess([],0,b'',b''),
@@ -179,7 +180,8 @@ class DistributedState(unittest.TestCase):
             BuildVersion='10B329',ActivationState='Activated'))
         pending=('P101AP\n10B329\nselected\nCYDIA_READY:\n'
                  '10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n')
-        ready=pending.replace('CYDIA_READY:\n','CYDIA_READY:selected\n')
+        ready=pending.replace('CYDIA_READY:\n',
+                              'CYDIA_READY:selected\nBOOT_SUCCESS:selected\n')
         replies=[subprocess.CompletedProcess([],0,pending.encode(),b''),
                  subprocess.CompletedProcess([],0,b'',b''),
                  subprocess.CompletedProcess([],0,lockdown,b''),

@@ -23,6 +23,26 @@ class Image:
         self.removed.append(path);del self.files[path]
 
 class ProfileService(unittest.TestCase):
+    def test_boot_success_job_rearms_only_after_stable_springboard(self):
+        root=Path(__file__).resolve().parents[1]
+        job=plistlib.loads((root/'target/boot-success.plist').read_bytes())
+        script=(root/'target/boot-success.sh').read_bytes()
+        self.assertEqual(job['Label'],'org.olsn0w.boot-success')
+        self.assertEqual(job['ProgramArguments'],[
+            '/bin/sh','/usr/local/libexec/olsn0w/boot-success.sh'])
+        self.assertEqual(job['KeepAlive'],{'SuccessfulExit':False})
+        self.assertIn(b'com.apple.SpringBoard',script)
+        self.assertIn(b'[ "$stable" -ge 5 ] || exit 1',script)
+        self.assertLess(script.index(b'/bin/rm -f "$marker" "$marker.new"'),
+                        script.index(b'wait-graphics.sh'))
+        self.assertLess(script.index(b'com.apple.SpringBoard'),
+                        script.index(b'housekeeper=/usr/libexec/CrashHousekeeping.backup'))
+        self.assertIn(b'housekeeper=/usr/libexec/CrashHousekeeping\n',script)
+        self.assertIn(b'[ ! -h "$housekeeper" ] || exit 1',script)
+        self.assertLess(script.index(b'"$housekeeper"\n'),
+                        script.index(b'/usr/sbin/nvram auto-boot=true'))
+        self.assertIn(b'$AG_GENERATION',script)
+
     def test_deferral_preserves_real_apple_services_and_mach_endpoints(self):
         image=Image();original=dict(image.files)
         defer_profile_service(image)

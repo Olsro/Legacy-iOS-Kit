@@ -8,10 +8,42 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import guided
 
 IDENTITY=dict(product='iPhone5,2',ecid=123,board='n42ap',chip=0x8950,board_id=2,mode='Normal')
+RECOVERY=dict(IDENTITY,mode='Recovery')
 RELEASE=dict(version='7.1.2',buildid='11D257')
 IOS8_RELEASE=dict(version='8.4.1',buildid='12H321')
 
 class GuidedTest(unittest.TestCase):
+    def test_selected_recovery_can_be_rearmed_without_preparation_or_erase(self):
+        calls=[]
+        with patch.object(guided,'query_recovery',return_value=RECOVERY):
+            result=guided.exit_selected_recovery(
+                RECOVERY,command=lambda argv,**kwargs:calls.append((argv,kwargs)))
+        self.assertEqual([call[0][-1] for call in calls],[
+            'setenv auto-boot true','saveenv','reboot'])
+        self.assertTrue(all(call[1]=={'timeout':15} for call in calls))
+        self.assertTrue(result['recovery_repaired'])
+        self.assertFalse(result['device_erased'])
+
+    def test_recovery_menu_repair_skips_release_lookup_and_preparation(self):
+        repaired={'recovery_repaired':True}
+        with patch.object(guided,'connected',return_value=(RECOVERY,None)), \
+             patch.object(guided,'exit_selected_recovery',return_value=repaired) as repair, \
+             patch.object(guided,'releases') as releases, \
+             patch.object(guided,'prepare') as prepare:
+            result=guided.menu('iPhone5,2','123',read=lambda _:'y',show=lambda _:None)
+        self.assertIs(result,repaired)
+        repair.assert_called_once_with(RECOVERY)
+        releases.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_recovery_menu_can_continue_to_restore_selection(self):
+        with patch.object(guided,'connected',return_value=(RECOVERY,None)), \
+             patch.object(guided,'releases',return_value=[RELEASE]), \
+             patch.object(guided,'prepare') as prepare:
+            answers=iter(['n','0'])
+            guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
+        prepare.assert_not_called()
+
     def test_outdated_reproducible_recipe_is_rebuilt_automatically(self):
         with tempfile.TemporaryDirectory() as folder:
             cached=Path(folder)/'relay';cached.mkdir();(cached/'old').write_bytes(b'x')
