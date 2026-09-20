@@ -25,7 +25,7 @@ class HostTools(unittest.TestCase):
         for system, arch, relative in [
             ('Linux', 'aarch64', 'linux/arm64'),
             ('Linux', 'x86_64', 'linux/x86_64'),
-            ('Darwin', 'arm64', 'macos/arm64'),
+            ('Darwin', 'arm64', 'macos'),
             ('Darwin', 'x86_64', 'macos'),
         ]:
             with self.subTest(system=system, arch=arch), patch('platform.system', return_value=system), patch('platform.machine', return_value=arch):

@@ -26,7 +26,7 @@ def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=N
     binding(Path(ticket).read_bytes(), identity['product'], identity['ecid'])
     executable=tools()/'futurerestore_old'
     if not executable.is_file() and platform.system()=='Darwin':
-        executable=KIT/'bin/macos/futurerestore_old'
+        executable=KIT/'bin/macos/x86_64/futurerestore_old'
     if not executable.is_file():raise ValueError('Kit legacy restore tool is missing')
     argv=[str(executable), '--use-pwndfu', '-t', str(Path(ticket).resolve())]
     strategy=baseband_strategy(identity['product'])

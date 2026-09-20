@@ -139,9 +139,9 @@ def tools():
         raise ValueError('Unsupported host platform')
     if machine not in ('arm64', 'x86_64'):
         raise ValueError('Unsupported host architecture: ' + machine)
-    path = KIT / 'bin' / system / machine
-    if not path.is_dir() and system == 'macos':
-        path = KIT / 'bin' / system
+    # macOS tools are universal binaries after the upstream layout change;
+    # Linux keeps one directory per host architecture.
+    path = KIT / 'bin' / system if system == 'macos' else KIT / 'bin' / system / machine
     if not path.is_dir():
         raise ValueError('Legacy iOS Kit tools are missing: ' + str(path))
     return path
