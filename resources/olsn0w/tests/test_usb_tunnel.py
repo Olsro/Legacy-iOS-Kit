@@ -8,6 +8,32 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import usb_tunnel
 
 class TunnelTest(unittest.TestCase):
+    def test_transient_restore_interface_does_not_hide_selected_normal_device(self):
+        selected=Mock(idProduct=0x12ab,iSerialNumber=1)
+        transient=Mock(idProduct=0x1281,iSerialNumber=2)
+        with patch('usb.core.find',return_value=[selected,transient]), \
+             patch('usb.util.get_string',side_effect=['A'*40,'CPID:8955 ECID:123']), \
+             patch('usb.util.dispose_resources') as dispose:
+            self.assertEqual(usb_tunnel.normal_serial(),'a'*40)
+        self.assertEqual(dispose.call_count,2)
+
+    def test_duplicate_interfaces_for_selected_udid_are_one_target(self):
+        devices=[Mock(idProduct=0x12ab,iSerialNumber=1),
+                 Mock(idProduct=0x12ab,iSerialNumber=2)]
+        with patch('usb.core.find',return_value=devices), \
+             patch('usb.util.get_string',side_effect=['A'*40,'a'*40]), \
+             patch('usb.util.dispose_resources'):
+            self.assertEqual(usb_tunnel.normal_serial(),'a'*40)
+
+    def test_two_distinct_normal_devices_are_still_rejected(self):
+        devices=[Mock(idProduct=0x12ab,iSerialNumber=1),
+                 Mock(idProduct=0x12ab,iSerialNumber=2)]
+        with patch('usb.core.find',return_value=devices), \
+             patch('usb.util.get_string',side_effect=['a'*40,'b'*40]), \
+             patch('usb.util.dispose_resources'), \
+             self.assertRaisesRegex(ValueError,'only the selected'):
+            usb_tunnel.normal_serial()
+
     def test_wrong_returning_device_never_starts_proxy(self):
         with tempfile.TemporaryDirectory() as folder:
             session=Path(folder);(session/'device.json').write_text(json.dumps({'ram_udid':'a'*40}))

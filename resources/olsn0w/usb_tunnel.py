@@ -14,15 +14,19 @@ def normal_serial():
     import usb.core
     import usb.util
     devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac) if 0x1200<=d.idProduct<=0x12ff]
-    if len(devices)>1:raise ValueError('Keep only the selected iOS device connected')
-    if not devices:return None
-    device=devices[0]
-    try:
-        value=usb.util.get_string(device,device.iSerialNumber) or ''
-        return value.lower() if re.fullmatch('[0-9a-fA-F]{40}',value) else None
-    except usb.core.USBError:
-        return None
-    finally:usb.util.dispose_resources(device)
+    serials=set()
+    for device in devices:
+        try:
+            value=usb.util.get_string(device,device.iSerialNumber) or ''
+            if re.fullmatch('[0-9a-fA-F]{40}',value):serials.add(value.lower())
+        except usb.core.USBError:
+            # Restore-to-normal transitions can leave a disappearing Apple USB
+            # interface in the libusb snapshot. It is not a selectable target.
+            pass
+        finally:
+            usb.util.dispose_resources(device)
+    if len(serials)>1:raise ValueError('Keep only the selected iOS device connected')
+    return next(iter(serials),None)
 
 
 def start(session,timeout=120):
