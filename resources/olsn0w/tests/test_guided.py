@@ -131,17 +131,17 @@ class GuidedTest(unittest.TestCase):
 
     def test_prepare_before_confirmation_cancel_before_dfu(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={}) as prepare:
-            answers=iter(['1','n'])
+            answers=iter(['1','n','n'])
             def read(_):
                 answer=next(answers)
-                if answer=='n':prepare.assert_called_once()
                 return answer
             guided.menu('iPhone5,2','123',read=read,show=lambda _:None)
+            prepare.assert_called_once()
             dfu.assert_not_called()
 
     def test_one_guided_entry_runs_complete_pipeline(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare,patch('provision_restore.run',return_value={'success':True}) as restore:
-            answers=iter(['1','y'])
+            answers=iter(['1','n','y'])
             result=guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             self.assertEqual(result,{'success':True});dfu.assert_called_once();restore.assert_called_once()
             self.assertTrue(restore.call_args.kwargs['erase'])
@@ -150,12 +150,29 @@ class GuidedTest(unittest.TestCase):
     def test_retryable_dfu_failure_reuses_prepared_plan(self):
         from provision_run import DfuPreparationError
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare,patch('provision_restore.run',side_effect=[DfuPreparationError('checkm8'),{'success':True}]) as restore:
-            answers=iter(['1','y'])
+            answers=iter(['1','n','y'])
             result=guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             self.assertEqual(result,{'success':True})
             prepare.assert_called_once()
             self.assertEqual(dfu.call_count,2)
             self.assertEqual(restore.call_count,2)
+
+    def test_setup_removal_choice_is_bound_to_the_prepared_session(self):
+        observed={};messages=[]
+        def prepare(session,release,show):
+            observed.update(json.loads((session/'device.json').read_text()))
+            return {'session':'prepared'}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(guided,'STATE',Path(folder)), \
+             patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+             patch.object(guided,'releases',return_value=[RELEASE]), \
+             patch.object(guided,'prepare',side_effect=prepare), \
+             patch.object(guided,'enter_dfu'), \
+             patch('provision_restore.run',return_value={'success':True}):
+            answers=iter(['1','y','y'])
+            guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
+        self.assertIs(observed['remove_setup_app'],True)
+        self.assertTrue(any('activation was intentionally skipped' in line for line in messages))
 
     def test_preparation_failure_never_requests_dfu_or_erase(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',side_effect=RuntimeError('checksum')):

@@ -13,7 +13,8 @@ from archives import write_tar
 
 
 def prepare(technical, target_version, destination, *, has_baseband=True,
-            baseband_family='Mav5', include_modem=None, activate_on_target=False):
+            baseband_family='Mav5', include_modem=None, activate_on_target=False,
+            omit_activation=False):
     technical, destination = Path(technical), Path(destination)
     if destination.exists():
         raise ValueError('Preserve existing personalization output')
@@ -21,6 +22,10 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
         raise ValueError('Activation destination needs a qualified version recipe')
     if type(has_baseband) is not bool:
         raise ValueError('Expected an explicit modem capability')
+    if type(activate_on_target) is not bool or type(omit_activation) is not bool:
+        raise ValueError('Expected an explicit activation policy')
+    if activate_on_target and omit_activation:
+        raise ValueError('Cannot activate a target while omitting activation')
     if include_modem is None:
         include_modem=has_baseband
     if type(include_modem) is not bool or (include_modem and not has_baseband):
@@ -28,11 +33,12 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
     if not isinstance(baseband_family,str) or not baseband_family.isalnum():
         raise ValueError('Expected a safe modem family')
     activation_path = technical/'activation-files.json'
-    activation = json.loads(activation_path.read_text()) if activation_path.exists() else {}
+    supplied_activation = json.loads(activation_path.read_text()) if activation_path.exists() else {}
+    activation = {} if omit_activation else supplied_activation
     record_name = 'activation_record.plist' if has_baseband else 'pod_record.plist'
     required = ('mobile/Library/mad/activation_records/' + record_name,
                 'mobile/Library/mad/data_ark.plist')
-    if (not (activate_on_target and not activation) and
+    if (not omit_activation and not (activate_on_target and not activation) and
             any(name not in activation or activation[name].get('unavailable') for name in required)):
         raise ValueError('Missing selected-device activation records')
     data_entries, missing = {}, []
@@ -90,8 +96,11 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
         root_entries[name] = entry(name, (destination/'data-personalization.tar').read_bytes(), 0o600)
         add_parents(root_entries)
     write_tar(destination/'root-personalization.tar',root_entries.values())
-    report=dict(source='selected-device-activated-8.4.1' if activation else 'fresh-signed-base',
+    source=('activation-intentionally-omitted' if omit_activation else
+            'selected-device-activated-8.4.1' if activation else 'fresh-signed-base')
+    report=dict(source=source,
         activate_on_target=activate_on_target and not activation,target_version=target_version,has_baseband=has_baseband,
+        activation_omitted=omit_activation,
         modem_payload_included=include_modem,
         missing_optional_activation_files=missing,activation_on_target_verified=False,
         files={n:digest(destination/n) for n in ('data-personalization.tar','root-personalization.tar')})

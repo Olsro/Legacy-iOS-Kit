@@ -35,7 +35,12 @@ def main():
     parser.add_argument('--bundle',type=Path,help='Prepared device-bound restoration bundle')
     parser.add_argument('--erase',action='store_true',help='Erase the selected device during restoration')
     parser.add_argument('--ram-ready',action='store_true',help='Resume from an already authenticated RAM rescue')
+    parser.add_argument('--remove-setup-app',action='store_true',
+                        help='Remove Setup.app before first boot and skip target activation')
     args=parser.parse_args()
+    if (args.remove_setup_app and
+            args.action not in ('prepare-system','prepare-restore','provision-restore')):
+        parser.error('--remove-setup-app applies to system and restoration preparation')
     if args.action=='supports':
         return
     if args.action == 'provision-restore' and not all((args.session,args.bundle,args.bootstrap,args.ticket,args.base_keys,args.version,args.erase)):
@@ -102,17 +107,23 @@ def main():
     print('Prepared '+metadata['product']+' / iOS '+metadata['version']+': '+str(relay))
     if args.action in ('prepare-system','prepare-restore','provision-restore'):
         from system import prepare as prepare_system
-        system_folder=folder.parent/'system'
+        system_folder=folder.parent/('system-no-setup' if args.remove_setup_app else 'system')
         if system_folder.exists():
             from restore import checked_manifest
             from system import RECIPE_VERSION as SYSTEM_RECIPE_VERSION
             system_report=checked_manifest(system_folder)
             if system_report.get('recipe_version') != SYSTEM_RECIPE_VERSION:
                 raise ValueError('Prepared system uses an older recipe; preserve it and prepare a new system')
+            if system_report.get('setup_app_removed') is not args.remove_setup_app:
+                raise ValueError('Prepared system uses another Setup.app policy')
         else:
-            system_folder, system_report = prepare_system(folder, relay)
+            system_folder, system_report = prepare_system(
+                folder,relay,remove_setup_app=args.remove_setup_app)
         print('Prepared target filesystem and Data seed: '+str(system_folder))
-        print('Device-specific baseband, activation, and bootstrap installation remain required.')
+        if args.remove_setup_app:
+            print('Setup.app removal is verified; target activation will be skipped.')
+        else:
+            print('Device-specific baseband, activation, and bootstrap installation remain required.')
     if args.action == 'provision-restore':
         from provision_restore import run as provision_restore
         provision_restore(args.session,args.bundle,args.bootstrap,system_folder,relay,args.ticket,args.base_keys,

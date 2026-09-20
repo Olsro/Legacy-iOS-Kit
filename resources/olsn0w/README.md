@@ -6,13 +6,22 @@ checks its firmware, Apple signing ticket, modem, restore environment and compac
 bootstrap automatically. No developer paths or build tools for the ARM helpers
 are requested. The Python runtime is installed on first use.
 
+After selecting the release, the guided menu optionally removes the stock
+`/Applications/Setup.app` before the target's first boot. This provides the
+short path directly to SpringBoard for a device whose owner does not want to
+run Setup Assistant. The choice is bound to a separate checked system cache.
+In this mode olsn0w deliberately copies no activation records, sends no
+activation request, performs no activation acknowledgement, and accepts an
+`Unactivated` state during final boot qualification. The normal choice retains
+the existing official activation and Setup Assistant flow.
+
 Preparation calculates the remaining disk requirement from firmware and system
 images that are not already cached, and reports it before creating large files.
 An Internet connection is needed for firmware that is not already available.
 After preparation, confirm the erase and follow the instructions for the initial
 manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate downloads.
 The signed 8.4.1 restore, RAM handoff, compact installation,
-target boot and official activation verification then run automatically. Only
+target boot and, in normal mode, official activation verification then run automatically. Only
 one manual DFU entry is intended for a successful A6 run; recovery after a failure
 can require another. The iPhone 4S additionally requires A5Mate's A5_8940
 `PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
@@ -36,12 +45,13 @@ plain-text updates; the display never reports 100% before the operation succeeds
 
 Follow the computer's phase messages: the device can display stationary progress
 bars, black screens and successive Apple logos during transitions. Success is
-reported only after target and activation verification. Failures retain logs and
+reported only after target verification and the activation policy selected in
+the menu. Failures retain logs and
 stop without silently repeating an erase. The guided frontend and renamed assets
 have host tests; a complete physical restore through this new menu remains to be
 qualified.
 
-After final target boot and activation qualification, olsn0w retains manifests,
+After final target boot and its selected activation qualification, olsn0w retains manifests,
 logs and the small device-bound technical collection while pruning reconstructible
 restore archives and working images. A failure at any earlier stage preserves its
 complete session for diagnosis. Mutable HFS working images use filesystem
@@ -81,9 +91,11 @@ covers all installation stages.
 
 `installation.json` records completed writes and failures; `qualification.json`
 is published only after the target's version, Data generation, and SpringBoard
-are observed. Activation must report `Activated` for the command to succeed. Only then does
-the USB handshake acknowledge that existing activation; it does not fabricate
-records or skip Setup Assistant.
+are observed. In the normal mode, activation must report `Activated` for the
+command to succeed. Only then does the USB handshake acknowledge that existing
+activation; it does not fabricate records or skip Setup Assistant. When the
+explicit Setup.app-removal option is selected, activation is intentionally
+omitted and is not part of the completion gate.
 A failed installation stops in rescue and preserves its logs; it does not silently
 repeat an erase. `--ram-ready` skips the DFU loader only when an already running,
 authenticated rescue passes the same identity/mount checks.
@@ -174,7 +186,8 @@ step's percentage, and distinguishes transfer from verification and boot wait.
 The phone's base-restore bar may stay unchanged while the target is installed.
 Sparse Data progress counts bytes actually transferred, not the last disk
 position. Waiting messages do not claim progress or a successful boot; target
-services and official activation must still be observed within the timeout.
+services and, in normal mode, official activation must still be observed within
+the timeout.
 Startup observation never reboots a device whose initialization did not finish.
 On the iOS 7.1 Pangu path, its launchctl call is only an intermediate signal:
 Pangu still has to finish its kernel work and remount the selected System

@@ -4,10 +4,25 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from system import entry, merge_data_payload
+from system import entry, merge_data_payload, remove_setup_application
 
 
 class DataOverlay(unittest.TestCase):
+    def test_setup_application_removal_is_verified(self):
+        class Image:
+            present=True
+            def ls(self,path):
+                self.assert_path=path
+                return ([{'name':'Setup.app','mode':0o040755}]
+                        if self.present else [])
+            def command(self,action,path):
+                if (action,path)!=('rmall','/Applications/Setup.app'):
+                    raise AssertionError((action,path))
+                self.present=False
+        image=Image()
+        remove_setup_application(image)
+        self.assertFalse(image.present)
+
     def test_stock_directories_survive_restrictive_package_metadata(self):
         for stock_mode in (0o711, 0o755):
             with self.subTest(stock_mode=stock_mode):

@@ -24,7 +24,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 33
+RECIPE_VERSION = 34
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -514,8 +514,21 @@ def move_daemons(image, major=7, product=None, untether=None):
         configure_untether_jetsam(image, product, 'com.apple.CrashHousekeeping')
 
 
-def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/disk0s1s2'):
+def remove_setup_application(image):
+    """Remove the stock setup application and prove the catalog change."""
+    matches = [item for item in image.ls('/Applications') if item['name'] == 'Setup.app']
+    if len(matches) != 1 or not stat.S_ISDIR(matches[0]['mode']):
+        raise ValueError('Expected the stock Setup.app directory')
+    image.command('rmall', '/Applications/Setup.app')
+    if any(item['name'] == 'Setup.app' for item in image.ls('/Applications')):
+        raise ValueError('Setup.app removal readback failed')
+
+
+def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/disk0s1s2',
+            *, remove_setup_app=False):
     firmware, relay = Path(firmware), Path(relay)
+    if type(remove_setup_app) is not bool:
+        raise ValueError('Expected an explicit Setup.app policy')
     source = json.loads((firmware/'manifest.json').read_text())
     chain = json.loads((relay/'manifest.json').read_text())
     for key in ('product', 'version', 'build'):
@@ -540,7 +553,7 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     # The physically qualified iOS 8 path keeps Apple's early keybagd in place.
     # iOS 7 still needs the wrapper because launchd starts keybagd before Aquila.
     early_keybag = wraps_early_keybag(source['version'], stock.read('/sbin/launchd'))
-    destination = firmware.parent/'system'
+    destination = firmware.parent/('system-no-setup' if remove_setup_app else 'system')
     if destination.exists():
         raise ValueError('Prepared target filesystem already exists: '+str(destination))
     out = Path(tempfile.mkdtemp(prefix='system-pending-', dir=firmware.parent))
@@ -680,6 +693,8 @@ Subsystem sftp /usr/libexec/sftp-server
 
     clone_or_copy(stock.path, out/'system.hfs')
     image = HFS(out/'system.hfs')
+    if remove_setup_app:
+        remove_setup_application(image)
     image.command('rmall', '/private/var')
     image.mkdir('/private/var')
     needed = sum(len(data) for _,data in payload.values() if data is not None) + 16*1024**2
@@ -827,7 +842,10 @@ Subsystem sftp /usr/libexec/sftp-server
                   kernel_patch=kernel_patch,
                   service_loading=('stock-daemon-layout' if untether_name == 'panguaxe'
                                    else 'skip-registered-jobs-before-creating-sockets'),
-                  activation='official activation required for the selected device',
+                  setup_app_removed=remove_setup_app,
+                  activation=('intentionally omitted; Setup.app removed'
+                              if remove_setup_app else
+                              'official activation required for the selected device'),
                   restore_ready=False, filesystem_check_required=True, physical_boot_validated=False,
                   files={n:digest(out/n) for n in ('system.hfs','data-seed.tar')})
     save(out/'manifest.json', report)

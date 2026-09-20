@@ -91,3 +91,22 @@ class RadioCapability(unittest.TestCase):
             self.technical(root, {'unexpected': {}}, has_baseband=False)
             with self.assertRaisesRegex(ValueError, 'without a baseband'):
                 prepare(root, '6.1.3', root / 'output', has_baseband=False)
+
+    def test_setup_removed_mode_omits_available_activation_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            self.technical(root,{},has_baseband=False)
+            result=prepare(root,'6.1.3',root/'output',has_baseband=False,
+                           omit_activation=True)
+            self.assertTrue(result['activation_omitted'])
+            self.assertFalse(result['activate_on_target'])
+            self.assertEqual(result['source'],'activation-intentionally-omitted')
+            with tarfile.open(root/'output/data-personalization.tar') as archive:
+                self.assertEqual(archive.getnames(),[])
+
+    def test_activation_cannot_be_requested_when_records_are_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'modem-files.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError,'while omitting activation'):
+                prepare(root,'6.1.3',root/'output',has_baseband=False,
+                        activate_on_target=True,omit_activation=True)

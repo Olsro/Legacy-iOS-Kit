@@ -118,6 +118,29 @@ class DistributedState(unittest.TestCase):
                 restore_run.qualify(Path(work),['ssh'],'fixture',timeout=0,progress=lambda _:None)
             activate.assert_called_once()
 
+    def test_setup_removed_target_is_qualified_without_activation(self):
+        identity={'board':'p101ap','product':'iPad3,4','ecid':123}
+        report=dict(product='iPad3,4',version='6.1.3',build='10B329',generation='selected',
+                    identity=identity,activation_mode='skipped-setup-removed',
+                    setup_app_removed=True)
+        jobs=('P101AP\n10B329\nselected\nCYDIA_READY:selected\n'
+              'BOOT_SUCCESS:selected\n'
+              '10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n')
+        lockdown=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='6.1.3',
+            BuildVersion='10B329',ActivationState='Unactivated'))
+        replies=[subprocess.CompletedProcess([],0,jobs.encode(),b''),
+                 subprocess.CompletedProcess([],0,lockdown,b'')]
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run.subprocess,'run',side_effect=replies), \
+             patch('activation.activate') as activate, \
+             patch('activation.acknowledge') as acknowledge:
+            result=restore_run.qualify(Path(work),['ssh'],'fixture',progress=lambda _:None)
+        self.assertTrue(result['normal_boot_verified'])
+        self.assertTrue(result['activation_skipped'])
+        self.assertEqual(result['activation_state'],'Unactivated')
+        activate.assert_not_called();acknowledge.assert_not_called()
+
     def test_transient_data_generation_mismatch_does_not_prevent_activation(self):
         identity={'board':'p101ap','product':'iPad3,4','ecid':123}
         report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',

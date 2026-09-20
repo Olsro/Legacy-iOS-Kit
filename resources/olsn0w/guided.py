@@ -68,7 +68,7 @@ GIB=1024**3
 SESSION_WORKSPACE=8*GIB
 
 
-def preparation_space(product, selected, records_provider=releases):
+def preparation_space(product, selected, records_provider=releases, *, remove_setup_app=False):
     """Estimate the remaining peak from artifacts that are not cached yet."""
     from firmware import select_release
     from compact_cache import qualified_source
@@ -98,7 +98,8 @@ def preparation_space(product, selected, records_provider=releases):
             extraction_scratch=max(extraction_scratch,size)
         if (item_product,record['version'],record['buildid'])==(product,selected['version'],selected['buildid']):
             selected_firmware=firmware;selected_record=record
-    system=STATE/'targets'/product/selected['buildid']/'system/manifest.json'
+    system_name='system-no-setup' if remove_setup_app else 'system'
+    system=STATE/'targets'/product/selected['buildid']/system_name/'manifest.json'
     if not system.is_file():
         root=selected_firmware/'rootfs.hfs'
         permanent+=root.stat().st_size if root.is_file() else (int(selected_record['filesize'])*4+2)//3
@@ -161,7 +162,10 @@ def _prepare(session, release, display):
     from hfs import HFS
     from guided_inputs import ticket, modem
     record=json.loads((session/'device.json').read_text());identity=record['identity'];product=identity['product']
-    required=preparation_space(product,release)
+    remove_setup_app=record.get('remove_setup_app',False)
+    if type(remove_setup_app) is not bool:
+        raise ValueError('Invalid guided Setup.app policy')
+    required=preparation_space(product,release,remove_setup_app=remove_setup_app)
     show('Disk space needed for the remaining preparation: about '+str((required+GIB-1)//GIB)+' GiB.')
     check_space(required)
     display.phase(1,'obtaining the signed base, selected firmware and Apple ticket. The device is not being erased yet.')
@@ -179,15 +183,16 @@ def _prepare(session, release, display):
         if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest):
             relay_prepare(firmware)
         relay_report=checked_manifest(relay)
-        system=firmware.parent/'system'
+        system=firmware.parent/('system-no-setup' if remove_setup_app else 'system')
         system_inputs=dict(relay_recipe_version=relay_report['recipe_version'],
                            relay_devicetree_sha256=relay_report['files']['devicetree'],
-                           relay_binary_sha256=relay_report['files']['relay.bin'])
+                           relay_binary_sha256=relay_report['files']['relay.bin'],
+                           setup_app_removed=remove_setup_app)
         if not reusable_recipe(system,SYSTEM_RECIPE,checked_manifest,system_inputs):
             # Both caches are generated solely from verified firmware and
             # payload inputs. Rebuild an obsolete recipe in place so a safety
             # correction never requires manual cache surgery.
-            system_prepare(firmware,relay)
+            system_prepare(firmware,relay,remove_setup_app=remove_setup_app)
     display.phase(3,'preparing the restore environment and compact bootstrap.')
     with activity('preparing the restore environment and compact bootstrap'):
         with socket.socket() as sock:
@@ -280,20 +285,29 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             return result
     selected=choose(releases(product,refresh),read,show)
     if selected is None:return
+    show('Optional fast configuration: Setup.app can be removed before first boot. '
+         'In that mode olsn0w will not copy activation records or activate the device.')
+    remove_setup_app=(read('Remove Setup.app and skip activation? [y/N]: ').strip().lower()
+                      in ('y','yes'))
     session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
-    record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True)
+    record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
+                remove_setup_app=remove_setup_app)
     if udid:record['ram_udid']=udid
     save(session/'device.json',record)
     show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
     plan=prepare(session,selected,show)
-    show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.')
+    setup_note=(' Setup.app will be removed and activation will be skipped.'
+                if remove_setup_app else '')
+    show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.'+setup_note)
     if read('Continue with restoration? [y/N]: ').strip().lower() not in ('y','yes'):
         show('Cancelled. Prepared files retained; no device was erased.');return
     from provision_restore import run as restore
     from provision_run import DfuPreparationError
     while True:
         enter_dfu(identity,read,show)
-        show('Restoration: signed 8.4.1 base → compact bootstrap → selected iOS → activation and boot verification.')
+        final_check=('boot verification without activation' if remove_setup_app
+                     else 'activation and boot verification')
+        show('Restoration: signed 8.4.1 base → compact bootstrap → selected iOS → '+final_check+'.')
         show('Apple logos, a stationary progress bar and black-screen transitions can occur. Follow the status here and keep the cable connected; an error will be reported explicitly.')
         try:
             result=restore(**plan,erase=True,progress=show)
@@ -301,5 +315,9 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
         except DfuPreparationError as error:
             show('DFU exploit failed before any erase: '+str(error))
             show('All preparation is retained. Re-enter DFU to retry, or press Ctrl+C to cancel.')
-    show('Restoration verified: iOS '+selected['version']+'. Complete Setup Assistant on the device.')
+    if remove_setup_app:
+        show('Restoration verified: iOS '+selected['version']+
+             '. Setup.app was removed before first boot; activation was intentionally skipped.')
+    else:
+        show('Restoration verified: iOS '+selected['version']+'. Complete Setup Assistant on the device.')
     return result

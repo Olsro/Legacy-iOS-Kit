@@ -73,13 +73,21 @@ def prepare(session, system, relay, base, destination):
     if chain.get('recipe_version') != RECIPE_VERSION:
         raise ValueError('Regenerate the target relay with the current recipe')
     if destination.exists():raise ValueError('Preserve the previous restore bundle')
+    setup_app_removed=source.get('setup_app_removed')
+    if type(setup_app_removed) is not bool:
+        raise ValueError('Target system lacks an explicit Setup.app policy')
     destination.mkdir(parents=True,mode=0o700)
     selected_profile=profile(source['product'])
-    personalize(base/'technical',source['version'],destination/'personalization',
-                has_baseband=selected_profile['has_baseband'],
-                baseband_family=selected_profile.get('baseband_family','Mav5'),
-                include_modem=baseband_strategy(source['product'])=='update',
-                activate_on_target=fresh)
+    personalized=personalize(
+        base/'technical',source['version'],destination/'personalization',
+        has_baseband=selected_profile['has_baseband'],
+        baseband_family=selected_profile.get('baseband_family','Mav5'),
+        include_modem=baseband_strategy(source['product'])=='update',
+        activate_on_target=fresh and not setup_app_removed,
+        omit_activation=setup_app_removed)
+    if (personalized.get('activation_omitted') is not setup_app_removed or
+            personalized.get('activate_on_target') is not (fresh and not setup_app_removed)):
+        raise ValueError('Personalization activation policy differs from the target system')
     for name, source_path in [('system.hfs',system/'system.hfs'),('root8.hfs',base/'root8.hfs'),
                               ('data8.hfs',base/'data8.hfs'),('data-seed.tar',system/'data-seed.tar')]:
         (clone_or_copy if name.endswith('.hfs') else shutil.copyfile)(source_path,destination/name)
@@ -125,7 +133,9 @@ def prepare(session, system, relay, base, destination):
            'ssh_client_rsa','ssh_host_rsa_key.pub']
     report=dict(identity=identity,product=source['product'],version=source['version'],build=source['build'],
                 generation=source['generation'],layout=layout,kind='install-fresh-base' if fresh else 'reinstall-provisioned-base',
-                activation_mode='official-on-target' if fresh else 'preserved-official-records',
+                setup_app_removed=setup_app_removed,
+                activation_mode=('skipped-setup-removed' if setup_app_removed else
+                                 'official-on-target' if fresh else 'preserved-official-records'),
                 files={n:digest(destination/n) for n in names},physical_boot_verified=False)
     checkpoint(destination/'manifest.json',report)
     return destination
@@ -319,6 +329,15 @@ def install(bundle, ram, *, erase=False, progress=print):
     if journal.exists():raise ValueError('Previous install exists; inspect its stage before retrying')
     # Reject cached bundles with the old non-root reserve before touching USB.
     require_reserve(bundle/'system.hfs',root=True)
+    if type(report.get('setup_app_removed')) is not bool:
+        raise ValueError('Restore bundle lacks an explicit Setup.app policy')
+    if ((report.get('activation_mode')=='skipped-setup-removed') is not
+            report['setup_app_removed']):
+        raise ValueError('Restore activation and Setup.app policies differ')
+    setup_present=any(item['name']=='Setup.app'
+                      for item in HFS(bundle/'system.hfs').ls('/Applications'))
+    if setup_present == report['setup_app_removed']:
+        raise ValueError('Restore Setup.app state differs from its manifest')
     old=(bundle/'gpt-primary.bin').read_bytes(),(bundle/'gpt-secondary.bin').read_bytes()
     expected=(bundle/'next-primary.bin').read_bytes(),(bundle/'next-secondary.bin').read_bytes()
     new_a,new_b,layout=encode(*old,(bundle/'system.hfs').stat().st_size,report['version'])

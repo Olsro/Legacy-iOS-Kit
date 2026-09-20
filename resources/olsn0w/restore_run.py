@@ -148,6 +148,9 @@ def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
 def qualify(bundle, prefix, udid, timeout=360, progress=print,
             verify_writable_root=False):
     report=checked_manifest(bundle)
+    activation_skipped=report.get('activation_mode')=='skipped-setup-removed'
+    if activation_skipped is not (report.get('setup_app_removed') is True):
+        raise ValueError('Target activation and Setup.app policies differ')
     started=time.monotonic();deadline=started+timeout;last_notice=started
     status='Waiting for the target USB connection.'
     values=None;activation_acknowledgement=None
@@ -233,7 +236,9 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 raise ValueError('Lockdown reports a different target')
             baseband_ready=(not profile(report['product'])['has_baseband']
                             or bool(values.get('BasebandVersion')))
-            if baseband_ready and values.get('ActivationState')!='Activated' and report.get('activation_mode')=='official-on-target':
+            if (not activation_skipped and baseband_ready and
+                    values.get('ActivationState')!='Activated' and
+                    report.get('activation_mode')=='official-on-target'):
                 from activation import ActivationPending, activate
                 if time.monotonic()>=next_activation_attempt:
                     if activation_attempts==0:
@@ -247,10 +252,13 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                         values['ActivationState']='Activated'
                 if values.get('ActivationState')!='Activated':
                     status='Official activation is not ready; retrying through the connected computer.'
-            if baseband_ready and values.get('ActivationState')=='Activated' and activation_acknowledgement is None:
+            if (not activation_skipped and baseband_ready and
+                    values.get('ActivationState')=='Activated' and
+                    activation_acknowledgement is None):
                 from activation import acknowledge
                 activation_acknowledgement=acknowledge(udid,report['identity'])
-            if services and baseband_ready and values.get('ActivationState')=='Activated':
+            if (services and baseband_ready and
+                    (activation_skipped or values.get('ActivationState')=='Activated')):
                 break
         elif not ssh_reachable:
             mode=target_recovery_mode(report)
@@ -275,7 +283,8 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 normal_boot_verified=True,activation_state=values.get('ActivationState'),
                 baseband_version=values.get('BasebandVersion'),springboard_verified=True,
                 generation_verified=True,forced_reset_verified=False,
-                writable_root_verified=verify_writable_root,autoboot_verified=True)
+                writable_root_verified=verify_writable_root,autoboot_verified=True,
+                activation_skipped=activation_skipped)
     result['activation_acknowledgement']=activation_acknowledgement
     checkpoint(bundle/'qualification.json',result)
     return result
