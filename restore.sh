@@ -766,9 +766,20 @@ version_update_check() {
         version_latest=${version_latest#Latest-}
         git_hash_latest=$(echo "$github_api" | $jq -r '.target_commitish')
     else
+        # A local development branch has no update endpoint in the official
+        # repository.  Treat the checked-out revision as current instead of
+        # asking GitHub for a branch that cannot exist there.
+        if ! git -C .. rev-parse --verify --quiet "${branch_current}@{upstream}" >/dev/null; then
+            git_hash_latest=$git_hash
+            commits_latest=$commits_current
+            popd >/dev/null
+            return
+        fi
         local response=$($curl -sS -D - "https://api.github.com/repos/LukeZGD/Legacy-iOS-Kit/commits?sha=$branch_current&per_page=1&page=1")
-        git_hash_latest=$(printf '%s\n' "$response" | awk 'BEGIN { found = 0 } found { print; next } /^(\r)?$/ { found = 1 }' | $jq -r '.[0].sha')
+        git_hash_latest=$(printf '%s\n' "$response" | awk 'BEGIN { found = 0 } found { print; next } /^(\r)?$/ { found = 1 }' |
+            $jq -r 'if type == "array" and length > 0 then .[0].sha // empty else empty end')
         commits_latest=$(printf '%s\n' "$response" | sed -n 's/.*[Ll]ink:.*page=\([0-9][0-9]*\)>; rel="last".*/\1/p')
+        [[ -n $git_hash_latest && -z $commits_latest ]] && commits_latest=1
     fi
     git_hash_latest=${git_hash_latest:0:7}
     popd >/dev/null
