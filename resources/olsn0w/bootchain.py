@@ -12,7 +12,7 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 19
+RECIPE_VERSION = 20
 
 
 def memory_layout(product):
@@ -129,9 +129,11 @@ def preserve_upgrade_autoboot(data):
     The dualboot patch selects iBEC's stock ``upgrade`` command. That command
     persists ``auto-boot=false`` before loading the alternate system, so one
     failed target attempt makes the following hardware boot stop in Recovery.
-    Retarget only the qualified false-string literal used by that write. The
-    PMU boot/panic counters remain untouched and are still acknowledged only
-    after a stable SpringBoard by the target boot-success job.
+    Retarget only the qualified false-string literal used by that write, or
+    validate it byte-identically when the dualboot patcher already retargeted
+    it. The PMU boot/panic counters remain untouched and are still
+    acknowledged only after a stable SpringBoard by the target boot-success
+    job.
     """
     from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
     from capstone.arm import (ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_REG_PC,
@@ -162,7 +164,7 @@ def preserve_upgrade_autoboot(data):
         if (not 0<=auto_literal<=len(data)-4
                 or struct.unpack_from('<I',data,auto_literal)[0]!=tokens['auto_boot']):
             continue
-        persist=False;false_literal=None
+        persist=False;value_literal=None;value=None
         for instruction in instructions[1:6]:
             if instruction.mnemonic=='bl':
                 break
@@ -178,11 +180,14 @@ def preserve_upgrade_autoboot(data):
                     and instruction.operands[1].type==ARM_OP_MEM
                     and instruction.operands[1].mem.base==ARM_REG_PC):
                 literal=((instruction.address+4)&~3)+instruction.operands[1].mem.disp
-                if (0<=literal<=len(data)-4
-                        and struct.unpack_from('<I',data,literal)[0]==tokens['false']):
-                    false_literal=literal
-        if persist and false_literal is not None:
-            matches.append((at,false_literal))
+                if 0<=literal<=len(data)-4:
+                    pointer=struct.unpack_from('<I',data,literal)[0]
+                    if pointer==tokens['false']:
+                        value_literal=literal;value='false'
+                    elif pointer==tokens['true']:
+                        value_literal=literal;value='true'
+        if persist and value_literal is not None:
+            matches.append((at,value_literal,value))
     if len(matches)!=1:
         if matches:
             raise ValueError('Ambiguous persistent upgrade auto-boot write')
@@ -194,16 +199,20 @@ def preserve_upgrade_autoboot(data):
             if len(locations)!=1:
                 raise ValueError('Ambiguous iBEC '+name.replace('_',' ')+' string')
             tokens[name]=base+locations[0]
-        command_entries=[at for at in range(len(data)-8)
-                         if data.startswith(struct.pack('<I',tokens['upgrade']),at)]
+        command_entries=[]
+        for at in range(len(data)-8):
+            if not data.startswith(struct.pack('<I',tokens['upgrade']),at):
+                continue
+            candidate=struct.unpack_from('<I',data,at+4)[0]
+            offset=(candidate&~1)-base
+            # The dualboot patch adds another reference to the upgrade
+            # string beside the fsboot literal.  It is not a command-table
+            # entry: its following word is not a Thumb handler in this iBEC.
+            if candidate&1 and 0<=offset<=len(data)-32:
+                command_entries.append((at,offset))
         if len(command_entries)!=1:
             raise ValueError('Unrecognized iBEC upgrade command entry')
-        handler_address=struct.unpack_from('<I',data,command_entries[0]+4)[0]
-        if not handler_address&1:
-            raise ValueError('Upgrade command handler is not Thumb code')
-        handler=(handler_address&~1)-base
-        if not 0<=handler<=len(data)-32:
-            raise ValueError('Upgrade command handler is outside iBEC')
+        _,handler=command_entries[0]
         instructions=list(md.disasm(data[handler:handler+32],handler))
         boot_load=None
         for index,instruction in enumerate(instructions[:4]):
@@ -223,16 +232,22 @@ def preserve_upgrade_autoboot(data):
                 or len(calls)<2 or calls[0]<=boot_load or calls[1]!=calls[0]+1):
             raise ValueError('Unrecognized non-disarming upgrade command')
         return data,dict(instruction=handler,form='transient-boot-command',persistent=False)
-    instruction,literal=matches[0]
+    instruction,literal,value=matches[0]
     before=data[literal:literal+4]
     after=struct.pack('<I',tokens['true'])
+    if value=='true':
+        return data,dict(instruction=instruction,literal=literal,
+                         before=before.hex(),after=after.hex(),
+                         form='persistent-auto-boot',persistent=True,
+                         already_rearmed=True)
     result=data[:literal]+after+data[literal+4:]
     if (result[literal:literal+4]!=after or result[:literal]!=data[:literal]
             or result[literal+4:]!=data[literal+4:]):
         raise ValueError('Upgrade auto-boot patch changed unexpected bytes')
     return result,dict(instruction=instruction,literal=literal,
                        before=before.hex(),after=after.hex(),
-                       form='persistent-auto-boot',persistent=True)
+                       form='persistent-auto-boot',persistent=True,
+                       already_rearmed=False)
 
 
 def literal_ibss(data, second):

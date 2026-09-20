@@ -48,8 +48,9 @@ class BootVariants(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<I',patched,0x184)[0],BASE+0x340)
         changed=[i for i,(before,after) in enumerate(zip(data,patched)) if before!=after]
         self.assertEqual(changed,[0x184])
-        with self.assertRaises(ValueError):
-            preserve_upgrade_autoboot(patched)
+        checked,second=preserve_upgrade_autoboot(patched)
+        self.assertEqual(checked,patched)
+        self.assertTrue(second['already_rearmed'])
 
     def test_newer_upgrade_handler_is_validated_without_modification(self):
         data=firmware(b'auto-boot\0')
@@ -61,6 +62,10 @@ class BootVariants(unittest.TestCase):
         data[0x100:0x100+len(code)]=code
         struct.pack_into('<I',data,0x180,BASE+0x380)
         struct.pack_into('<II',data,0x1a0,BASE+0x360,BASE+0x101)
+        # The dualboot patch also references "upgrade" from its fsboot
+        # literal pair; the following even pointer proves it is not the
+        # command-table entry.
+        struct.pack_into('<II',data,0x1c0,BASE+0x360,BASE+0x380)
         patched,report=preserve_upgrade_autoboot(bytes(data))
         self.assertEqual(patched,bytes(data))
         self.assertEqual(report,dict(
