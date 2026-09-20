@@ -12,6 +12,8 @@ from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
 
+PANGU_READONLY_RETRY_POLLS = 12
+
 
 def target_prefix(bundle, port):
     public=(bundle/'ssh_host_rsa_key.pub').read_text().split()
@@ -157,6 +159,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
     cydia_start_attempted=False
     startup_error=None
     activation_attempts=0;next_activation_attempt=started
+    pangu_readonly_polls=0;untether_retry_rebooted=False
     progress('Waiting for iOS '+report['version']+' to start. The Apple logo can change and the display can go black during the boot handoff; keep the cable connected.')
     command=('/usr/sbin/sysctl -n hw.model; /usr/sbin/sysctl -n kern.osversion; '
              '/bin/cat /var/lib/olsn0w/generation; '
@@ -172,6 +175,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
         status='Waiting for the target USB connection.'
         services=False
         ssh_reachable=False
+        retry_stalled_untether=False
         try:
             r=subprocess.run(prefix+[command],capture_output=True,timeout=15)
             text=r.stdout.decode(errors='replace')
@@ -185,11 +189,22 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                     if not writable:
                         # Pangu calls its launchctl endpoint before finishing
                         # the kernel patch and root remount.  Its marker alone
-                        # is therefore not a completion signal, and rebooting
-                        # here strands the next boot behind Pangu's own
-                        # panguaxe.installed shortcut.
+                        # is therefore not a completion signal. The ordinary
+                        # path keeps waiting; the Setup.app-free path gets one
+                        # bounded retry only after this state remains stable.
                         status='Waiting for Pangu to remount the selected System volume read-write.'
+                        jobs=startup_jobs(text)
+                        if (report.get('setup_app_removed') is True and
+                                len(lines)>=6 and lines[4]=='UNTETHER_READY:ready' and
+                                jobs.get('com.apple.SpringBoard',['-'])[0].isdigit()):
+                            pangu_readonly_polls+=1
+                            retry_stalled_untether=(
+                                not untether_retry_rebooted and
+                                pangu_readonly_polls>=PANGU_READONLY_RETRY_POLLS)
+                        else:
+                            pangu_readonly_polls=0
                     else:
+                        pangu_readonly_polls=0
                         failure=startup_failure(text)
                         if failure:
                             # The Cydia job deliberately has KeepAlive on
@@ -236,6 +251,19 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 raise ValueError('Lockdown reports a different target')
             baseband_ready=(not profile(report['product'])['has_baseband']
                             or bool(values.get('BasebandVersion')))
+            if retry_stalled_untether and baseband_ready:
+                progress('Pangu completed without remounting the selected System volume. '
+                         'Retrying the untether with one controlled reboot.')
+                try:
+                    subprocess.run(prefix+['/sbin/reboot'],capture_output=True,timeout=15)
+                except subprocess.TimeoutExpired:
+                    # A successful reboot can close SSH before returning. The
+                    # next loop still has to prove the complete second boot.
+                    pass
+                untether_retry_rebooted=True;pangu_readonly_polls=0
+                status='Waiting for the controlled Pangu retry boot.'
+                time.sleep(5)
+                continue
             if (not activation_skipped and baseband_ready and
                     values.get('ActivationState')!='Activated' and
                     report.get('activation_mode')=='official-on-target'):
@@ -284,7 +312,8 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 baseband_version=values.get('BasebandVersion'),springboard_verified=True,
                 generation_verified=True,forced_reset_verified=False,
                 writable_root_verified=verify_writable_root,autoboot_verified=True,
-                activation_skipped=activation_skipped)
+                activation_skipped=activation_skipped,
+                untether_retry_rebooted=untether_retry_rebooted)
     result['activation_acknowledgement']=activation_acknowledgement
     checkpoint(bundle/'qualification.json',result)
     return result

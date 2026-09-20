@@ -141,6 +141,44 @@ class DistributedState(unittest.TestCase):
         self.assertEqual(result['activation_state'],'Unactivated')
         activate.assert_not_called();acknowledge.assert_not_called()
 
+    def test_setup_removed_pangu_stall_gets_one_controlled_retry_boot(self):
+        identity={'board':'p101ap','product':'iPad3,4','ecid':123}
+        report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+                    identity=identity,activation_mode='skipped-setup-removed',
+                    setup_app_removed=True,layout={'partitions':[
+                        {'role':'system','device':'/dev/disk0s1s3'}]})
+        base=('P101AP\n11D257\nselected\nCYDIA_READY:selected\n'
+              'UNTETHER_READY:ready\n')
+        jobs=('BOOT_SUCCESS:selected\n10 - com.apple.SpringBoard\n'
+              '- 0 com.saurik.Cydia.Startup\n'
+              '- 0 com.apple.accountsd\n'
+              '- 0 com.apple.managedconfiguration.profiled\n')
+        readonly=base+'/dev/disk0s1s3 on / (hfs, local, read-only, journaled)\n'+jobs
+        writable=base+'/dev/disk0s1s3 on / (hfs, local, journaled)\n'+jobs
+        lockdown=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
+            BuildVersion='11D257',ActivationState='Unactivated'))
+        replies=[subprocess.CompletedProcess([],0,readonly.encode(),b''),
+                 subprocess.CompletedProcess([],0,lockdown,b''),
+                 subprocess.CompletedProcess([],0,b'',b''),
+                 subprocess.CompletedProcess([],0,writable.encode(),b''),
+                 subprocess.CompletedProcess([],0,lockdown,b'')]
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run,'PANGU_READONLY_RETRY_POLLS',1), \
+             patch.object(restore_run.subprocess,'run',side_effect=replies) as command, \
+             patch.object(restore_run.time,'sleep'), \
+             patch('activation.activate') as activate, \
+             patch('activation.acknowledge') as acknowledge:
+            result=restore_run.qualify(
+                Path(work),['ssh'],'fixture',progress=lambda _:None,
+                verify_writable_root=True)
+        self.assertTrue(result['normal_boot_verified'])
+        self.assertTrue(result['untether_retry_rebooted'])
+        reboots=[call.args[0] for call in command.call_args_list
+                 if call.args[0][-1]=='/sbin/reboot']
+        self.assertEqual(reboots,[['ssh','/sbin/reboot']])
+        activate.assert_not_called();acknowledge.assert_not_called()
+
     def test_transient_data_generation_mismatch_does_not_prevent_activation(self):
         identity={'board':'p101ap','product':'iPad3,4','ecid':123}
         report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',

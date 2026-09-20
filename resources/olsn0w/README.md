@@ -188,14 +188,19 @@ Sparse Data progress counts bytes actually transferred, not the last disk
 position. Waiting messages do not claim progress or a successful boot; target
 services and, in normal mode, official activation must still be observed within
 the timeout.
-Startup observation never reboots a device whose initialization did not finish.
+Startup observation normally never reboots a device whose initialization did
+not finish. The Setup.app-removal mode has one bounded exception on iOS 7.1:
+after the selected Data generation, SpringBoard and Pangu completion marker are
+all observed repeatedly, a root volume that remains read-only receives one
+controlled reboot so Pangu can retry. A second failure is reported without
+another reboot.
 On the iOS 7.1 Pangu path, its launchctl call is only an intermediate signal:
 Pangu still has to finish its kernel work and remount the selected System
-partition. The host therefore stays on that first boot, never restarts it at the
-intermediate marker, and requires the real root mount to be read-write before
-Cydia initialization or successful qualification. This is necessary for `dpkg`
-and Cydia package upgrades. Failures preserve the logs and report the observed
-stage without reinstalling the device.
+partition. The host therefore never treats that marker alone as completion and
+requires the real root mount to be read-write before Cydia initialization or
+successful qualification. This is necessary for `dpkg` and Cydia package
+upgrades. Failures preserve the logs and report the observed stage without
+reinstalling the device.
 
 ## Hosts and dependencies
 
