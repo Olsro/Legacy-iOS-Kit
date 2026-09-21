@@ -4,8 +4,8 @@
   <coder>Olsro</coder>
   <version>0.1.0-pwndfu-milestone</version>
   <release_date>20260911044307</release_date>
-  <short_description>PWNDFU Wii, profil a5mate A5_8945.</short_description>
-  <long_description>Build explicite A5_8945. Exige un appareil Apple en DFU avec CPID 8945, vérifie PWND:[checkm8], puis retient l'EHCI jusqu'à éjection propre. Validation matérielle à réaliser.</long_description>
+  <short_description>pwnDFU via Wii pour A5_8945 — validation matérielle requise.</short_description>
+  <long_description>Profil expérimental A5_8945. Connecter un appareil Apple en DFU avec CPID 8945. Validation matérielle encore requise avant utilisation de référence.</long_description>
   <arguments><arg>--pwndfu</arg></arguments>
   <ahb_access/><no_ios_reload/>
 </app>

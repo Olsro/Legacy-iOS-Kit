@@ -15,7 +15,7 @@ Trois builds explicitement séparés sont inclus. Tous démarrent avec
 | Dossier HBC | Profil compilé | État matériel |
 | --- | --- | --- |
 | `a5mate-wii-8940` | `A5_8940` | PWNDFU observé sur le 4S de test |
-| `a5mate-wii-8942` | `A5_8942` | Généré, à tester sur cible |
+| `a5mate-wii-8942` | `A5_8942` | PWNDFU observé sur le iPod Touch 5G de test |
 | `a5mate-wii-8945` | `A5_8945` | Généré, à tester sur cible |
 
 ## Préconditions et comportement
@@ -38,6 +38,10 @@ Le mode de développement peut être construit séparément avec
 `A5WII_ENABLE_NETWORK=1`; il réactive la télémétrie vers le Mac et les consoles
 TCP. Les détails et la preuve matérielle sont dans
 [JALON-PWNDFU.md](JALON-PWNDFU.md).
+
+Le profil 8942 utilise la révision `8d22193` de `synackuk/checkm8-a5`, qui
+retire la démotion. Cette variante est nécessaire pour conserver les clés de
+production et permettre au Mac de lancer un iBSS Apple signé après le pwnDFU.
 
 ## Reconstruire le DOL avec Docker
 

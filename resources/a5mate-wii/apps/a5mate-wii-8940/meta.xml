@@ -4,8 +4,8 @@
   <coder>Olsro</coder>
   <version>0.1.0-pwndfu-milestone</version>
   <release_date>20260911044307</release_date>
-  <short_description>PWNDFU Wii, profil a5mate A5_8940.</short_description>
-  <long_description>Profil testé sur l'iPhone 4S du jalon. Exige un appareil Apple en DFU avec CPID 8940, vérifie PWND:[checkm8], puis retient l'EHCI jusqu'à éjection propre.</long_description>
+  <short_description>pwnDFU via Wii pour A5_8940 — validé sur matériel.</short_description>
+  <long_description>Profil A5_8940 validé sur matériel (iPhone 4S). Connecter un appareil Apple en DFU avec CPID 8940. La séquence a5mate applique le payload checkm8 puis revient automatiquement au Homebrew Channel.</long_description>
   <arguments><arg>--pwndfu</arg></arguments>
   <ahb_access/><no_ios_reload/>
 </app>
