@@ -1,4 +1,5 @@
 """Synthetic firmware/cache fixtures, with independent ARM execution checks."""
+import json
 from pathlib import Path
 import struct
 import sys
@@ -6,6 +7,8 @@ import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from bootchain import (literal_ibss, memory_layout, preserve_upgrade_autoboot,
                        skip_ramdisk)
+from compact_cache import (ARMV7_REQUIRED_PATCHES, ARMV7_REQUIRED_RANGES,
+                           ARMV7_SOURCE)
 from ios8_cache import prepare, protect_registry, encode, export_slot
 from logo import bl
 from system import jailbreak_payload
@@ -86,6 +89,14 @@ class BootVariants(unittest.TestCase):
         self.assertEqual(report['usb_call'],0x112)
         struct.pack_into('<I',data,0x184,123)
         with self.assertRaises(ValueError):literal_ibss(bytes(data),second)
+        # A5 iOS 8 uses the same receive-loop form with a different stock
+        # buffer. Keep the A6 default strict; require an explicit A5 policy.
+        struct.pack_into('<I',data,0x184,0x8fe00000)
+        with self.assertRaises(ValueError):literal_ibss(bytes(data),second)
+        a5_second=memory_layout('iPod5,1')[1]
+        patched,report=literal_ibss(bytes(data),a5_second,stock_buffer=0x8fe00000)
+        self.assertEqual(struct.unpack_from('<I',patched,0x184)[0],a5_second)
+        self.assertEqual(report['before'],'0x8fe00000')
 
     def test_ramdisk_failure_branch_can_fall_through(self):
         data=firmware(b'/boot/ramdisk\0')
@@ -106,6 +117,16 @@ class BootVariants(unittest.TestCase):
         with self.assertRaises(ValueError):skip_ramdisk(bytes(data))
 
 class CacheRemap(unittest.TestCase):
+    def test_armv7_recipe_retains_early_initializer_stub_pages(self):
+        recipe=json.loads((Path(__file__).resolve().parents[1]/
+                           'recipes/dyld-armv7-12H321.recipe').read_text())
+        self.assertEqual(recipe['output_sha256'],ARMV7_SOURCE['prepared_sha256'])
+        for required,count in ARMV7_REQUIRED_RANGES:
+            self.assertTrue(any(offset<=required and required+count<=offset+length
+                                for offset,length in recipe['keep_ranges']))
+        self.assertEqual(tuple(tuple(item) for item in recipe['bootstrap_patches']),
+                         ARMV7_REQUIRED_PATCHES)
+
     def fixture(self, architecture='armv7s'):
         data=bytearray(0x1d00c)
         data[:16]=b'dyld_v1'+b' '*(8-len(architecture))+architecture.encode()+b'\0'

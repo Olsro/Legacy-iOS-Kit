@@ -83,7 +83,7 @@ MODEL_PROFILES = {
     'iPad3,6': dict(soc='a6x', cache_arch='armv7s', has_baseband=True,
                    baseband_family='Mav5', tristar_soft_reset_majors=(6, 7, 8)),
     'iPod5,1': dict(soc='a5r2', cache_arch='armv7', has_baseband=False,
-                    external_pwndfu=True),
+                    external_pwndfu=True, tristar_soft_reset_majors=(6,)),
 }
 
 BASEBAND_FILES = {

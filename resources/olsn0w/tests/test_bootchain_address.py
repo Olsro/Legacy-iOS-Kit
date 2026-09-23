@@ -50,11 +50,11 @@ class RelayAddressTests(unittest.TestCase):
 
     def test_patcher_markers_keep_distinct_a5_and_a6_contracts(self):
         self.assertEqual(
-            dualboot_patcher_marker('iPhone4,1',4,0xbfd00000),
+            dualboot_patcher_marker('iPhone4,1',10,0xbfd00000),
             movt(4,0xbfd0))
-        # The A6/A6X patcher marker is intentionally r4 even when the source
-        # firmware carries the image pointer in r10. olsn0w replaces it only
-        # after validating this exact output.
+        # The patcher marker is intentionally r4 even when the source firmware
+        # carries the image pointer in r10. olsn0w replaces it only after
+        # validating this exact output.
         self.assertEqual(
             dualboot_patcher_marker('iPad3,4',10,0xbfe00000),
             bytes.fromhex('c7f6d074'))
@@ -66,10 +66,12 @@ class RelayAddressTests(unittest.TestCase):
         self.assertIn('iPad3,1',products)
         for product in products:
             with self.subTest(product=product):
-                self.assertEqual(memory_layout(product),(0xbfd00000,0xbfd20000))
-                self.assertEqual(dualboot_patcher_marker(product,4,0xbfd00000),
+                first=0xbfe00000 if MODEL_PROFILES[product]['soc']=='a5x' else 0x9fe00000
+                self.assertEqual(memory_layout(product),(first,first-0x100000))
+                self.assertEqual(dualboot_patcher_marker(product,10,0xbfd00000),
                                  movt(4,0xbfd0))
-                self.assertFalse(uses_tristar_soft_reset(product,'6.1.3'))
+                self.assertEqual(uses_tristar_soft_reset(product,'6.1.3'),
+                                 product == 'iPod5,1')
 
     def test_tristar_reset_stays_on_explicitly_qualified_releases(self):
         ios6_releases = {
@@ -78,6 +80,7 @@ class RelayAddressTests(unittest.TestCase):
             'iPad3,4': ('6.0', '6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPad3,5': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPad3,6': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
+            'iPod5,1': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3'),
         }
         for product, versions in ios6_releases.items():
             for release in versions:
@@ -89,14 +92,14 @@ class RelayAddressTests(unittest.TestCase):
             for release in ios7_releases:
                 self.assertTrue(uses_tristar_soft_reset(product, release),
                                 (product, release))
-        for product in ('iPhone5,1', 'iPhone5,2'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1'):
             self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '7.1.2'))
         for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
             self.assertTrue(uses_tristar_soft_reset(product, '8.0'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.1.3'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.4.1'))
-        for product in ('iPhone5,1', 'iPhone5,2'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1'):
             self.assertFalse(uses_tristar_soft_reset(product, '8.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '8.4.1'))
         self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))

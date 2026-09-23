@@ -7,7 +7,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from signing import verify
+from signing import rehash_adhoc, verify
 
 
 def executable():
@@ -15,7 +15,7 @@ def executable():
     entitlements = struct.pack('>II', 0xfade7171, 8+len(entitlements)) + entitlements
     directory = bytearray(44+20*6)
     struct.pack_into('>9I4BI', directory, 0, 0xfade0c02, len(directory),
-                     0x20001, 0, 144, 44, 5, 1, 512, 20, 1, 0, 9, 0)
+                     0x20001, 2, 144, 44, 5, 1, 512, 20, 1, 0, 9, 0)
     directory[44:64] = hashlib.sha1(entitlements).digest()
     size = 28+len(directory)+len(entitlements)
     code = bytearray(512)
@@ -36,6 +36,30 @@ class SignedPages(unittest.TestCase):
             data[offset] ^= 1
             with self.assertRaises(ValueError):
                 verify(data)
+
+    def test_rehash_preserves_adhoc_signature_metadata(self):
+        original = bytes(executable())
+        modified = bytearray(original)
+        modified[100] ^= 1
+        repaired = rehash_adhoc(original, modified)
+        self.assertEqual(verify(repaired), verify(original))
+        self.assertEqual(len(repaired), len(original))
+        signature = 512
+        before, after = original[signature:], repaired[signature:]
+        changed = [i for i, values in enumerate(zip(before, after))
+                   if values[0] != values[1]]
+        self.assertTrue(changed)
+        # Only the single SHA-1 code slot changes in this fixture.
+        self.assertTrue(all(28+144 <= i < 28+164 for i in changed))
+
+    def test_rehash_rejects_size_or_signature_changes(self):
+        original = bytes(executable())
+        with self.assertRaisesRegex(ValueError, 'preserve executable size'):
+            rehash_adhoc(original, original+b'\0')
+        modified = bytearray(original)
+        modified[-1] ^= 1
+        with self.assertRaisesRegex(ValueError, 'preserve the original signature blob'):
+            rehash_adhoc(original, modified)
 
     def test_truncated_signature_is_rejected(self):
         with self.assertRaises(ValueError):

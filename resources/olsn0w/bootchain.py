@@ -12,15 +12,16 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 20
+RECIPE_VERSION = 23
 
 
 def memory_layout(product):
-    """Return the kloader window used by the Kit's dualboot patch."""
+    """Return the actual loader destinations, not the patcher's defaults."""
     family = profile(product)['soc']
     if family.startswith('a5'):
-        # iBoot32Patcher's A5-family dualboot recipe selects 0xbfd00000.
-        return 0xbfd00000, 0xbfd20000
+        # multi_kloader loads independent images; iBEC precedes iBSS by 1 MiB.
+        first = 0xbfe00000 if family == 'a5x' else 0x9fe00000
+        return first, first - WINDOW
     if family in ('a6', 'a6x'):
         return 0xbfe00000, 0xbfe20000
     raise ValueError('No relay memory layout for selected product')
@@ -43,13 +44,12 @@ def movt(register, immediate):
 def dualboot_patcher_marker(product, register, first):
     """Return the exact address instruction emitted by iBoot32Patcher.
 
-    Its A5_8940 recipe encodes the A5 kloader window in the discovered
-    register.  The A6/A6X default recipe instead emits a historic fixed-r4
-    marker, which olsn0w must validate before restoring the firmware's real
-    register and selected relay address.
+    iBoot32Patcher emits a fixed-r4 marker for both its A5-family recipe and
+    its A6/A6X recipe.  olsn0w must validate that exact marker before restoring
+    the firmware's real register and selected relay address.
     """
     family=profile(product)['soc']
-    if family.startswith('a5'):return movt(register,first >> 16)
+    if family.startswith('a5'):return movt(4,0xbfd0)
     if family in ('a6','a6x'):return bytes.fromhex('c7f6d074')
     raise ValueError('No dualboot patcher contract for selected product')
 
@@ -250,7 +250,7 @@ def preserve_upgrade_autoboot(data):
                        already_rearmed=False)
 
 
-def literal_ibss(data, second):
+def literal_ibss(data, second, *, stock_buffer=0x9fe00000):
     """Handle the literal-buffer form of the Kit's iBSS dualboot patch."""
     from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
     from capstone.arm import ARM_OP_MEM, ARM_REG_PC
@@ -277,7 +277,7 @@ def literal_ibss(data, second):
             location=((i.address+4)&~3)+m.mem.disp
             branch=ins[index+7] if index+7<len(ins) else None
             if branch is None or branch.mnemonic!='blt':continue
-            if struct.unpack_from('<I',data,location)[0]!=0x9fe00000:continue
+            if struct.unpack_from('<I',data,location)[0]!=stock_buffer:continue
             matches.append((location,tail[4].address,branch.address))
     if len(matches)!=1:raise ValueError('Unrecognized literal iBSS receive loop')
     location,call,branch=matches[0];out=bytearray(data)
@@ -286,7 +286,64 @@ def literal_ibss(data, second):
     out[call:call+4]=bytes.fromhex('084600bf') # mov r0,r1; nop
     out[branch:branch+2]=bytes.fromhex('00bf')
     return bytes(out),dict(form='literal',literal=location,usb_call=call,branch=branch,
-                           before=hex(0x9fe00000),physical=second)
+                           before=hex(stock_buffer),physical=second)
+
+
+def preloaded_ibss_length(original, data, log):
+    """The receive-call replacement must return a length, not the buffer VA."""
+    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
+    md=Cs(CS_ARCH_ARM,CS_MODE_THUMB)
+    matches=re.findall(r'patch_dualboot_ibss: Found usb_wait_for_image\(\) at (0x[0-9a-f]+)',log)
+    if len(matches)!=1:raise ValueError('Ambiguous iBSS receive call')
+    at=int(matches[0],16)
+    ins=list(md.disasm(original[at:at+10],at))
+    # The image-pointer store is 16-bit for r4 and 32-bit for r10 (iOS 7).
+    prior=[]
+    for distance in (10,12):
+        if at<distance:continue
+        candidate=list(md.disasm(original[at-distance:at],at-distance))
+        if (candidate and candidate[0].mnemonic=='mov.w'
+                and candidate[0].op_str=='r1, #0x200000'
+                and candidate[-1].address+candidate[-1].size==at):prior.append(candidate)
+    if (len(ins)!=4 or [i.mnemonic for i in ins]!=['bl','mov','cmp','blt']
+            or ins[1].op_str.split(', ')[-1]!='r0'
+            or ins[2].op_str!=ins[1].op_str.split(',')[0]+', #0'
+            or len(prior)!=1
+            or data[at:at+4]!=bytes.fromhex('00bf00bf')
+            or data[at+8:at+10]!=bytes.fromhex('00bf')):
+        raise ValueError('Unrecognized iBSS preloaded-image length contract')
+    result=data[:at]+bytes.fromhex('084600bf')+data[at+4:]
+    return result,dict(offset=at,before='00bf00bf',after='084600bf',length=2*WINDOW)
+
+
+def ram_autoboot(data):
+    """Force only this RAM iBEC's startup decision; never write NVRAM."""
+    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
+    from capstone.arm import ARM_OP_MEM, ARM_REG_PC
+    md=Cs(CS_ARCH_ARM,CS_MODE_THUMB);md.detail=True
+    token=b'auto-boot\0'
+    if data.count(token)!=1:raise ValueError('Ambiguous RAM iBEC auto-boot string')
+    base=struct.unpack_from('<I',data,32)[0]-64
+    pointer=base+data.index(token);matches=[]
+    for at in range(0,len(data)-48,2):
+        # Narrow to Thumb literal LDR r0 before disassembling.
+        if data[at+1]!=0x48:continue
+        ins=list(md.disasm(data[at:at+48],at))
+        if not ins or ins[0].mnemonic!='ldr':continue
+        mem=ins[0].operands[1]
+        if mem.type!=ARM_OP_MEM or mem.mem.base!=ARM_REG_PC:continue
+        literal=((at+4)&~3)+mem.mem.disp
+        if not 0<=literal<=len(data)-4 or struct.unpack_from('<I',data,literal)[0]!=pointer:continue
+        if len(ins)<6 or ins[1].mnemonic!='movs' or ins[1].op_str!='r1, #0':continue
+        call=next((j for j in range(2,min(5,len(ins))) if ins[j].mnemonic=='bl'),None)
+        if call is None or ins[call+1].mnemonic!='mov':continue
+        reg,value=ins[call+1].op_str.split(', ')
+        if value!='r0':continue
+        if not any(i.mnemonic=='cmp' and i.op_str==reg+', #1' for i in ins[call+2:]):continue
+        matches.append(ins[call].address)
+    if len(matches)!=1:raise ValueError('Unrecognized RAM iBEC startup auto-boot decision')
+    at=matches[0];replacement=bytes.fromhex('012000bf')
+    return data[:at]+replacement+data[at+4:],dict(offset=at,before=data[at:at+4].hex(),after=replacement.hex(),persistent=False)
 
 
 def prepare(firmware, *, verbose=False):
@@ -302,16 +359,17 @@ def prepare(firmware, *, verbose=False):
         raise ValueError('Prepared relay already exists: '+str(destination))
     out=Path(tempfile.mkdtemp(prefix='relay-pending-',dir=firmware.parent))
     bootargs='rd=disk0s1s3 amfi=0xff cs_enforcement_disable=1'
-    if verbose:
+    # Keep the physically qualified A5 target diagnostics during integration;
+    # this does not add debug flags to the signed 8.4.1 bootstrap entry.
+    if verbose or selected_profile['soc'].startswith('a5'):
         bootargs+=' -v debug=0x14e'
     patches={}
     for name in ('iBSS','iBEC'):
         raw=(firmware/(name+'.raw')).read_bytes()
         patched=out/(name+'.patched.raw')
-        # A6 iOS 8 changed the receive loop to a literal form. The A5-family
-        # dualboot patcher has its own SoC recipe and must keep using it.
-        use_literal=(name=='iBSS' and version(source['version'])[0] == 8
-                     and not selected_profile['soc'].startswith('a5'))
+        # iOS 8 uses a literal receive buffer on both A5 and A6. The Kit's
+        # MOVT-only dualboot iBSS patch cannot recognize the A5 literal either.
+        use_literal=(name=='iBSS' and version(source['version'])[0] == 8)
         argv=[tools()/'iBoot32Patcher',firmware/(name+'.raw'),patched,'--rsa']
         if not use_literal:argv+=['--dualboot']
         # Match the Kit's iBEC boot path: image RSA admission and the
@@ -321,7 +379,8 @@ def prepare(firmware, *, verbose=False):
         data=patched.read_bytes()
         if len(data)!=len(raw):raise ValueError('Bootloader length changed')
         if use_literal:
-            data,patches['relay_address']=literal_ibss(data,second)
+            data,patches['relay_address']=literal_ibss(data,second,
+                stock_buffer=0x8fe00000 if selected_profile['soc'].startswith('a5') else 0x9fe00000)
         elif name=='iBSS':
             matches=re.findall(r'patch_dualboot_ibss: Found kloader MOV at (0x[0-9a-f]+)',log)
             if len(matches)!=1:raise ValueError('Ambiguous relay address instruction')
@@ -336,9 +395,13 @@ def prepare(firmware, *, verbose=False):
             patches['relay_address']=dict(offset=at,before=expected.hex(),after=replacement.hex(),
                                           physical=second,register=register,
                                           original=raw[at:at+4].hex())
+            if selected_profile['soc'].startswith('a5'):
+                data,patches['preloaded_length']=preloaded_ibss_length(raw,data,log)
         else:
             data,patches['optional_ramdisk']=skip_ramdisk(data)
             data,patches['upgrade_autoboot']=preserve_upgrade_autoboot(data)
+            if selected_profile['soc'].startswith('a5'):
+                data,patches['ram_autoboot']=ram_autoboot(data)
             if verbose or selected_profile['soc'].startswith('a5'):
                 save(out/'display-validation.json',dict(
                     mode='verbose' if verbose else 'stock',logo_hook=False))
@@ -357,8 +420,12 @@ def prepare(firmware, *, verbose=False):
     if kind!='ibec' or 'KBAG' in tags or payload!=(out/'iBEC.patched.raw').read_bytes():
         raise ValueError('iBEC container readback mismatch')
     ibss=(out/'iBSS.patched.raw').read_bytes()
-    if len(ibss)>second-first:raise ValueError('iBSS overlaps iBEC')
-    relay=ibss+bytes(second-first-len(ibss))+container
+    separate=selected_profile['soc'].startswith('a5')
+    # Keep a canonical bundle for cache identity. On A5 only the separately
+    # verified files are loaded; this bundle is NOT a contiguous memory image.
+    stride=0x20000 if separate else second-first
+    if len(ibss)>stride:raise ValueError('iBSS overlaps iBEC')
+    relay=ibss+bytes(stride-len(ibss))+container
     if len(relay)>WINDOW:raise ValueError('Relay exceeds loader memory window')
     (out/'relay.bin').write_bytes(relay)
     raw=(firmware/'DeviceTree.raw').read_bytes();nodes=devicetree.parse(raw)
@@ -374,9 +441,10 @@ def prepare(firmware, *, verbose=False):
     run([tools()/'xpwntool',out/'DeviceTree.raw',out/'devicetree','-t',firmware/'DeviceTree.orig'],out/'tree-pack.log')
     if img3((out/'devicetree').read_bytes())[2]!=raw:raise ValueError('DeviceTree readback mismatch')
     report=dict(recipe_version=RECIPE_VERSION,product=source['product'],version=source['version'],build=source['build'],
-                bootargs=bootargs,relay_memory=dict(first=first,second=second,window=WINDOW),
+                bootargs=bootargs,loader=('a5-two-image' if separate else 'contiguous'),
+                relay_memory=dict(first=first,second=second,window=WINDOW),
                 patches=patches,physical_boot_validated=False,
-                files={n:digest(out/n) for n in ['relay.bin','devicetree','iBSS.patched.raw','iBEC.patched.raw','display-validation.json']})
+                files={n:digest(out/n) for n in ['relay.bin','devicetree','iBSS.patched.raw','iBEC.patched.raw','iBEC.img3','display-validation.json']})
     save(out/'manifest.json',report)
     out.rename(destination)
     return destination,report

@@ -4,7 +4,7 @@ import plistlib
 import struct
 
 
-def jobs(amfid):
+def jobs(amfid, delayed_services=()):
     result = {}
     amfid = copy.deepcopy(amfid)
     if amfid.get('Label') != 'com.apple.MobileFileIntegrity':
@@ -12,6 +12,31 @@ def jobs(amfid):
     amfid.update(RunAtLoad=True, StandardOutPath='/var/log/amfid-startup.log',
                  StandardErrorPath='/var/log/amfid-startup.log')
     result['/System/Library/LaunchDaemons/com.apple.MobileFileIntegrity.plist'] = amfid
+    expected = {
+        'com.apple.notifyd': '/usr/sbin/notifyd',
+        'com.apple.powerd': '/System/Library/CoreServices/powerd.bundle/powerd',
+    }
+    for original in delayed_services:
+        job = copy.deepcopy(original)
+        label = job.get('Label')
+        if label not in expected:
+            raise ValueError('Unexpected delayed bootstrap service')
+        arguments = job.pop('ProgramArguments', None)
+        program = job.pop('Program', None)
+        if arguments is None:
+            arguments = [program] if program else None
+        if not arguments or arguments[0] != expected[label]:
+            raise ValueError('Unexpected delayed bootstrap service executable')
+        # everuntether uses libsystem_notify while acquiring tfp0.  Delaying
+        # notifyd until after that acquisition deadlocks every A5/A5X target.
+        # powerd remains gated because it must not inspect power state while
+        # the held untether is changing the kernel.
+        job['ProgramArguments'] = (['/olsn0w/service-gate', *arguments]
+                                   if label == 'com.apple.powerd' else arguments)
+        job['RunAtLoad'] = True
+        job['StandardOutPath'] = '/var/log/'+label+'.log'
+        job['StandardErrorPath'] = '/var/log/'+label+'.log'
+        result['/System/Library/LaunchDaemons/'+label+'.plist'] = job
     for label, arguments in [('org.olsn0w.boot', ['/olsn0w/controller']),
                              ('org.olsn0w.services', ['/olsn0w/root-start', 'start'])]:
         result['/System/Library/LaunchDaemons/'+label+'.plist'] = dict(

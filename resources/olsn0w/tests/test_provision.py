@@ -1,5 +1,6 @@
 from pathlib import Path
 import plistlib
+import io
 import subprocess
 import sys
 import tempfile
@@ -9,10 +10,51 @@ import zipfile
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from provision import (HANDOFF, copy_ipsw, handoff_sleep, multipatch_manifest,
+                       multipatch_iboot_flags, multipatch_key_metadata,
                        reboot_hook, require_completed_restore)
 from provision_run import record_failed_restore
+from provision_collect import personalized_modem
 
 class ProvisionHandoff(unittest.TestCase):
+    def test_personalized_modem_archive_supplies_hidden_restore_component(self):
+        packed=io.BytesIO()
+        with zipfile.ZipFile(packed,'w') as archive:
+            archive.writestr('amss.mbn',b'amss')
+            archive.writestr('restoredbl.mbn',b'restore')
+        result=personalized_modem(packed.getvalue(),('amss.mbn','restoredbl.mbn'))
+        self.assertEqual(result['restoredbl.mbn'],b'restore')
+        with zipfile.ZipFile(packed,'a') as archive:archive.writestr('extra',b'x')
+        with self.assertRaises(ValueError):
+            personalized_modem(packed.getvalue(),('amss.mbn','restoredbl.mbn'))
+    def test_checked_multipatch_asr_is_already_signed(self):
+        from common import KIT
+        from signing import verify
+        binary=(KIT/'resources/patch/asr').read_bytes()
+        report=verify(binary)
+        self.assertEqual(report['directories'],1)
+        self.assertGreater(report['verified_pages'],0)
+
+    def test_multipatch_leaves_rsa_and_ticket_to_futurerestore(self):
+        self.assertEqual(multipatch_iboot_flags('iBSS'),[])
+        ibec=multipatch_iboot_flags('iBEC')
+        self.assertIn('--debug',ibec)
+        self.assertIn('-b',ibec)
+        self.assertNotIn('--rsa',ibec)
+        self.assertNotIn('--ticket',ibec)
+        with self.assertRaises(ValueError):multipatch_iboot_flags('iBoot')
+
+    def test_multipatch_serves_donor_keys_only_for_encrypted_restore_pair(self):
+        keys=lambda build,tree,kernel:{'identifier':'iPhone4,1','buildid':build,'keys':[
+            {'image':'iBSS','iv':'base-iv','key':'base-key'},
+            {'image':'DeviceTree','iv':tree+'-iv','key':tree+'-key'},
+            {'image':'Kernelcache','iv':kernel+'-iv','key':kernel+'-key'}]}
+        result=multipatch_key_metadata(keys('12H321','base-tree','base-kernel'),
+                                       keys('10B329','donor-tree','donor-kernel'))
+        by_image={item['image']:item for item in result['keys']}
+        self.assertEqual(by_image['iBSS']['key'],'base-key')
+        self.assertEqual(by_image['DeviceTree']['key'],'donor-tree-key')
+        self.assertEqual(by_image['Kernelcache']['iv'],'donor-kernel-iv')
+
     def test_failure_diagnostics_preserve_error_without_reboot_or_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             state={'complete':False,'error':'ASR validation failed'}
@@ -98,9 +140,14 @@ class ProvisionHandoff(unittest.TestCase):
                                 'RestoreKernelCache':{'Info':{'Path':'stock-kernel'}}}}
         source=plistlib.dumps({'ProductBuildVersion':'12H321','SupportedProductTypes':['iPhone4,1'],
                                'BuildIdentities':[identity('Erase'),identity('Update')]})
-        result=plistlib.loads(multipatch_manifest(source,'iPhone4,1'))['BuildIdentities']
+        donor_identity=identity('Erase')
+        donor_identity['Manifest']['RestoreKernelCache']['PartialDigest']=b'donor-partial'
+        donor={'ProductBuildVersion':'10B329','BuildIdentities':[donor_identity]}
+        result=plistlib.loads(multipatch_manifest(source,'iPhone4,1',donor))['BuildIdentities']
         self.assertEqual(result[0]['Manifest']['RestoreDeviceTree']['Info']['Path'],
                          'Downgrade/RestoreDeviceTree')
         self.assertEqual(result[0]['Manifest']['RestoreKernelCache']['Info']['Path'],
                          'Downgrade/RestoreKernelCache')
+        self.assertEqual(result[0]['Manifest']['RestoreKernelCache']['PartialDigest'],
+                         b'donor-partial')
         self.assertEqual(result[1]['Manifest']['RestoreDeviceTree']['Info']['Path'],'stock-tree')

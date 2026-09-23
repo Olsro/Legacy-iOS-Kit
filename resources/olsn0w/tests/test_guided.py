@@ -150,7 +150,7 @@ class GuidedTest(unittest.TestCase):
     def test_retryable_dfu_failure_reuses_prepared_plan(self):
         from provision_run import DfuPreparationError
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare,patch('provision_restore.run',side_effect=[DfuPreparationError('checkm8'),{'success':True}]) as restore:
-            answers=iter(['1','n','y'])
+            answers=iter(['1','n','y',''])
             result=guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             self.assertEqual(result,{'success':True})
             prepare.assert_called_once()
@@ -173,6 +173,23 @@ class GuidedTest(unittest.TestCase):
             guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
         self.assertIs(observed['remove_setup_app'],True)
         self.assertTrue(any('activation was intentionally skipped' in line for line in messages))
+
+    def test_compatible_sync_choice_preserves_setup_message(self):
+        observed={};messages=[]
+        def prepare(session,release,show):
+            observed.update(json.loads((session/'device.json').read_text()))
+            return {'session':'prepared'}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(guided,'STATE',Path(folder)), \
+             patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+             patch.object(guided,'releases',return_value=[dict(version='6.1.3',buildid='10B329')]), \
+             patch.object(guided,'prepare',side_effect=prepare), \
+             patch.object(guided,'enter_dfu'), \
+             patch('provision_restore.run',return_value={'success':True}):
+            answers=iter(['1','y','y'])
+            guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
+        self.assertIs(observed['remove_setup_app'],True)
+        self.assertTrue(any('Hacktiv8 applied; Setup.app preserved' in line for line in messages))
 
     def test_preparation_failure_never_requests_dfu_or_erase(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',side_effect=RuntimeError('checksum')):

@@ -11,12 +11,20 @@ from device import recheck_recovery
 from restore import Rescue, checkpoint
 
 
+def has_checkm8_marker(output):
+    """Accept the two exact PWND field renderings emitted by irecovery."""
+    return bool(re.search(r'^PWND:\s*\[?checkm8\]?\s*$', output, re.MULTILINE))
+
+
 def unique_usb_target(ecid):
     # libusb works on Linux and macOS; no system_profiler/ioreg dependency.
     import usb.core
     import usb.util
+    # The unaddressed exploit tools operate on DFU/recovery interfaces, not
+    # normal-mode iPhones or iPods (which also use Apple 0x12xx product IDs).
+    # Reject a second boot interface, while retaining the exact ECID check.
     devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac)
-             if 0x1220 <= d.idProduct <= 0x12ff]
+             if d.idProduct in (0x1222,0x1227,0x1280,0x1281,0x1282,0x1283)]
     if len(devices)!=1 or devices[0].idProduct!=0x1227:
         raise ValueError('Connect only the selected device in DFU before loading the rescue')
     try:
@@ -75,7 +83,7 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
     elif selected_profile.get('external_pwndfu'):
         progress('Checking the external A5 pwnDFU marker')
         query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'a5-pwndfu-ready')
-        if 'PWND: [checkm8]' not in query and 'PWND:[checkm8]' not in query:
+        if not has_checkm8_marker(query):
             raise RuntimeError('A5 requires PWND:[checkm8] from A5Mate before the host can send iBSS')
         # Match Legacy iOS Kit's device_send_unpacked_ibss path for A5.  The
         # raw RSA-patched 8.4.1 iBSS is sent only after the external exploit
@@ -106,7 +114,8 @@ def connect(session, timeout=120):
     record=json.loads((session/'device.json').read_text())
     prefix=json.loads((session/'ssh-prefix.json').read_text())
     maintenance=record.get('rescue_maintenance','/olsn0w-maintenance')
-    ram=Rescue(prefix,record['identity'],maintenance)
+    from restore_environment import session_build
+    ram=Rescue(prefix,record['identity'],maintenance,rescue_build=session_build(session))
     deadline=time.monotonic()+timeout
     while True:
         try:
@@ -115,3 +124,40 @@ def connect(session, timeout=120):
         except (RuntimeError,subprocess.TimeoutExpired) as error:
             if time.monotonic()>=deadline:raise RuntimeError('RAM SSH did not become ready') from error
             time.sleep(3)
+
+
+def interactive(session, *, ram_ready=False, progress=print):
+    """Boot a prepared rescue and keep its selected USB tunnel for a root shell."""
+    session=Path(session).resolve()
+    record=json.loads((session/'device.json').read_text())
+    if ram_ready:
+        progress('Reusing the already running RAM rescue')
+    else:
+        boot(session,progress=progress)
+    tunnel=None
+    try:
+        ram=None
+        if ram_ready:
+            try:
+                ram=connect(session,timeout=1)
+                progress('Reusing the existing selected USB tunnel')
+            except RuntimeError:
+                pass
+        if ram is None and record.get('manage_usb_tunnel'):
+            from usb_tunnel import start
+            progress('Waiting for the RAM rescue USB connection')
+            tunnel=start(session)
+        if ram is None:
+            ram=connect(session)
+        # connect() already applies this guard while waiting, but repeat it at
+        # the boundary before handing an interactive root shell to the user.
+        ram.guard()
+        progress('RAM rescue ready; root is in memory and no internal volume is mounted.')
+        progress('Opening the authenticated root shell. Type exit to leave it.')
+        result=subprocess.run(ram.prefix)
+        if result.returncode:
+            raise RuntimeError('RAM rescue shell exited with status '+str(result.returncode))
+    finally:
+        if tunnel is not None:
+            from usb_tunnel import stop
+            stop(tunnel)

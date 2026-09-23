@@ -5,6 +5,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import stat
+import struct
 import tarfile
 
 from archives import members, write_tar
@@ -13,7 +14,7 @@ from compact_cache import write_sparse
 from common import KIT, MODELS, digest, profile, run, tools
 from hfs import HFS
 from img3 import img3
-from signing import resign, verify
+from signing import rehash_adhoc, resign, verify
 from system import entry, add_parents
 
 STOCK_FILES = '''bin/launchctl sbin/fsck sbin/launchd sbin/mount
@@ -26,6 +27,53 @@ System/Library/Filesystems/hfs.fs/Contents/Resources/fsck_hfs
 System/Library/Filesystems/hfs.fs/Contents/Resources/mount_hfs
 usr/share/zoneinfo.default/+VERSION usr/share/zoneinfo.default/UTC
 usr/share/zoneinfo.default/posixrules usr/share/zoneinfo.default/Etc/UTC'''.split()
+
+
+def binary_launchd_bootstrap(original):
+    """Replace launchd's embedded XML bootstrap plist without moving sections."""
+    data = bytearray(original)
+    if len(data) < 28 or data[:4] != b'\xce\xfa\xed\xfe':
+        raise ValueError('Expected a thin 32-bit launchd executable')
+    commands, command_bytes = struct.unpack_from('<II', data, 16)
+    if command_bytes > len(data)-28 or commands > command_bytes//8:
+        raise ValueError('Invalid launchd load commands')
+    found = []
+    at = 28
+    for _ in range(commands):
+        command, length = struct.unpack_from('<II', data, at)
+        if length < 8 or at+length > 28+command_bytes:
+            raise ValueError('Invalid launchd load command')
+        if command == 1:
+            if length < 56:
+                raise ValueError('Truncated launchd segment')
+            sections, = struct.unpack_from('<I', data, at+48)
+            if length != 56+68*sections:
+                raise ValueError('Invalid launchd section table')
+            for section in range(sections):
+                position = at+56+section*68
+                name = data[position:position+16].rstrip(b'\0')
+                segment = data[position+16:position+32].rstrip(b'\0')
+                if (name, segment) == (b'__bs_plist', b'__TEXT'):
+                    found.append(position)
+        at += length
+    if len(found) != 1:
+        raise ValueError('Expected one launchd bootstrap plist section')
+    section = found[0]
+    size, offset = struct.unpack_from('<II', data, section+36)
+    if not size or offset+size > len(data):
+        raise ValueError('Invalid launchd bootstrap plist section')
+    source = bytes(data[offset:offset+size])
+    if not source.startswith(b'<?xml'):
+        raise ValueError('Expected an XML launchd bootstrap plist')
+    values = plistlib.loads(source)
+    if not isinstance(values, dict) or not {'Boot','Bootstrap'} <= set(values):
+        raise ValueError('Unexpected launchd bootstrap plist')
+    binary = plistlib.dumps(values, fmt=plistlib.FMT_BINARY, sort_keys=False)
+    if len(binary) >= size or plistlib.loads(binary) != values:
+        raise ValueError('Launchd bootstrap plist conversion failed')
+    data[offset:offset+size] = binary + bytes(size-len(binary))
+    struct.pack_into('<I', data, section+36, len(binary))
+    return bytes(data)
 
 
 def held_untether(original, output):
@@ -66,7 +114,15 @@ def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
         record = next(r for r in stock.ls('/'+parent) if r['name'] == leaf)
         if not stat.S_ISREG(record['mode']):
             raise ValueError('Expected a stock regular file: '+name)
-        payload[name] = entry(name, stock.read('/'+name), stat.S_IMODE(record['mode']))
+        data = stock.read('/'+name)
+        # ARMv7 now retains the complete ObjC/LINKEDIT metadata: stock signed
+        # launchd is essential for normal entry. Keep the qualified A6 path.
+        if name == 'sbin/launchd' and architecture == 'armv7s':
+            data = rehash_adhoc(data, binary_launchd_bootstrap(data))
+            (destination/'launchd').write_bytes(data)
+        if name == 'System/Library/CoreServices/SystemVersion.plist':
+            data = plistlib.dumps(plistlib.loads(data),fmt=plistlib.FMT_BINARY,sort_keys=False)
+        payload[name] = entry(name, data, stat.S_IMODE(record['mode']))
     selected_packages = {
         'resources/jailbreak/freeze.tar.gz': ['bin/bash','usr/lib/libhistory.6.0.dylib','usr/lib/libreadline.6.0.dylib'],
         'resources/sshrd/ssh.tar.gz': ['bin/chmod','sbin/sshd','usr/lib/libcrypto.0.9.8.dylib','usr/lib/libiconv.2.dylib','usr/lib/libncurses.5.dylib'],
@@ -95,17 +151,38 @@ def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
     payload['sbin/sshd'] = entry('sbin/sshd',sshd.read_bytes(),0o755)
     payload['olsn0w/untether-held'] = entry('olsn0w/untether-held',held_untether(payload['everuntether'][1],destination/'untether-held'),0o755)
     mapping = {'controller':'controller','root-start':'root_start','held-control':'untether_supervisor',
+               'service-gate':'service_gate',
                'bootstrap_pm_ready':'power_ready','bootstrap_wake':'wake'}
+    if architecture == 'armv7':
+        mapping['bootstrap_wake']='wake_a5'
     for name,source in mapping.items():
         data = (native/source).read_bytes();verify(data)
         payload['olsn0w/'+name] = entry('olsn0w/'+name,data,0o755)
-    kloader = KIT/'resources/kloader/kloader'
-    if digest(kloader) != 'bec212b4d99a1e3b9fa4add663fa884a2435045d1e47051415f4e26e197f8132':
-        raise ValueError('Unqualified kloader binary')
-    payload['usr/local/bin/kloader'] = entry('usr/local/bin/kloader',kloader.read_bytes(),0o755)
-    payload['olsn0w/relay.bin'] = entry('olsn0w/relay.bin',Path(relay_file).read_bytes(),0o600)
+    if architecture == 'armv7':
+        from a5_loader import payload as loader_payload, WRAPPER, relay_images
+        images=relay_images(product,Path(relay_file).parent)
+        payload['usr/local/bin/kloader']=entry('usr/local/bin/kloader',WRAPPER,0o755)
+        payload['usr/local/bin/4smulti_kloader']=entry('usr/local/bin/4smulti_kloader',loader_payload(),0o755)
+        for name,data in images.items():
+            payload['olsn0w/'+name]=entry('olsn0w/'+name,data,0o600)
+    else:
+        kloader = KIT/'resources/kloader/kloader'
+        if digest(kloader) != 'bec212b4d99a1e3b9fa4add663fa884a2435045d1e47051415f4e26e197f8132':
+            raise ValueError('Unqualified kloader binary')
+        payload['usr/local/bin/kloader'] = entry('usr/local/bin/kloader',kloader.read_bytes(),0o755)
+        payload['olsn0w/relay.bin'] = entry('olsn0w/relay.bin',Path(relay_file).read_bytes(),0o600)
+    kernel = Path(kernel_file).read_bytes()
+    kernel_kind, kernel_tags, _ = img3(kernel)
+    # A5/A5R2 reaches this filesystem through Apple's ordinary signed iBoot.
+    # It must therefore receive the encrypted stock IMG3, whose KBAG iBoot can
+    # unwrap on the device.  The host-repacked plaintext IMG3 is appropriate
+    # only after our admitted relay is running; stock A5 iBoot rejects it as an
+    # invalid kernelcache before the bootstrap kernel can start.
+    a5_boot = profile(product)['soc'].startswith('a5')
+    if kernel_kind != 'krnl' or (('KBAG' in kernel_tags) is not a5_boot):
+        raise ValueError('Bootstrap kernel container differs from the selected boot policy')
     payload['System/Library/Caches/com.apple.kernelcaches/kernelcache'] = entry(
-        'System/Library/Caches/com.apple.kernelcaches/kernelcache',Path(kernel_file).read_bytes())
+        'System/Library/Caches/com.apple.kernelcaches/kernelcache',kernel)
     tree = destination/'DeviceTree8.img3'
     run([tools()/'xpwntool',firmware/'DeviceTree.raw',tree,'-t',firmware/'DeviceTree.orig'])
     if img3(tree.read_bytes())[2] != (firmware/'DeviceTree.raw').read_bytes():
@@ -131,13 +208,15 @@ PasswordAuthentication no
 ChallengeResponseAuthentication no
 UsePrivilegeSeparation no
 '''
+    if architecture == 'armv7':config+='UseDNS no\n'
     payload['olsn0w/sshd_config'] = entry('olsn0w/sshd_config',config.encode(),0o600)
-    launch_jobs = jobs(plistlib.loads(stock.read('/System/Library/LaunchDaemons/com.apple.MobileFileIntegrity.plist')))
+    delayed_services = [plistlib.loads(stock.read('/System/Library/LaunchDaemons/'+name))
+                        for name in ('com.apple.notifyd.plist','com.apple.powerd.plist')]
+    launch_jobs = jobs(
+        plistlib.loads(stock.read('/System/Library/LaunchDaemons/com.apple.MobileFileIntegrity.plist')),
+        delayed_services)
     for path, job in launch_jobs.items():
         payload[path[1:]] = entry(path[1:],plistlib.dumps(job,fmt=plistlib.FMT_BINARY))
-    for name in ('com.apple.notifyd.plist','com.apple.powerd.plist'):
-        path='olsn0w/disabled/'+name
-        payload[path] = entry(path,stock.read('/System/Library/LaunchDaemons/'+name))
     cache = Path(compact_cache).read_bytes()
     if architecture == 'armv7s':
         recipe = json.loads((Path(__file__).parent/'recipes/dyld-armv7s-12H321.recipe').read_text())
@@ -175,6 +254,8 @@ UsePrivilegeSeparation no
     var_image.command('symlink','/db/timezone/zoneinfo','/usr/share/zoneinfo.default')
     var_image.command('symlink','/db/timezone/localtime','/usr/share/zoneinfo.default/UTC')
     image.normalize_root();var_image.normalize_root()
+    if image.info()['bytes']!=30*1024**2 or var_image.info()['bytes']!=2*1024**2:
+        raise ValueError('Compact bootstrap must remain 30 MiB System + 2 MiB Data')
     records = {record['path']: record for record in image.tree('/')}
     for path,(item,data) in payload.items():
         if item.isfile() and image.read('/'+path)!=data:
@@ -184,6 +265,9 @@ UsePrivilegeSeparation no
             if (stat.S_IMODE(record['mode']), record['uid'], record['gid']) != (item.mode, item.uid, item.gid):
                 raise ValueError('Bootstrap permissions readback mismatch: '+path)
     report=dict(product=product,base_build='12H321',cache_architecture=architecture,
+        relay_policy=('a5-two-image-relative-wake' if a5_boot else 'a6-contiguous'),
+        kernel_policy=('stock-encrypted-a5' if a5_boot else 'relay-admitted-plaintext'),
+        kernel_sha256=hashlib.sha256(kernel).hexdigest(),
         autoboot_policy='persistent-enable',
         target_rearm_required=False,source_packages=provenance,root=image.info(),var=var_image.info(),
         files={p.name:digest(p) for p in (root,var,archive)},physical_boot_verified=False)

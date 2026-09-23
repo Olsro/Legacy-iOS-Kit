@@ -2922,6 +2922,7 @@ ipsw_nojailbreak_message() {
 }
 
 ipsw_preference_set() {
+    ipsw_hacktiv8=0
     # sets ipsw variables: ipsw_jailbreak, ipsw_memory, ipsw_verbose
     case $device_latest_vers in
         [76543]* ) ipsw_canjailbreak=1;;
@@ -3039,7 +3040,9 @@ ipsw_preference_set() {
         echo
     fi
 
-    if (( target_vers_maj >= 7 )); then
+    ipsw_hacktiv8_option
+
+    if (( target_vers_maj >= 7 )) || [[ $ipsw_hacktiv8 == 1 ]]; then
         ipsw_canhacktivate=
     fi
     if [[ $ipsw_jailbreak == 1 && -z $ipsw_hacktivate && $ipsw_canhacktivate == 1 ]]; then
@@ -3450,6 +3453,50 @@ ipsw_prepare_logos_add() {
     fi
 }
 
+jailbreak_sources_tar() {
+    # Shared with olsn0w. Can also append to Sundance/g1lbert's Cydia.tar.
+    # Use ustar and numeric root ownership for old on-device tar/HFS tools.
+    local archive="${1:-Olsro.tar}"
+    local payload_root="${3:-$jelbrek}"
+    local operation="-cf"
+    [[ $2 == append ]] && operation="-rf"
+    local owners=(--owner=0 --group=0)
+    [[ $platform == macos ]] && owners=(--uid 0 --gid 0 --uname root --gname wheel)
+    COPYFILE_DISABLE=1 tar --format=ustar "${owners[@]}" "$operation" "$archive" \
+        -C "$payload_root/olsro" private || error "Failed to prepare Olsro repositories."
+}
+
+device_send_olsro_sources() {
+    jailbreak_sources_tar
+    $ssh -p "$ssh_port" root@127.0.0.1 "tar -xf - -C /mnt1" < Olsro.tar ||
+        error "Failed to install Olsro repositories."
+}
+
+jailbreak_sources_dmg() {
+    # Prebuilt legacy filesystems bypass JBFiles (and can replace its result).
+    # Work on a copy and keep the original DMG until build/readback succeeds.
+    local image="$1"
+    jailbreak_sources_tar
+    "$dir/dmg" extract "$image" Olsro-rootfs.hfs || error "Failed to extract jailbreak filesystem."
+    "$dir/hfsplus" Olsro-rootfs.hfs untar Olsro.tar || error "Failed to add Olsro repositories."
+    "$dir/hfsplus" Olsro-rootfs.hfs extract private/etc/apt/sources.list.d/Olsro.list Olsro-readback.list ||
+        error "Failed to read back Olsro repositories."
+    cmp -s "$jelbrek/olsro/private/etc/apt/sources.list.d/Olsro.list" Olsro-readback.list ||
+        error "Olsro repositories readback differs."
+    "$dir/dmg" build Olsro-rootfs.hfs Olsro-rootfs.dmg || error "Failed to rebuild jailbreak filesystem."
+    mv Olsro-rootfs.dmg "$image" || error "Failed to replace prepared jailbreak filesystem."
+    rm -f Olsro-rootfs.hfs Olsro-readback.list
+}
+
+jailbreak_sources_prebuilt_ipsw() {
+    file_extract_from_archive temp.ipsw Restore.plist
+    local image=$($PlistBuddy -c "Print SystemRestoreImages:User" Restore.plist | tr -d '"')
+    [[ -z $image || $image == */* || $image != *.dmg ]] && error "Invalid prebuilt root filesystem path."
+    file_extract_from_archive temp.ipsw "$image"
+    jailbreak_sources_dmg "$image"
+    zip -0 temp.ipsw "$image" || error "Failed to update prebuilt jailbreak IPSW."
+}
+
 ipsw_prepare_jailbreak() {
     if [[ -s "$ipsw_custom.ipsw" ]]; then
         log "Found existing Custom IPSW. Skipping IPSW creation."
@@ -3473,7 +3520,8 @@ ipsw_prepare_jailbreak() {
             [43].* ) JBFiles+=("$jelbrek/fstab_old.tar");;
             *      ) JBFiles+=("$jelbrek/fstab_rw.tar");;
         esac
-        JBFiles+=("freeze.tar")
+        jailbreak_sources_tar
+        JBFiles+=("freeze.tar" "Olsro.tar")
         case $device_target_vers in
             4.2.[8761] )
                 if [[ $device_type != "iPhone1,2" ]]; then
@@ -4261,7 +4309,8 @@ ipsw_prepare_32bit() {
             4.*    ) JBFiles+=("$jelbrek/fstab_old.tar");;
             *      ) JBFiles+=("$jelbrek/fstab_rw.tar");;
         esac
-        JBFiles+=("freeze.tar")
+        jailbreak_sources_tar
+        JBFiles+=("freeze.tar" "Olsro.tar")
         case $device_target_vers in
             9.* ) JBFiles+=("$jelbrek/launchctl.tar" "$jelbrek/zebra.tar");;
             5.* ) JBFiles+=("$jelbrek/cydiasubstrate.tar");;
@@ -5002,6 +5051,8 @@ ipsw_prepare_specialios7() {
         gzip -d freeze.tar.gz
         "$dir/hfsplus" rootfs.dec untar freeze.tar
         "$dir/hfsplus" rootfs.dec untar $jelbrek/LukeZGD.tar
+        jailbreak_sources_tar
+        "$dir/hfsplus" rootfs.dec untar Olsro.tar || error "Failed to install Olsro repositories."
         touch .cydia_no_stash
         "$dir/hfsplus" rootfs.dec add .cydia_no_stash .cydia_no_stash
 
@@ -5111,6 +5162,7 @@ ipsw_prepare_sundanceinh2a() {
     log "Copying freeze.tar to Cydia.tar"
     cp $jelbrek/freeze.tar.gz .
     gzip -d freeze.tar.gz
+    [[ $ipsw_jailbreak == 1 ]] && jailbreak_sources_tar freeze.tar append
     mv freeze.tar $sundance/resources/Cydia.tar
 
     log "Copying IPSWs..."
@@ -5513,6 +5565,7 @@ ipsw_prepare_multipatch() {
         log "Extract RootFS from FS IPSW"
         file_extract_from_archive "$ipsw_name.ipsw" $rootfs_name_fs
         [[ $rootfs_name_fs != "$rootfs_name" ]] && mv $rootfs_name_fs $rootfs_name
+        [[ $ipsw_jailbreak == 1 ]] && jailbreak_sources_dmg "$rootfs_name"
         log "Add RootFS to IPSW"
         zip -r0 temp.ipsw $rootfs_name
     ;;
@@ -5654,6 +5707,8 @@ ipsw_prepare_ios4powder() {
 
     if [[ $ipsw_jailbreak == 1 ]]; then
         JBFiles=("aquila_4.tar" "fstab_old.tar" "cydiasubstrate.tar" "freeze.tar")
+        jailbreak_sources_tar
+        JBFiles+=("Olsro.tar")
         for i in {0..2}; do
             JBFiles[i]=$jelbrek/${JBFiles[$i]}
         done
@@ -5784,6 +5839,8 @@ ipsw_prepare_powder() {
             JBFiles+=("$jelbrek/sshdeb.tar" "openssh.tar" "openssl.tar")
         fi
         JBFiles+=("$jelbrek/LukeZGD.tar")
+        jailbreak_sources_tar
+        JBFiles+=("Olsro.tar")
         cp $jelbrek/freeze.tar.gz .
         gzip -d freeze.tar.gz
     fi
@@ -5965,6 +6022,14 @@ ipsw_prepare_s5l8900() {
     local rname="018-6494-014.dmg"
     local sha1E="4f6539d2032a1c7e1a068c667e393e62d8912700"
     local sha1L="none"
+    # These upstream IPSWs have a pinned hash before repository insertion.
+    # Cache our modified copy separately without changing that upstream check.
+    if [[ $target_vers_maj != 4 && $ipsw_jailbreak == 1 &&
+          -s "$ipsw_custom.ipsw" && -s "$ipsw_custom.ipsw.olsro.sha1" ]] &&
+       [[ $($sha1sum "$ipsw_custom.ipsw" | awk '{print $1}') == "$(<"$ipsw_custom.ipsw.olsro.sha1")" ]]; then
+        log "Verified existing jailbreak IPSW with Olsro repositories."
+        return
+    fi
     ipsw_url="https://github.com/LukeZGD/Legacy-iOS-Kit-Keys/releases/download/jailbreak/"
     if [[ $device_target_vers == "4.1" ]]; then
         rname="018-7079-079.dmg"
@@ -6004,9 +6069,20 @@ ipsw_prepare_s5l8900() {
         device_fw_key_check
         ipsw_prepare_logos_convert
         ipsw_prepare_logos_add
+        [[ $ipsw_jailbreak == 1 && $target_vers_maj != 4 ]] && jailbreak_sources_prebuilt_ipsw
         mv temp.ipsw "$ipsw_custom.ipsw"
+        if [[ $ipsw_jailbreak == 1 && $target_vers_maj != 4 ]]; then
+            $sha1sum "$ipsw_custom.ipsw" | awk '{print $1}' > "$ipsw_custom.ipsw.olsro.sha1"
+        fi
         return
     elif [[ $sha1L == "$sha1E" ]]; then
+        if [[ $ipsw_jailbreak == 1 && $target_vers_maj != 4 ]]; then
+            cp "$ipsw_custom2.ipsw" temp.ipsw
+            jailbreak_sources_prebuilt_ipsw
+            mv temp.ipsw "$ipsw_custom.ipsw"
+            $sha1sum "$ipsw_custom.ipsw" | awk '{print $1}' > "$ipsw_custom.ipsw.olsro.sha1"
+            return
+        fi
         log "Verified existing Custom IPSW. Skipping IPSW creation."
         return
     else
@@ -6033,7 +6109,11 @@ ipsw_prepare_s5l8900() {
             ipsw_prepare_logos_convert
             ipsw_prepare_logos_add
         fi
+        [[ $ipsw_jailbreak == 1 ]] && jailbreak_sources_prebuilt_ipsw
         mv temp.ipsw "$ipsw_custom.ipsw"
+        if [[ $ipsw_jailbreak == 1 ]]; then
+            $sha1sum "$ipsw_custom.ipsw" | awk '{print $1}' > "$ipsw_custom.ipsw.olsro.sha1"
+        fi
         return
     fi
 
@@ -6059,7 +6139,8 @@ ipsw_prepare_custom() {
     if [[ -s "$ipsw_custom.ipsw" ]]; then
         log "Found existing Custom IPSW. Skipping IPSW creation."
         return
-    elif [[ $device_target_vers == "4.1" && $ipsw_jailbreak != 1 ]]; then
+    elif [[ $device_target_vers == "4.1" && $ipsw_jailbreak != 1 &&
+            $ipsw_hacktiv8 != 1 ]]; then
         log "No need to create custom IPSW for non-jailbroken restores on $device_type-$device_target_build"
         return
     fi
@@ -6565,7 +6646,8 @@ restore_deviceprepare() {
                 shsh_save version $device_latest_vers
                 device_enter_mode pwnDFU
             elif [[ $device_target_vers == "$device_latest_vers" ]]; then
-                if [[ $ipsw_jailbreak == 1 || $ipsw_gasgauge_patch == 1 ]]; then
+                if [[ $ipsw_jailbreak == 1 || $ipsw_gasgauge_patch == 1 ||
+                      $ipsw_hacktiv8 == 1 ]]; then
                     shsh_save version $device_latest_vers
                     device_buttons
                 fi
@@ -6603,7 +6685,8 @@ restore_deviceprepare() {
             elif [[ $device_target_other != 1 && $device_target_powder != 1 ]]; then
                 shsh_save
             fi
-            if [[ $device_target_vers == "$device_latest_vers" && $ipsw_gasgauge_patch != 1 ]]; then
+            if [[ $device_target_vers == "$device_latest_vers" &&
+                  $ipsw_gasgauge_patch != 1 && $ipsw_hacktiv8 != 1 ]]; then
                 device_enter_mode Recovery
             else
                 device_buttons
@@ -6813,10 +6896,49 @@ restore_notpwned64() {
     restore_futurerestore
 }
 
+ipsw_hacktiv8_option() {
+    if (( device_proc >= 7 )) || [[ $device_target_setnonce == 1 ]]; then
+        return
+    fi
+    input "Hacktiv8 Option"
+    local setup_question="Remove Setup.app?"
+    local hacktiv8_method
+    hacktiv8_method=$(python3 ../resources/olsn0w/hacktiv8.py --check \
+        --product "$device_type" --version "$device_target_vers" \
+        --build "$device_target_build" 2>/dev/null)
+    if [[ -n $hacktiv8_method ]]; then
+        print "* Apply Hacktiv8 to the target filesystem and keep Setup.app."
+        print "* Hacktiv8 requires the jailbreak for this restore, which will be enabled."
+        setup_question="Apply Hacktiv8 and keep Setup.app?"
+    else
+        print "* Hacktiv8 does not support this iOS/device/build."
+        print "* Setup.app can still be removed without applying Hacktiv8."
+    fi
+    select_yesno "$setup_question"
+    if [[ $? == 1 ]]; then
+        ipsw_hacktiv8=1
+        ipsw_hacktivate=
+        if [[ -n $hacktiv8_method ]]; then
+            ipsw_jailbreak=1
+        fi
+    else
+        ipsw_hacktiv8=0
+    fi
+}
+
+ipsw_prepare_hacktiv8() {
+    [[ $ipsw_hacktiv8 != 1 ]] && return 0
+    [[ ! -s "$ipsw_custom.ipsw" ]] && error "No custom IPSW available for the selected Hacktiv8 option."
+    log "Applying the selected Hacktiv8/Setup.app policy to the target IPSW"
+    python3 ../resources/olsn0w/hacktiv8.py --ipsw "$ipsw_custom.ipsw" \
+        --product "$device_type" --version "$device_target_vers" --build "$device_target_build" ||
+        error "Hacktiv8/Setup.app preparation failed. The device has not been restored."
+}
+
 ipsw_prepare() {
     case $device_proc in
         1 )
-            if [[ $ipsw_jailbreak == 1 ]]; then
+            if [[ $ipsw_jailbreak == 1 || $ipsw_hacktiv8 == 1 ]]; then
                 ipsw_prepare_s5l8900
             elif [[ $device_target_vers == "$device_latest_vers" && ! -s "$ipsw_path.ipsw" ]]; then
                 ipsw_path="../$ipsw_latest_path"
@@ -6832,7 +6954,8 @@ ipsw_prepare() {
             elif [[ $device_target_tethered == 1 ]]; then
                 ipsw_prepare_tethered
             elif [[ $device_target_other == 1 || $ipsw_gasgauge_patch == 1 ]] ||
-                 [[ $device_target_vers == "$device_latest_vers" && $ipsw_jailbreak == 1 ]]; then
+                 [[ $device_target_vers == "$device_latest_vers" &&
+                    ( $ipsw_jailbreak == 1 || $ipsw_hacktiv8 == 1 ) ]]; then
                 case $device_type in
                     iPhone2,1 ) ipsw_prepare_jailbreak;;
                     iPod2,1 ) ipsw_prepare_custom;;
@@ -6868,7 +6991,8 @@ ipsw_prepare() {
                     4.3* ) ipsw_prepare_ios4powder;;
                     * ) ipsw_prepare_powder;;
                 esac
-            elif [[ $device_target_vers != "$device_latest_vers" || $ipsw_gasgauge_patch == 1 ]]; then
+            elif [[ $device_target_vers != "$device_latest_vers" ||
+                    $ipsw_gasgauge_patch == 1 || $ipsw_hacktiv8 == 1 ]]; then
                 ipsw_prepare_32bit
             fi
             if [[ $ipsw_fourthree == 1 ]]; then
@@ -6892,6 +7016,7 @@ ipsw_prepare() {
             fi
         ;;
     esac
+    ipsw_prepare_hacktiv8
 }
 
 restore_usepwndfu64_option() {
@@ -7703,6 +7828,7 @@ device_ramdisk() {
                 [43].* ) :;;
                 * ) device_send_rdtar LukeZGD.tar;;
             esac
+            device_send_olsro_sources
 
             # remove patcyh except for ios 8.3+ where it's required
             case $vers in
@@ -8099,6 +8225,7 @@ menu_ramdisk() {
                 cp $jelbrek/freeze.tar.gz .
                 gzip -d freeze.tar.gz
                 cat freeze.tar | $ssh -p $ssh_port root@127.0.0.1 "cd /mnt1; tar -xvf - -C .; mv private/var/lib private"
+                device_send_olsro_sources
                 if [[ $device_vers == "9"* ]]; then
                     cat $jelbrek/launchctl.tar | $ssh -p $ssh_port root@127.0.0.1 "tar -xvf - -C /mnt1"
                 fi
@@ -10082,6 +10209,7 @@ ipsw_version_set() {
 ipsw_custom_set() {
     if [[ $ipsw_fourthree == 1 ]]; then
         ipsw_custom="../${device_type}_${device_target_vers}_${device_target_build}_FourThree"
+        [[ $ipsw_hacktiv8 == 1 ]] && ipsw_custom+="-Hacktiv8"
         return
     fi
 
@@ -10102,11 +10230,15 @@ ipsw_custom_set() {
     if [[ $ipsw_gasgauge_patch == 1 ]]; then
         ipsw_custom+="G"
     fi
+    if [[ $ipsw_hacktiv8 == 1 ]]; then
+        ipsw_custom+="-Hacktiv8"
+    fi
     if [[ $ipsw_hacktivate == 1 ]]; then
         ipsw_custom+="H"
     fi
     if [[ $ipsw_jailbreak == 1 ]]; then
-        ipsw_custom+="J"
+        # Do not reuse pre-Olsro jailbreak images; leave stock restore names alone.
+        ipsw_custom+="J-Olsro1"
     fi
     if [[ $device_proc == 1 && $target_vers_maj != 4 ]]; then
         ipsw_custom2="$ipsw_custom"
@@ -11085,6 +11217,7 @@ device_jailbreak_gilbert() {
     log "Copying freeze.tar to Cydia.tar"
     cp ../freeze.tar.gz .
     gzip -d freeze.tar.gz
+    jailbreak_sources_tar freeze.tar append ..
     mv freeze.tar payload/common/Cydia.tar
     log "Running g1lbertJB..."
     "../../$dir/gilbertjb"
@@ -12278,6 +12411,7 @@ device_fourthree_step3() {
     cp $jelbrek/freeze.tar.gz .
     gzip -d freeze.tar.gz
     cat freeze.tar | $ssh -p $ssh_port root@127.0.0.1 "tar -xvf - -C /mnt1"
+    device_send_olsro_sources
     if [[ $ipsw_openssh == 1 ]]; then
         log "Installing OpenSSH"
         cat $jelbrek/sshdeb.tar | $ssh -p $ssh_port root@127.0.0.1 "tar -xvf - -C /mnt1"

@@ -15,10 +15,39 @@ from firmware import acquire, extract
 from hfs import HFS
 from img3 import img3
 from rescue_prepare import RAM_VOLUME_BYTES, RECIPE_VERSION
+from restore_environment import report_build
 from restore import checkpoint
 from progress import activity
 
 HANDOFF = 'olsn0w-restore-handoff'
+MULTIPATCH_BOOTARGS = ('rd=md0 -v nand-enable-reformat=1 amfi=0xff '
+                       'amfi_get_out_of_my_way=1 cs_enforcement_disable=1 pio-error=0')
+
+
+def multipatch_iboot_flags(component):
+    """Leave RSA/ticket admission to futurerestore exactly once."""
+    if component == 'iBSS':
+        return []
+    if component == 'iBEC':
+        return ['--debug', '-b', MULTIPATCH_BOOTARGS]
+    raise ValueError('Unsupported multipatch boot component')
+
+
+def multipatch_key_metadata(base, donor):
+    """Serve donor restore-component keys under the signed-base build route."""
+    if (base.get('identifier') != donor.get('identifier') or
+            base.get('buildid') != '12H321' or donor.get('buildid') != '10B329'):
+        raise ValueError('Unexpected multipatch firmware-key identity')
+    output=copy.deepcopy(base)
+    for image in ('DeviceTree','Kernelcache'):
+        target=[item for item in output.get('keys',[]) if item.get('image')==image]
+        source=[item for item in donor.get('keys',[]) if item.get('image')==image]
+        if len(target)!=1 or len(source)!=1:
+            raise ValueError('Missing unique multipatch firmware key: '+image)
+        for field in ('iv','key'):
+            if not source[0].get(field):raise ValueError('Incomplete multipatch firmware key: '+image)
+            target[0][field]=source[0][field]
+    return output
 
 
 def handoff_sleep():
@@ -129,8 +158,8 @@ def copy_ipsw(source, output, replacements, additions=()):
                     raise ValueError('Unmodified stock IPSW component changed')
 
 
-def multipatch_manifest(data, product):
-    """Route the erase identity to Legacy Kit's 6.1.3 downgrade components."""
+def multipatch_manifest(data, product, donor):
+    """Route the erase identity to the complete 6.1.3 restore component records."""
     document=plistlib.loads(data);board,chip,board_id=MODELS[product]
     matches=[item for item in document['BuildIdentities']
              if item['Info'].get('DeviceClass')==board
@@ -138,9 +167,20 @@ def multipatch_manifest(data, product):
              and integer(item['ApChipID'])==chip and integer(item['ApBoardID'])==board_id]
     if document.get('ProductBuildVersion')!='12H321' or product not in document.get('SupportedProductTypes',[]) or len(matches)!=1:
         raise ValueError('Unexpected signed-base manifest for multipatch')
-    manifest=matches[0]['Manifest']
-    manifest['RestoreDeviceTree']['Info']['Path']='Downgrade/RestoreDeviceTree'
-    manifest['RestoreKernelCache']['Info']['Path']='Downgrade/RestoreKernelCache'
+    donor_matches=[item for item in donor['BuildIdentities']
+                   if item['Info'].get('DeviceClass')==board
+                   and item['Info'].get('RestoreBehavior')=='Erase'
+                   and integer(item['ApChipID'])==chip and integer(item['ApBoardID'])==board_id]
+    if donor.get('ProductBuildVersion')!='10B329' or len(donor_matches)!=1:
+        raise ValueError('Unexpected multipatch restore donor manifest')
+    manifest=matches[0]['Manifest'];donor_manifest=donor_matches[0]['Manifest']
+    for component,path in (('RestoreDeviceTree','Downgrade/RestoreDeviceTree'),
+                           ('RestoreKernelCache','Downgrade/RestoreKernelCache')):
+        # In particular, the 6.1.3 kernel PartialDigest tells futurerestore how
+        # to personalize the donor IMG3. Keeping the 8.4.1 component record
+        # makes it transmit a different kernel image that old A5 iBEC rejects.
+        manifest[component]=copy.deepcopy(donor_manifest[component])
+        manifest[component]['Info']['Path']=path
     fmt=plistlib.FMT_BINARY if data.startswith(b'bplist00') else plistlib.FMT_XML
     output=plistlib.dumps(document,fmt=fmt,sort_keys=False)
     checked=plistlib.loads(output)
@@ -165,9 +205,11 @@ def prepare(session, destination, ipsw=None, keys=None):
     if destination.exists():
         raise ValueError('Preserve the earlier provisioning bundle')
     source, metadata, _, identity = acquire(selected['product'], '8.4.1', ipsw, keys, '12H321')
-    firmware, _ = extract(selected['product'], '8.4.1', source, keys, '12H321')
+    base_firmware, _ = extract(selected['product'], '8.4.1', source, keys, '12H321')
+    firmware=base_firmware
     selected_profile=profile(selected['product'])
     multipatch=bool(selected_profile.get('multipatch'))
+    native6=report_build(rescue)=='10B329'
     if rescue.get('multipatch') is not multipatch:
         raise ValueError('RAM rescue multipatch policy differs from selected model')
     destination.mkdir(parents=True, mode=0o700)
@@ -180,7 +222,7 @@ def prepare(session, destination, ipsw=None, keys=None):
     from asr_patch import patch as patch_asr
     from signing import resign, verify
     asr_original = image.read('/usr/sbin/asr')
-    if multipatch:
+    if native6:
         # Match Legacy iOS Kit --multipatch: the 6.1.3 restore environment
         # receives its checked replacement ASR instead of the iOS 8 patch.
         asr=(KIT/'resources/patch/asr').read_bytes()
@@ -190,7 +232,14 @@ def prepare(session, destination, ipsw=None, keys=None):
         asr, asr_report = patch_asr(asr_original)
     asr_file = destination/'asr.patched'
     asr_file.write_bytes(asr)
-    resign(asr_file, verify(asr_original)['entitlements'])
+    if not native6:
+        resign(asr_file, verify(asr_original)['entitlements'])
+    elif asr_file.read_bytes() != (KIT/'resources/patch/asr').read_bytes():
+        # Legacy iOS Kit's gas-gauge path installs this already-signed ASR
+        # byte-for-byte.  Re-signing it adds a second code directory and no
+        # longer reproduces the multipatch restore environment exercised by
+        # the Kit on A5 hardware.
+        raise ValueError('Multipatch ASR differs from the checked Kit binary')
     image.rename_file('/usr/sbin/asr', '/usr/sbin/asr_olsn0w_original')
     image.add('/usr/sbin/asr', asr_file.read_bytes(), 0o755)
     if image.read('/usr/sbin/asr') != asr_file.read_bytes():
@@ -208,8 +257,38 @@ def prepare(session, destination, ipsw=None, keys=None):
         raise ValueError('Original RAM reboot executable was not preserved')
     # Leave the flashable boot chain untouched. Only the restore iBEC receives
     # debug/AMFI boot arguments; futurerestore applies its own RSA patch later.
-    if multipatch:
-        shutil.copyfile(session/'iBEC.img3',destination/'iBEC.img3')
+    if native6:
+        # The RAM rescue carries already-admitted iBSS/iBEC images because it
+        # sends them directly.  The IPSW passed to futurerestore must not: its
+        # --use-pwndfu path applies RSA and the iBEC ticket patch itself.
+        # Repack an unpatched iBSS and an iBEC containing boot arguments only,
+        # both from the checked 6.1.3 multipatch restore environment.
+        restore_inputs,restore_keys,restore_manifest,restore_identity=acquire(
+            selected['product'],'6.1.3',build='10B329')
+        restore_firmware,_=extract(selected['product'],'6.1.3',restore_inputs,
+                                   build='10B329')
+        restore_key_metadata=multipatch_key_metadata(metadata,restore_keys)
+        (destination/'futurerestore-keys.json').write_text(
+            json.dumps(restore_key_metadata,indent=2,sort_keys=True)+'\n')
+        # The 6.1.3 components are only the native Data/gas-gauge-safe restore
+        # environment.  Legacy iOS Kit deliberately keeps the selected signed
+        # system image itself at 8.4.1.
+        technical=destination/'signed-technical';technical.mkdir()
+        signed_root=HFS(base_firmware/'rootfs.hfs')
+        technical_names=['System/Library/CoreServices/SystemVersion.plist',
+                         'System/Library/Caches/com.apple.kernelcaches/kernelcache']
+        for name in technical_names:
+            data=((base_firmware/'Kernelcache.img3').read_bytes()
+                  if name=='System/Library/Caches/com.apple.kernelcaches/kernelcache'
+                  else signed_root.read('/'+name))
+            if not data:raise ValueError('Empty signed technical artifact: '+name)
+            path=technical/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
+        run([tools()/'xpwntool',restore_firmware/'iBSS.raw',destination/'iBSS.img3',
+             '-t',restore_firmware/'iBSS.orig'])
+        run([tools()/'iBoot32Patcher',restore_firmware/'iBEC.raw',destination/'iBEC.patched',
+             *multipatch_iboot_flags('iBEC')],destination/'ibec-patch.log',patcher=True)
+        run([tools()/'xpwntool',destination/'iBEC.patched',destination/'iBEC.img3',
+             '-t',restore_firmware/'iBEC.orig'])
     else:
         run([tools()/'iBoot32Patcher', firmware/'iBEC.raw', destination/'iBEC.patched',
              '--debug', '-b', 'rd=md0 -v amfi=0xff cs_enforcement_disable=1'],
@@ -226,51 +305,90 @@ def prepare(session, destination, ipsw=None, keys=None):
             raise ValueError('Restore RAM packing readback differs')
         replacements[identity['Manifest'][component]['Info']['Path']] = blob
     additions=set();multipatch_manifest_sha256=None
-    if multipatch:
+    if native6:
         components=(('iBSS','iBSS.img3','ibss',None),
-                    ('RestoreDeviceTree','DeviceTree.img3','dtre','Downgrade/RestoreDeviceTree'),
-                    ('RestoreKernelCache','Kernelcache.img3','krnl','Downgrade/RestoreKernelCache'))
+                    ('RestoreDeviceTree','DeviceTree.orig','dtre','Downgrade/RestoreDeviceTree'),
+                    ('RestoreKernelCache','Kernelcache.orig','krnl','Downgrade/RestoreKernelCache'))
         for component,name,kind,downgrade_path in components:
-            blob=(session/name).read_bytes();actual,tags,_=img3(blob)
-            if actual!=kind or 'KBAG' in tags:
-                raise ValueError('Unexpected encrypted multipatch restore component: '+component)
+            source_file=(destination/name if component=='iBSS' else restore_firmware/name)
+            blob=source_file.read_bytes();actual,tags,_=img3(blob)
+            encrypted=component!='iBSS'
+            if actual!=kind or ('KBAG' in tags) is not encrypted:
+                raise ValueError('Unexpected multipatch restore component encoding: '+component)
             path=downgrade_path or identity['Manifest'][component]['Info']['Path']
             replacements[path]=blob
             if downgrade_path:additions.add(path)
         with zipfile.ZipFile(source) as archive:
-            changed_manifest=multipatch_manifest(archive.read('BuildManifest.plist'),selected['product'])
+            changed_manifest=multipatch_manifest(
+                archive.read('BuildManifest.plist'),selected['product'],restore_manifest)
         replacements['BuildManifest.plist']=changed_manifest
         multipatch_manifest_sha256=hashlib.sha256(changed_manifest).hexdigest()
-    from filevault import decrypt_stream
-    os_member = identity['Manifest']['OS']['Info']['Path']
-    os_keys = [key for key in metadata['keys'] if key['image'] == 'RootFS']
-    if len(os_keys) != 1 or Path(os_member).name != os_keys[0]['filename']:
-        raise ValueError('System image/key identity mismatch')
-    plaintext = destination/'system.asr.dmg'
-    with zipfile.ZipFile(source) as archive, archive.open(os_member) as incoming:
-        decrypt_stream(incoming,archive.getinfo(os_member).file_size,plaintext,os_keys[0]['key'])
-    verified = destination/'system.verify.hfs'
-    run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=600)
-    if digest(verified) != digest(firmware/'rootfs.hfs'):
-        raise ValueError('Plaintext ASR image differs from the original filesystem')
-    verified.unlink()
-    replacements[os_member] = plaintext
+    target_os_member=identity['Manifest']['OS']['Info']['Path']
+    if native6:
+        # Legacy Kit's multipatch starts from a custom IPSW: it decrypts the
+        # selected filesystem and rebuilds a plain UDIF before handing it to
+        # the older restore ASR. The stock FileVault member cannot be opened
+        # by iOS 6 ASR and fails source validation with Authentication error.
+        rebuilt=destination/'system.asr.dmg'
+        run([tools()/'dmg','build',base_firmware/'rootfs.hfs',rebuilt],
+            destination/'system-build.log',timeout=600)
+        verified=destination/'system.verify.hfs'
+        run([tools()/'dmg','extract',rebuilt,verified],
+            destination/'system-verify.log',timeout=600)
+        if digest(verified)!=digest(base_firmware/'rootfs.hfs'):
+            raise ValueError('Rebuilt multipatch ASR image differs from signed base')
+        verified.unlink()
+        replacements[target_os_member]=rebuilt
+        asr_source='rebuilt-udif-from-signed-base-hfs'
+        transient_system=rebuilt
+    else:
+        from filevault import decrypt_stream
+        os_keys = [key for key in metadata['keys'] if key['image'] == 'RootFS']
+        if len(os_keys) != 1 or Path(target_os_member).name != os_keys[0]['filename']:
+            raise ValueError('System image/key identity mismatch')
+        plaintext = destination/'system.asr.dmg'
+        with zipfile.ZipFile(source) as archive, archive.open(target_os_member) as incoming:
+            decrypt_stream(incoming,archive.getinfo(target_os_member).file_size,
+                           plaintext,os_keys[0]['key'])
+        verified = destination/'system.verify.hfs'
+        run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=600)
+        if digest(verified) != digest(base_firmware/'rootfs.hfs'):
+            raise ValueError('Plaintext ASR image differs from the original filesystem')
+        verified.unlink()
+        replacements[target_os_member] = plaintext
+        asr_source='original-udif-without-filevault-envelope'
+        transient_system=plaintext
     pending = destination/'base8.pending.ipsw'
     copy_ipsw(source, pending, replacements,additions)
     pending.rename(destination/'base8.ipsw')
     # copy_ipsw checked the replacement inside the completed archive; the
     # standalone plaintext image is no longer an input to restoration.
-    plaintext.unlink()
+    if transient_system is not None:transient_system.unlink()
     names = ['asr.patched','base8.ipsw','restore-ram.hfs','Ramdisk.img3','iBEC.img3']
+    if native6:
+        names+=['iBSS.img3','futurerestore-keys.json']
+        names += [str(path.relative_to(destination)) for path in
+                  (destination/'signed-technical').rglob('*') if path.is_file()]
     report = dict(kind='signed-base-restore-handoff',identity=selected,product=selected['product'],
                   build='12H321',reboot_token=token,rescue_session=str(session),
                   stock_system_preserved=True,multipatch=multipatch,
+                  stock_system_member_preserved=not native6,
+                  restore_filesystem_build='12H321',
                   restore_environment_build=rescue.get('restore_environment_build'),
-                  restore_component_policy=('legacy-kit-4s-multipatch' if multipatch else 'signed-base'),
+                  restore_component_policy=('legacy-kit-4s-multipatch' if multipatch else
+                                            'native6-ram-writer' if native6 else 'signed-base'),
+                  multipatch_component_metadata_build=('10B329' if native6 else None),
+                  multipatch_restore_component_encoding=(
+                      'encrypted-donor-for-libipatcher' if native6 else None),
+                  restore_key_policy=('signed-base-with-10B329-restore-components'
+                                      if native6 else 'signed-base'),
+                  restore_bootchain_policy=('futurerestore-unpatched-rsa' if native6
+                                            else 'futurerestore-stock-rsa'),
                   multipatch_manifest_sha256=multipatch_manifest_sha256,
                   device_modified=False,physical_restore_verified=False,
-                  asr_patch=asr_report,asr_source='original-udif-without-filevault-envelope',
-                  stock_hfs_sha256=digest(firmware/'rootfs.hfs'),handoff_storage='nvram',
+                  asr_patch=asr_report,asr_source=asr_source,
+                  stock_hfs_sha256=digest(base_firmware/'rootfs.hfs'),
+                  restore_hfs_sha256=digest(base_firmware/'rootfs.hfs'),handoff_storage='nvram',
                   handoff_package_sha256=digest(KIT/'resources/jailbreak/freeze.tar.gz'),
                   files={name:digest(destination/name) for name in names},stock_ipsw_sha256=digest(source))
     checkpoint(destination/'manifest.json', report)

@@ -5,11 +5,54 @@ import tempfile
 import unittest
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore import install,Rescue,preview_matches,copy_image,refresh_layout,resume_system_fsck
+from restore import (install,Rescue,preview_matches,copy_image,refresh_layout,
+                     resume_system_fsck,data_formatter,require_data_environment,
+                     _finish_data,_finish_install)
 from layout import encode,editor_commands
 from test_layout import fixture
 
 class RestoreGuards(unittest.TestCase):
+    def test_a5_ios6_requires_native6_for_every_minor_release(self):
+        for product in ('iPod5,1','iPhone4,1','iPad2,5','iPad3,1'):
+            for release in ('6.0','6.0.1','6.0.2','6.1','6.1.2','6.1.3'):
+                with self.subTest(product=product,release=release):
+                    require_data_environment(product,release,'10B329')
+                    with self.assertRaisesRegex(ValueError,'native iOS 6 RAM'):
+                        require_data_environment(product,release,'12H321')
+
+    def test_data_environment_does_not_change_qualified_a6_or_ios7_8(self):
+        for product in ('iPhone5,1','iPad3,4'):
+            for release in ('6.0','6.1.3','6.1.4'):
+                require_data_environment(product,release,'12H321')
+        for product in ('iPod5,1','iPhone4,1','iPad2,5','iPad3,1'):
+            for release in ('7.0','7.1.2','8.0','8.1.3','8.4.1'):
+                for build in ('10B329','12H321'):
+                    require_data_environment(product,release,build)
+
+    def test_incompatible_data_environment_fails_before_resumed_writes(self):
+        ram=Mock(rescue_build='12H321')
+        report=dict(product='iPod5,1',version='6.1.3')
+        for operation,args in [(_finish_data,('.',ram,report,None,None,{},Mock(),Mock())),
+                               (_finish_install,('.',ram,report,None,None,{},[],Mock()))]:
+            with self.assertRaisesRegex(ValueError,'native iOS 6 RAM'):
+                operation(*args)
+        self.assertFalse(ram.method_calls)
+
+    def test_incompatible_data_environment_fails_before_install_device_access(self):
+        identity=dict(ecid=1,product='iPod5,1',board='n78ap',chip=0x8942,board_id=0)
+        ram=Mock(identity=identity,rescue_build='12H321')
+        report=dict(identity=identity,product='iPod5,1',version='6.1.3')
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('restore.checked_manifest',return_value=report), \
+             patch('restore.require_reserve'):
+            with self.assertRaisesRegex(ValueError,'native iOS 6 RAM'):
+                install(folder,ram,erase=True)
+        self.assertFalse(ram.method_calls)
+
+    def test_multipatch_uses_the_ios6_native_data_formatter(self):
+        self.assertEqual(data_formatter('10B329'),'/sbin/newfs_hfs')
+        self.assertEqual(data_formatter('12H321'),'/mnt1/olsn0w/restore-newfs')
+        with self.assertRaises(ValueError):data_formatter('unknown')
     def test_erase_and_identity_checks_precede_device_access(self):
         ram=Mock();ram.identity={'ecid':2}
         with patch('restore.checked_manifest',return_value={'identity':{'ecid':1}}):
@@ -56,6 +99,10 @@ class RestoreGuards(unittest.TestCase):
 
     def test_unpinned_transport_is_rejected(self):
         with self.assertRaises(ValueError):Rescue(['ssh','root@127.0.0.1'],{})
+    def test_multipatch_rescue_uses_its_ios6_kernel_identity(self):
+        prefix=['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1']
+        ram=Rescue(prefix,dict(product='iPhone4,1',board='n94ap',chip=0x8940,board_id=8))
+        self.assertEqual(ram.rescue_build,'10B329')
     def test_native_fsck_repairs_then_requires_a_clean_verification(self):
         prefix=['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1']
         ram=Rescue(prefix,dict(product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2))

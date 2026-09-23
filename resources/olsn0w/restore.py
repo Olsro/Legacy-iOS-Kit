@@ -75,7 +75,14 @@ def prepare(session, system, relay, base, destination):
     if destination.exists():raise ValueError('Preserve the previous restore bundle')
     setup_app_removed=source.get('setup_app_removed')
     if type(setup_app_removed) is not bool:
-        raise ValueError('Target system lacks an explicit Setup.app policy')
+        raise ValueError('Target system lacks an explicit Hacktiv8/Setup.app policy')
+    skip_activation=setup_app_removed or source.get('hacktiv8') is not None
+    if setup_app_removed and source.get('hacktiv8') is not None:
+        raise ValueError('Hacktiv8 requires Setup.app to be preserved; regenerate the system')
+    if skip_activation:
+        from hacktiv8 import verify_installed
+        verify_installed(HFS(system/'system.hfs'), source.get('hacktiv8'),
+                         source['version'], source['product'])
     destination.mkdir(parents=True,mode=0o700)
     selected_profile=profile(source['product'])
     personalized=personalize(
@@ -83,10 +90,10 @@ def prepare(session, system, relay, base, destination):
         has_baseband=selected_profile['has_baseband'],
         baseband_family=selected_profile.get('baseband_family','Mav5'),
         include_modem=baseband_strategy(source['product'])=='update',
-        activate_on_target=fresh and not setup_app_removed,
-        omit_activation=setup_app_removed)
-    if (personalized.get('activation_omitted') is not setup_app_removed or
-            personalized.get('activate_on_target') is not (fresh and not setup_app_removed)):
+        activate_on_target=fresh and not skip_activation,
+        omit_activation=skip_activation)
+    if (personalized.get('activation_omitted') is not skip_activation or
+            personalized.get('activate_on_target') is not (fresh and not skip_activation)):
         raise ValueError('Personalization activation policy differs from the target system')
     for name, source_path in [('system.hfs',system/'system.hfs'),('root8.hfs',base/'root8.hfs'),
                               ('data8.hfs',base/'data8.hfs'),('data-seed.tar',system/'data-seed.tar')]:
@@ -109,7 +116,7 @@ def prepare(session, system, relay, base, destination):
     require_reserve(destination/'system.hfs',root=True)
     target.normalize_root()
     boot=HFS(destination/'root8.hfs')
-    boot.replace_regular('/olsn0w/relay.bin',(relay/'relay.bin').read_bytes())
+    update_bootstrap_relay(boot,source['product'],relay)
     boot.normalize_root()
     for name in ('root8.hfs','data8.hfs'):
         require_reserve(destination/name)
@@ -133,17 +140,33 @@ def prepare(session, system, relay, base, destination):
            'ssh_client_rsa','ssh_host_rsa_key.pub']
     report=dict(identity=identity,product=source['product'],version=source['version'],build=source['build'],
                 generation=source['generation'],layout=layout,kind='install-fresh-base' if fresh else 'reinstall-provisioned-base',
-                setup_app_removed=setup_app_removed,
-                activation_mode=('skipped-setup-removed' if setup_app_removed else
+                setup_app_removed=setup_app_removed, hacktiv8=source.get('hacktiv8'),
+                activation_mode=('skipped-hacktiv8' if source.get('hacktiv8') is not None else
+                                 'skipped-setup-removed' if setup_app_removed else
                                  'official-on-target' if fresh else 'preserved-official-records'),
                 files={n:digest(destination/n) for n in names},physical_boot_verified=False)
     checkpoint(destination/'manifest.json',report)
     return destination
 
 
+def update_bootstrap_relay(boot, product, relay):
+    if profile(product)['soc'].startswith('a5'):
+        from a5_loader import relay_images, payload, WRAPPER
+        images=relay_images(product,relay)
+        if (boot.read('/usr/local/bin/kloader')!=WRAPPER or
+                boot.read('/usr/local/bin/4smulti_kloader')!=payload()):
+            raise ValueError('Bootstrap A5 loader differs from the qualified two-image loader')
+    else:
+        images={'relay.bin':(Path(relay)/'relay.bin').read_bytes()}
+    for name,data in images.items():
+        path='/olsn0w/'+name
+        boot.replace_regular(path,data)
+        if boot.read(path)!=data:raise ValueError('Bootstrap relay readback differs: '+name)
+
+
 class Rescue:
     """Authenticated RAM connection supplied by the selected-device loader."""
-    def __init__(self, prefix, identity, maintenance='/olsn0w-maintenance'):
+    def __init__(self, prefix, identity, maintenance='/olsn0w-maintenance', *, rescue_build=None):
         if not isinstance(prefix,list) or not prefix or Path(prefix[0]).name!='ssh':
             raise ValueError('Expected an SSH argument vector')
         if prefix[-1]!='root@127.0.0.1' or 'StrictHostKeyChecking=yes' not in prefix:
@@ -153,6 +176,9 @@ class Rescue:
         if (identity['board'],identity['chip'],identity['board_id'])!=(board,chip,board_id):
             raise ValueError('Invalid selected hardware identity')
         self.prefix,self.identity,self.maintenance=prefix,identity,maintenance
+        from restore_environment import checked_build, selected_build
+        self.rescue_build=checked_build(identity['product'],
+            rescue_build if rescue_build is not None else selected_build(identity['product']))
     def run(self, command, data=None, timeout=180):
         result=subprocess.run(self.prefix+[command],input=data,capture_output=True,timeout=timeout)
         if result.returncode:
@@ -161,7 +187,8 @@ class Rescue:
     def tool(self,name):return self.maintenance+'/'+name
     def guard(self, mounted=()):
         state=self.run(self.tool('sysctl')+' hw.model kern.osversion').decode()
-        if ('hw.model: '+self.identity['board'].upper()+'\n' not in state or 'kern.osversion: 12H321\n' not in state):
+        if ('hw.model: '+self.identity['board'].upper()+'\n' not in state or
+                'kern.osversion: '+self.rescue_build+'\n' not in state):
             raise ValueError('Wrong RAM system identity')
         mounts=self.run('/sbin/mount').decode().splitlines()
         if not any(x.startswith('/dev/md0 on / ') for x in mounts):raise ValueError('Root is not RAM')
@@ -251,7 +278,29 @@ def copy_image(ram, path, device, *, sparse=False, progress=print, label='Image'
                     last_percent=percent
 
 
+def data_formatter(rescue_build):
+    if rescue_build=='10B329':return '/sbin/newfs_hfs'
+    if rescue_build=='12H321':return '/mnt1/olsn0w/restore-newfs'
+    raise ValueError('Unsupported restore formatter environment')
+
+
+def require_data_environment(product, release, rescue_build):
+    """Reject the A5/iOS6 cross-kernel crypto view before changing storage.
+
+    On N78AP, writing encrypted Data through 12H321 passes its own fsck but
+    10B329 reads different first AES blocks and cannot mount it. Native6 writes
+    have been physically validated through SpringBoard and an APT update.
+    Keep the already-qualified A6/A6X and iOS7/8 paths unchanged. This is a
+    fail-closed guard, not qualification of a new signed-base restore route.
+    """
+    if (profile(product)['soc'].startswith('a5') and version(release)[0] == 6
+            and rescue_build != '10B329'):
+        raise ValueError('A5 iOS 6 Data requires the native iOS 6 RAM environment (10B329); '
+                         'do not format or repair it through the iOS 8 rescue')
+
+
 def _finish_install(bundle,ram,report,layout,expected,state,roles,progress):
+    require_data_environment(report['product'], report['version'], ram.rescue_build)
     journal=bundle/'installation.json'
     messages={
         'writing-system':'Installing iOS '+report['version']+'. The phone bar may remain unchanged; follow the progress below.',
@@ -273,12 +322,23 @@ def _finish_install(bundle,ram,report,layout,expected,state,roles,progress):
         stage('writing-'+role);copy_image(ram,bundle/name,dev,progress=progress,label={'system':'iOS '+report['version'],'bootstrap':'Boot system','bootstrap-data':'Boot data'}[role])
         if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read(dev,0,1):raise RuntimeError('Parent/child mapping differs')
         (bundle/(role+'-fsck.log')).write_bytes(ram.fsck(dev));state['verified_volumes'].append(role);checkpoint(journal,state)
+    return _finish_data(bundle,ram,report,layout,expected,state,stage,progress)
+
+
+def _finish_data(bundle,ram,report,layout,expected,state,stage,progress):
+    require_data_environment(report['product'], report['version'], ram.rescue_build)
+    journal=bundle/'installation.json'
     stage('formatting-data')
     ram.run(ram.tool('mount_hfs')+' /dev/disk0s1s3 /mnt1')
     ram.guard(['/dev/disk0s1s3 on /mnt1'])
     protect=uses_protected_data(report['version'])
     options=' -P -n a=4096,c=4096,e=4096' if protect else ''
-    (bundle/'data-format.log').write_bytes(ram.run('/mnt1/olsn0w/restore-newfs -s -J'+options+' -v Data -b 4096 /dev/rdisk0s1s2'))
+    # The 4S gas-gauge rescue deliberately runs the iOS 6 restore environment.
+    # Its native formatter supports the required HFS content-protection flags;
+    # the selected iOS 8 formatter cannot run against iOS 6 libSystem.
+    formatter=data_formatter(ram.rescue_build)
+    (bundle/'data-format.log').write_bytes(ram.run(
+        formatter+' -s -J'+options+' -v Data -b 4096 /dev/rdisk0s1s2'))
     state['formatted_data']=True;checkpoint(journal,state)
     ram.run('rm /mnt1/olsn0w/restore-newfs')
     ram.run(ram.tool('unmount')+' /mnt1');ram.guard()
@@ -298,6 +358,44 @@ def _finish_install(bundle,ram,report,layout,expected,state,roles,progress):
     if ram.table()!=expected:raise RuntimeError('Final partition table differs')
     state['complete']=True;stage('installed-and-verified')
     return state
+
+
+def resume_data_format(bundle,ram,progress=print):
+    """Resume after the incompatible iOS 8 formatter was rejected on iOS 6 RAM."""
+    bundle=Path(bundle);report=checked_manifest(bundle);journal=bundle/'installation.json'
+    if not same_hardware(report['identity'],ram.identity):
+        raise ValueError('Restore bundle belongs to another device')
+    state=json.loads(journal.read_text());error=state.get('error','')
+    formatter_rejected=('___strlcpy_chk' in error and state.get('formatted_data') is False)
+    journal_interrupted=("name 'journal' is not defined" in error and
+                         state.get('formatted_data') is True)
+    if (state.get('stage')!='formatting-data' or state.get('complete') is not False
+            or state.get('verified_volumes')!=['system','bootstrap','bootstrap-data']
+            or not (formatter_rejected or journal_interrupted)
+            or ram.rescue_build!='10B329'):
+        raise ValueError('Restore is not at the qualified data-format recovery point')
+    expected=(bundle/'next-primary.bin').read_bytes(),(bundle/'next-secondary.bin').read_bytes()
+    layout=report['layout']
+    mounts=ram.run('/sbin/mount').decode().splitlines()
+    internal=[line.split(' (',1)[0] for line in mounts
+              if line.startswith(('/dev/disk','/dev/rdisk'))]
+    allowed=['/dev/disk0s1s3 on /mnt1'] if internal else []
+    if internal!=allowed:raise ValueError('Unexpected mount at data-format recovery point')
+    ram.guard(allowed)
+    if ram.table()!=expected:raise ValueError('Interrupted restore partition table changed')
+    if internal:ram.run(ram.tool('unmount')+' /mnt1')
+    ram.guard();state['formatted_data']=False;checkpoint(journal,state)
+    messages={
+        'formatting-data':'Preparing the user data filesystem and its initial files.',
+        'writing-data':'Writing initial user data. The total below counts transferred blocks, not the full storage capacity.',
+        'installed-and-verified':'Installation complete: every volume has passed readback and filesystem checks.',
+    }
+    def stage(value):
+        state['stage']=value;state.pop('error',None);checkpoint(journal,state)
+        progress(messages.get(value,value))
+    try:return _finish_data(bundle,ram,report,layout,expected,state,stage,progress)
+    except Exception as failure:
+        state['error']=str(failure);checkpoint(journal,state);raise
 
 
 def read_fresh_image(ram, device, path, expected_bytes):
@@ -329,15 +427,19 @@ def install(bundle, ram, *, erase=False, progress=print):
     if journal.exists():raise ValueError('Previous install exists; inspect its stage before retrying')
     # Reject cached bundles with the old non-root reserve before touching USB.
     require_reserve(bundle/'system.hfs',root=True)
+    require_data_environment(report['product'], report['version'], ram.rescue_build)
     if type(report.get('setup_app_removed')) is not bool:
-        raise ValueError('Restore bundle lacks an explicit Setup.app policy')
-    if ((report.get('activation_mode')=='skipped-setup-removed') is not
-            report['setup_app_removed']):
-        raise ValueError('Restore activation and Setup.app policies differ')
+        raise ValueError('Restore bundle lacks an explicit Hacktiv8/Setup.app policy')
+    from hacktiv8 import activation_skipped
+    skip_activation=activation_skipped(report)
     setup_present=any(item['name']=='Setup.app'
                       for item in HFS(bundle/'system.hfs').ls('/Applications'))
     if setup_present == report['setup_app_removed']:
         raise ValueError('Restore Setup.app state differs from its manifest')
+    if skip_activation:
+        from hacktiv8 import verify_installed
+        verify_installed(HFS(bundle/'system.hfs'), report.get('hacktiv8'),
+                         report['version'], report['product'])
     old=(bundle/'gpt-primary.bin').read_bytes(),(bundle/'gpt-secondary.bin').read_bytes()
     expected=(bundle/'next-primary.bin').read_bytes(),(bundle/'next-secondary.bin').read_bytes()
     new_a,new_b,layout=encode(*old,(bundle/'system.hfs').stat().st_size,report['version'])

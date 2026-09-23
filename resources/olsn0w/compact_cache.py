@@ -21,8 +21,20 @@ QUALIFIED_SOURCE = dict(product='iPhone5,2', release='8.4.1', build='12H321',
 ARMV7_SOURCE = dict(product='iPhone4,1', release='8.4.1', build='12H321',
                     sha256='ce591173973c04c2289784e897d3e2a47c9aed7776f7575fbcdece861e4cc9da',
                     bytes=428327698,
-                    prepared_sha256='b531ad04911c04b7caccfa8195bcd6811a6610b23a2c958b76f2d0a14187867b',
+                    prepared_sha256='11bbcaa49f8fdc068a286cc278b0f8da3d203a500fe055a2daf76707f98d8d1d',
                     registry=dict(address=0x201995d0,bytes=338480))
+# The A5/A5X bootstrap reaches launchd through dyld, libobjc, libdispatch and
+# libsp's early XPC event handler. Keep their executable import/lazy-binding
+# stubs, Objective-C registration metadata, initializer tables, and libsp's
+# data page. Missing one of these pages can leave pid 1 asleep in a zero page.
+ARMV7_REQUIRED_RANGES = ((0x01c1d000,0x4000),(0x10195000,0x2000),
+                         (0x1043a000,0x1d000),(0x10545000,0x1000),
+                         (0x1059b000,0x1000),(0x12e10000,0x1000),
+                         (0x12e3f000,0x2000))
+# Preserve Apple's executable pages (including their code-directory hashes).
+# Missing ObjC selectors and LINKEDIT tables must be retained, not worked
+# around by NOPing dispatch releases. Qualified on N78AP with stock launchd.
+ARMV7_REQUIRED_PATCHES = ()
 
 
 def qualified_source(architecture='armv7s'):
@@ -119,6 +131,13 @@ def prepare(source, destination, architecture='armv7s'):
                 recipe.get('output_sha256')!=qualified['prepared_sha256'] or
                 recipe.get('registry')!=qualified['registry']):
             raise ValueError('ARMv7 compact-cache recipe metadata differs')
+        for required,count in ARMV7_REQUIRED_RANGES:
+            if not any(offset<=required and required+count<=offset+length
+                       for offset,length in recipe['keep_ranges']):
+                raise ValueError('ARMv7 compact-cache recipe omits a required system stub page')
+        if tuple((offset,before,after) for offset,before,after in
+                 recipe.get('bootstrap_patches',())) != ARMV7_REQUIRED_PATCHES:
+            raise ValueError('ARMv7 compact-cache bootstrap patches differ')
         from ios8_cache import prepare as remap, protect_registry
         stock=source.read_bytes();transformed,report=remap(stock,architecture)
         region=qualified['registry']
@@ -139,6 +158,9 @@ def prepare(source, destination, architecture='armv7s'):
             if offset>=len(stock):output[offset:offset+size]=transformed[offset:offset+size]
         if hashlib.sha256(output).hexdigest() != qualified['prepared_sha256']:
             raise ValueError('Prepared ARMv7 cache checksum mismatch')
+        retained=verify_mappings(stock,output,recipe)
+        if retained != recipe['retained_executable_pages']:
+            raise ValueError('ARMv7 retained executable page count differs')
         destination.parent.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='olsn0w-cache-',dir=destination.parent) as temporary:
             result=Path(temporary)/'cache';write_sparse(output,result)
@@ -148,7 +170,7 @@ def prepare(source, destination, architecture='armv7s'):
         return dict(sha256=qualified['prepared_sha256'],bytes=len(output),
                     source_sha256=checksum,mappings=len(mappings),registry=region,
                     architecture=architecture,
-                    preserved_executable_pages=True)
+                    preserved_executable_pages=retained)
     if architecture != 'armv7s':
         raise ValueError('No qualified bootstrap cache architecture')
     candidates = [json.loads(path.read_text()) for path in

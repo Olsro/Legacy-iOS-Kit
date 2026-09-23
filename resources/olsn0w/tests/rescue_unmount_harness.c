@@ -19,7 +19,8 @@ int main(void){
     args="rd=md00 -v";assert(rescue_main(2,ok)==90 && calls==1);
     args="xrd=md0";assert(rescue_main(2,ok)==90 && calls==1);
     args="rd=disk0s1s1";assert(rescue_main(2,ok)==90 && calls==1);
-    args="rd=md0";build="11D257";assert(rescue_main(2,ok)==90 && calls==1);
-    build="12H321";fail=1;assert(rescue_main(2,ok)==90 && calls==1);
+    args="rd=md0";build="10B329";assert(rescue_main(2,ok)==0 && calls==2);
+    build="11D257";assert(rescue_main(2,ok)==90 && calls==2);
+    build="12H321";fail=1;assert(rescue_main(2,ok)==90 && calls==2);
     return 0;
 }

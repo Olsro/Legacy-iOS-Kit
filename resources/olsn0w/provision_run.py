@@ -16,6 +16,7 @@ from provision import read_handoff, require_completed_restore
 from rescue import prepare_dfu, connect
 from restore import Rescue, checked_manifest, checkpoint
 from tickets import binding
+from restore_environment import report_build, session_build
 
 
 class DfuPreparationError(RuntimeError):
@@ -52,7 +53,8 @@ def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=N
 def connect_handoff(session, timeout=120):
     session=Path(session)
     record=json.loads((session/'device.json').read_text())
-    ram=Rescue(json.loads((session/'ssh-prefix.json').read_text()),record['identity'],record['rescue_maintenance'])
+    ram=Rescue(json.loads((session/'ssh-prefix.json').read_text()),record['identity'],record['rescue_maintenance'],
+               rescue_build=session_build(session))
     allowed={'/dev/disk0s1s1 on /mnt1','/dev/disk0s1s2 on /mnt2'}
     deadline=time.monotonic()+timeout
     while True:
@@ -92,19 +94,44 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     report=checked_manifest(bundle)
     if not erase or report.get('kind')!='signed-base-restore-handoff' or not same_hardware(record['identity'],report['identity']):
         raise ValueError('Explicit erase and matching provisioning identity required')
-    expected_asr=('legacy-kit-multipatch-asr' if report.get('multipatch')
+    environment=report_build(report)
+    if session_build(session)!=environment:
+        raise ValueError('Provisioning and rescue RAM environments differ; no erase started')
+    native6=environment=='10B329'
+    expected_asr=('legacy-kit-multipatch-asr' if native6
                   else 'kit-asr-failure-to-success')
-    if (report.get('asr_source') != 'original-udif-without-filevault-envelope'
+    expected_source=('rebuilt-udif-from-signed-base-hfs' if native6
+                     else 'original-udif-without-filevault-envelope')
+    if (report.get('asr_source') != expected_source
             or report.get('handoff_storage') != 'nvram'
             or report.get('asr_patch',{}).get('method') != expected_asr):
         raise ValueError('Prepare the current plaintext ASR/NVRAM handoff recipe first')
+    expected_bootchain=('futurerestore-unpatched-rsa' if native6
+                        else 'futurerestore-stock-rsa')
+    if report.get('restore_bootchain_policy') != expected_bootchain:
+        raise ValueError('Prepare the current futurerestore boot-chain recipe first')
+    if (native6 and
+            report.get('multipatch_component_metadata_build') != '10B329'):
+        raise ValueError('Prepare the current multipatch component metadata first')
     if Path(report['rescue_session']).resolve()!=session:
         raise ValueError('Provisioning RAM belongs to another session')
     journal=bundle/'run.json'
     if journal.exists():raise ValueError('Inspect the previous provisioning run before retrying')
-    metadata=json.loads(Path(keys).read_text())
-    if metadata.get('identifier')!=record['identity']['product'] or metadata.get('buildid')!='12H321':
+    base_metadata=json.loads(Path(keys).read_text())
+    if base_metadata.get('identifier')!=record['identity']['product'] or base_metadata.get('buildid')!='12H321':
         raise ValueError('Firmware keys differ from selected base')
+    metadata=base_metadata
+    if native6:
+        if (report.get('multipatch_restore_component_encoding') !=
+                'encrypted-donor-for-libipatcher' or
+                report.get('restore_key_policy') !=
+                'signed-base-with-10B329-restore-components' or
+                report.get('restore_filesystem_build') != '12H321'):
+            raise ValueError('Prepare the current encrypted multipatch restore components first')
+        metadata=json.loads((bundle/'futurerestore-keys.json').read_text())
+        if (metadata.get('identifier')!=record['identity']['product'] or
+                metadata.get('buildid')!='12H321'):
+            raise ValueError('Multipatch firmware keys differ from selected base route')
     argv=restore_arguments(record['identity'],bundle/'base8.ipsw',ticket,baseband,baseband_manifest)
     try:
         prepare_dfu(session,pwned=pwned,progress=progress)
@@ -140,7 +167,7 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
             state.update(pid=process.pid,stage='signed-base-restore-started');checkpoint(journal,state)
             with (bundle/'restore.log').open('r',errors='replace') as status:
                 while True:
-                    display.feed(status.read());display.tick()
+                    chunk=status.read();display.feed(chunk);display.tick()
                     try:
                         code=process.wait(timeout=2)
                         display.feed(status.read())

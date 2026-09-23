@@ -56,7 +56,7 @@ class DistributedState(unittest.TestCase):
         self.assertEqual(common.STATE,common.KIT/'saved/olsn0w')
 
     def test_startup_timeout_never_reboots_or_reinstalls(self):
-        report=dict(version='8.3',build='12F70',generation='fixture',identity={'board':'n42ap'})
+        report=dict(setup_app_removed=False,version='8.3',build='12F70',generation='fixture',identity={'board':'n42ap'})
         with tempfile.TemporaryDirectory() as work,patch.object(restore_run,'checked_manifest',return_value=report),patch.object(restore_run.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'',b'')) as command:
             with self.assertRaisesRegex(RuntimeError,'startup is not yet confirmed'):
                 restore_run.qualify(Path(work),['ssh'], 'fixture',timeout=0,progress=lambda _:None)
@@ -68,7 +68,7 @@ class DistributedState(unittest.TestCase):
     def test_recovery_return_is_reported_as_terminal_boot_failure(self):
         identity={'board':'p101ap','product':'iPad3,4','chip':0x8955,
                   'board_id':0,'ecid':123}
-        report=dict(product='iPad3,4',version='8.1.3',build='12B466',
+        report=dict(setup_app_removed=False,product='iPad3,4',version='8.1.3',build='12B466',
                     generation='fixture',identity=identity)
         recovery=(b'PRODUCT: iPad3,4\nMODEL: p101ap\nCPID: 0x8955\n'
                   b'BDID: 0x00\nECID: 0x7b\nMODE: Recovery\n')
@@ -86,7 +86,7 @@ class DistributedState(unittest.TestCase):
 
     def test_ssh_rejection_does_not_postpone_official_activation(self):
         identity={'board':'n42ap','product':'iPhone5,2','ecid':123}
-        report=dict(product='iPhone5,2',version='8.1.3',build='12B466',generation='fixture',
+        report=dict(setup_app_removed=False,product='iPhone5,2',version='8.1.3',build='12B466',generation='fixture',
                     identity=identity,activation_mode='official-on-target')
         lockdown=plistlib.dumps(dict(ProductType='iPhone5,2',ProductVersion='8.1.3',
             BuildVersion='12B466',BasebandVersion='11.80.00',ActivationState='Unactivated'))
@@ -104,7 +104,7 @@ class DistributedState(unittest.TestCase):
 
     def test_transient_activation_failure_stays_in_qualification_loop(self):
         identity={'board':'n42ap','product':'iPhone5,2','ecid':123}
-        report=dict(product='iPhone5,2',version='7.1.2',build='11D257',generation='fixture',
+        report=dict(setup_app_removed=False,product='iPhone5,2',version='7.1.2',build='11D257',generation='fixture',
                     identity=identity,activation_mode='official-on-target')
         lockdown=plistlib.dumps(dict(ProductType='iPhone5,2',ProductVersion='7.1.2',
             BuildVersion='11D257',BasebandVersion='11.80.00',ActivationState='Unactivated'))
@@ -181,7 +181,7 @@ class DistributedState(unittest.TestCase):
 
     def test_transient_data_generation_mismatch_does_not_prevent_activation(self):
         identity={'board':'p101ap','product':'iPad3,4','ecid':123}
-        report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+        report=dict(setup_app_removed=False,product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
                     identity=identity,activation_mode='official-on-target')
         unactivated=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
             BuildVersion='11D257',ActivationState='Unactivated'))
@@ -208,7 +208,7 @@ class DistributedState(unittest.TestCase):
 
     def test_transient_cydia_status_is_retried_until_generation_marker(self):
         identity={'board':'p101ap','product':'iPad3,4','ecid':123}
-        report=dict(product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+        report=dict(setup_app_removed=False,product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
                     identity=identity,activation_mode='official-on-target')
         values=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
             BuildVersion='11D257',ActivationState='Activated'))
@@ -235,7 +235,7 @@ class DistributedState(unittest.TestCase):
 
     def test_registered_but_unstarted_cydia_job_is_started_and_marker_is_required(self):
         identity={'board':'p101ap','product':'iPad3,4','ecid':123}
-        report=dict(product='iPad3,4',version='6.1.3',build='10B329',generation='selected',
+        report=dict(setup_app_removed=False,product='iPad3,4',version='6.1.3',build='10B329',generation='selected',
                     identity=identity,activation_mode='official-on-target')
         lockdown=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='6.1.3',
             BuildVersion='10B329',ActivationState='Activated'))

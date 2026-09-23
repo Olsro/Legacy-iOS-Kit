@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     if (argc != 2 ||
         sysctlbyname("kern.osversion", build, &build_size, 0, 0) ||
         sysctlbyname("kern.bootargs", args, &args_size, 0, 0) ||
-        strcmp(build, "12H321")) return 90;
+        (strcmp(build, "12H321") && strcmp(build, "10B329"))) return 90;
     char *root = strstr(args, "rd=md0");
     if (!root || (root != args && root[-1] != ' ') ||
         (root[6] && root[6] != ' ')) return 90;

@@ -113,6 +113,20 @@ its rescue from the selected stock 8.4.1 firmware and the Kit's SSH tools;
 `--ipsw` can supply an existing firmware archive. Preparation writes host files
 only and does not start a restoration.
 
+Once the selected device is in the required pwned DFU state, start the prepared
+rescue without erasing or restoring anything and open its authenticated root
+shell with:
+
+```sh
+./restore.sh --olsn0w rescue --product TYPE --session "$SESSION"
+```
+
+The command owns the selected USB tunnel, verifies that `/` is the RAM disk and
+that no internal volume is mounted, then opens a root shell. Type `exit` to close
+the shell and USB tunnel; the device remains in the RAM rescue until rebooted.
+When the rescue is already running, append `--ram-ready` to reconnect without
+putting the device back in DFU or sending the boot chain again.
+
 The rescue uses a 64,000,000-byte HFS volume, preserving the allocation size
 qualified with the stock boot chain. A 64 MiB volume caused an early kernel
 failure during qualification. Its startup does not automatically mount internal
@@ -321,6 +335,17 @@ link and its Data-backed default-source link at the real `/private/etc` HFS
 catalog path before first boot. The link's mobile-owned cache target is seeded
 with the five default Cydia repositories as well; Cydia returning status 0
 without creating that cache can therefore no longer yield an empty source list.
+All iOS 6/7/8 target images also include the nine repositories listed at
+http://cydia.olsro.fr/ (checked 2026-09-24): BigBoss, Cydia.vn, Eat My Phone,
+Hack Your iPhone, ModMyi, Personal (Olsro), Ryan Petrich, Saurik and ZodTTD.
+They use a separate root-owned `/private/etc/apt/sources.list.d/Olsro.list`,
+like the existing LukeZGD source, without replacing the default repositories
+or weakening APT signature checks. The list is prepared offline and checked
+after insertion into the System image; no repository refresh is added to the
+boot/activation sequence. System recipe 38 invalidates older prepared images
+in the guided restore flow. Already restored devices are not modified.
+The list is shared with the other jailbreak restoration paths in `restore.sh`;
+see `resources/jailbreak/olsro/README.md` for the common payload and cache policy.
 This is prepared offline because the Pangu
 path can still have a read-only System volume when `firmware.sh` runs. A failed
 `firmware.sh` no longer publishes a successful Cydia marker.
@@ -364,9 +389,14 @@ through normal boot, official activation, SSH and a successful Cydia
 first-start job. Unknown products, releases, builds or kernel hashes retain
 their stock kernel instead of inheriting the workaround. Every patched
 container is read back before being embedded. Every iOS 6 release on the
-explicit Lightning profiles N41, N42, P101, P102 and P103 receives the TriStar
+explicit Lightning profiles N41, N42, N78, P101, P102 and P103 receives the TriStar
 DeviceTree reset; this major-version rule includes the phone-only 6.0.2 and
-6.1.4 releases without maintaining an incomplete point-release list. For p101,
+6.1.4 releases without maintaining an incomplete point-release list. The N78
+rule covers every iOS 6 release available for iPod5,1; its 6.1.3 kernel contains
+the same `AppleTriStarBuiltIn` reset-and-retry path and its parsed DeviceTree
+has the same THS7383 TriStar node. A physical N78 restore without the property
+reached the selected kernel but remained at the Apple logo before USB came up.
+For p101,
 6.1.2 is physically qualified, the 6.0/6.0.1 and 6.1 DeviceTrees were
 separately extracted, decrypted and parsed, and the 6.1, 6.1.2 and 6.1.3
 DeviceTrees are byte-identical. The same reset is required by iPad3,4 on
@@ -382,7 +412,8 @@ captured panicking in `AppleTriStarBuiltin` with `could not find system ID: bad
 IPC message ID` before launchd when the property was absent. Reinstalling that
 same target DeviceTree with `soft-reset` then completed the physical boot,
 official activation and SpringBoard qualification on the same installation.
-This reset policy is not inherited by other SoCs. Existing prepared relay and
+This reset policy remains explicit per qualified Lightning profile instead of
+being inherited by unrelated products or SoCs. Existing prepared relay and
 target-system images are rebuilt automatically by the guided flow to acquire
 recipe changes.
 
@@ -415,12 +446,31 @@ The compact bootstrap has separate, hash-pinned iOS 8.4.1 (12H321) recipes for
 ARMv7 and ARMv7s. iPhone4,1 uses its own ARMv7 stock cache. The ARMv7s recipe is
 reconstructed from the iPhone5,2 cache and its resulting shared cache was also
 physically exercised on iPad3,4. Both variants retain the same 30 MiB system plus
-2 MiB Data geometry; the verified host-built iPhone4,1 image leaves more than
-1 MiB free on its system volume. Guided preparation obtains a donor only where
+2 MiB Data geometry. Guided preparation obtains a donor only where
 the exact recipe requires one and never treats an unknown cache hash as equivalent
-merely because its architecture and build match. ARMv7 device qualification is
-still pending; the model catalog is not a claim that this bootstrap covers every
-device.
+merely because its architecture and build match. The ARMv7 recipe retains the
+missing Objective-C selectors, cached libutil and complete retained-image
+LINKEDIT metadata. Its 2,946 retained executable pages are compared byte-for-byte
+with stock; dispatch releases are no longer patched. ARMv7 uses stock signed
+launchd. The ARMv7s cache and launchd transformation are unchanged.
+
+Automatic A5 preparation now packages the qualified two-image `multi_kloader`,
+independently checked raw iBSS and plaintext IMG3 iBEC, and the native kernel
+power observer. It arms an eight-second `WakeRelativeToSleep` before publishing
+readiness, rearms on the sleep notification and acknowledges the transition.
+No host trigger, cable removal or Home press is required. The iBSS receive stub
+returns its buffer length, not its address; the selected RAM iBEC starts its
+target without a persistent NVRAM change. Old relay recipes are rebuilt through
+the normal recipe-version mechanism. No session/scratchpad files are inputs.
+
+This boot sequence was physically exercised on iPod5,1 with target 6.1.3,
+including normal autonomous boot with USB attached and user-confirmed Cydia/APT.
+The integrated image is also rebuilt/read back offline within 30+2 MiB. Target
+verbose diagnostics remain enabled on A5 while qualification continues; the
+signed bootstrap's normal entry uses stock boot arguments. The newly packaged
+preparation still needs its own end-to-end restore test. Other A5 models and
+releases are not hardware-qualified by this result. The single-DFU native
+iOS 6 installation test and its remaining qualification limits are recorded below.
 
 The restore completion check waits for Cydia preparation to exit successfully,
 for deferred iOS 7 services to be registered, and for the modem on cellular
@@ -478,6 +528,40 @@ uses its native Aquila payload. Its complete Data seed and personalization are
 written and checked before the first boot. Wi-Fi products explicitly select
 activation personalization without modem artifacts; cellular products still
 require their qualified modem component set.
+
+For A5-family iOS 6 targets, the installer now rejects a Data-writing operation
+through the iOS 8 RAM environment, including resumed installations. N78AP
+hardware testing found that a Data image written through 12H321 passes that
+kernel's checks but has different first 16-byte reads per 4096-byte block under
+10B329; the iOS 6 HFS mount then fails. Rewriting the verified Data image through
+the native 10B329 rescue allowed normal journaled mounts, SpringBoard, Cydia and
+an APT update on iPod5,1/6.1.3. The exact crypto implementation difference is not
+yet established. Do not repair that Data volume through the newer rescue.
+Guided preparation now selects the 10B329 RAM environment **from the initial
+DFU** for A5-family iOS 6 targets. It reuses the native restore-component,
+ASR and plaintext-UDIF recipe from the 4S path, while retaining the actual
+signed 8.4.1 filesystem, ticket and persistent boot firmware. The restore's
+authenticated reboot hook holds that same RAM environment for collection and
+target installation: no second DFU or inter-kernel RAM handoff is introduced.
+Gas-gauge `multipatch` remains a separate, 4S-only model property. A stale
+iOS 8 writer is rejected before the signed-base erase, not just before Data.
+The developer `prepare-rescue` command also selects this writer when given
+`--version 6.1.3` (or another iOS 6 target version); its optional IPSW/key inputs
+still refer to the signed 8.4.1 base. Without a target version, its existing
+model-specific rescue default is preserved.
+The iPod5,1/6.1.3 hardware run on 2026-09-24 completed the signed-base restore,
+target/Data installation and first-boot qualification from one initial DFU,
+with the cable connected and lockdownd activation bypass. SpringBoard, the
+generation-bound Cydia-ready marker and an actual `/usr/lib` write/remove probe
+passed. Official activation was skipped. Two host-side binding errors were
+fixed during that run, then preparation resumed in the still-running rescue;
+the signed-base erase was not repeated. This is not yet an unattended fresh
+run of the final corrected code, nor qualification of every A5 model/release.
+Device-bound preparation must retain both A5 relay images instead of writing
+the A6-only `relay.bin`. Native6 technical collection supplies a decrypted host
+kernel: binding must retain the checked encrypted stock 8.4.1 bootstrap kernel
+so that ordinary A5 iBoot can admit it. Both contracts have regression tests.
+The validated A6/A6X iOS 6 and existing iOS 7/8 policies are unchanged.
 
 Fresh iOS 7 and iOS 8 Data volumes require the native `newfs_hfs -P` format,
 `HFS.initialize_protection_v4()`, and a protected mount from the target kernel.

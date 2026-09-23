@@ -19,12 +19,16 @@ from aquila import (ios7_payload, job_loader, prepare_payload,
                     prepare_pangu71_payload)
 from common import KIT, MODELS, clone_or_copy, digest, profile, run, save, version
 from hfs import HFS
+from hacktiv8 import (install as install_hacktiv8,
+                     firstboot_files as hacktiv8_firstboot_files,
+                     prepare_data as prepare_hacktiv8_data,
+                     remove_setup_application)
 from img3 import img3
 from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 34
+RECIPE_VERSION = 38
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -33,6 +37,12 @@ CYDIA_DEFAULT_SOURCES = (
     b'deb http://modmyi.saurik.com/ stable main\n'
     b'deb http://zodttd.saurik.com/repo/cydia/ stable main\n'
 )
+
+# Flat repositories listed at http://cydia.olsro.fr/ (2026-09-24).
+# Keep a separate APT file, like LukeZGD.list: Cydia regenerates its own
+# Data-backed sources.list. Preparing this offline adds no network boot gate.
+OLSRO_SOURCE_PATH = 'private/etc/apt/sources.list.d/Olsro.list'
+OLSRO_SOURCES = (PACKAGE_ROOT/'olsro'/OLSRO_SOURCE_PATH).read_bytes()
 
 
 def uses_protected_data(release):
@@ -272,6 +282,7 @@ def jailbreak_payload(release):
         entries.pop('private/var/aquila/aquila', None)
         entries['aquila'] = entry('aquila', aquila, 0o755)
         provenance.append(origin)
+    entries[OLSRO_SOURCE_PATH] = entry(OLSRO_SOURCE_PATH, OLSRO_SOURCES)
     return entries, provenance
 
 
@@ -514,21 +525,11 @@ def move_daemons(image, major=7, product=None, untether=None):
         configure_untether_jetsam(image, product, 'com.apple.CrashHousekeeping')
 
 
-def remove_setup_application(image):
-    """Remove the stock setup application and prove the catalog change."""
-    matches = [item for item in image.ls('/Applications') if item['name'] == 'Setup.app']
-    if len(matches) != 1 or not stat.S_ISDIR(matches[0]['mode']):
-        raise ValueError('Expected the stock Setup.app directory')
-    image.command('rmall', '/Applications/Setup.app')
-    if any(item['name'] == 'Setup.app' for item in image.ls('/Applications')):
-        raise ValueError('Setup.app removal readback failed')
-
-
 def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/disk0s1s2',
             *, remove_setup_app=False):
     firmware, relay = Path(firmware), Path(relay)
     if type(remove_setup_app) is not bool:
-        raise ValueError('Expected an explicit Setup.app policy')
+        raise ValueError('Expected an explicit Hacktiv8/Setup.app policy')
     source = json.loads((firmware/'manifest.json').read_text())
     chain = json.loads((relay/'manifest.json').read_text())
     for key in ('product', 'version', 'build'):
@@ -553,7 +554,7 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     # The physically qualified iOS 8 path keeps Apple's early keybagd in place.
     # iOS 7 still needs the wrapper because launchd starts keybagd before Aquila.
     early_keybag = wraps_early_keybag(source['version'], stock.read('/sbin/launchd'))
-    destination = firmware.parent/('system-no-setup' if remove_setup_app else 'system')
+    destination = firmware.parent/('system-hacktiv8-v1' if remove_setup_app else 'system')
     if destination.exists():
         raise ValueError('Prepared target filesystem already exists: '+str(destination))
     out = Path(tempfile.mkdtemp(prefix='system-pending-', dir=firmware.parent))
@@ -574,6 +575,11 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     data_entries['lib/olsn0w/generation'] = entry('lib/olsn0w/generation', (generation+'\n').encode(), 0o600)
     for directory in ('logs/AppleSupport', 'run', 'lib/olsn0w'):
         data_entries.setdefault(directory, entry(directory, mode=0o755, directory=True))
+    hacktiv8 = (prepare_hacktiv8_data(data_entries, source['version'],
+                                     source['product'], source['build'])
+                 if remove_setup_app else None)
+    for name, (data, mode) in hacktiv8_firstboot_files(hacktiv8).items():
+        payload[name.lstrip('/')] = entry(name.lstrip('/'), data, mode)
     add_parents(data_entries)
     protected_data = uses_protected_data(source['version'])
     if protected_data:
@@ -693,8 +699,6 @@ Subsystem sftp /usr/libexec/sftp-server
 
     clone_or_copy(stock.path, out/'system.hfs')
     image = HFS(out/'system.hfs')
-    if remove_setup_app:
-        remove_setup_application(image)
     image.command('rmall', '/private/var')
     image.mkdir('/private/var')
     needed = sum(len(data) for _,data in payload.values() if data is not None) + 16*1024**2
@@ -718,11 +722,16 @@ Subsystem sftp /usr/libexec/sftp-server
                 raise ValueError('Payload would replace a system directory: '+name)
             image.command('rm', '/'+name)
     image.command('untar', out/'root-overlay.tar')
+    if remove_setup_app and hacktiv8 is None:
+        hacktiv8 = install_hacktiv8(
+            image, source['version'], source['product'], source['build'])
     if image.readlink('/User') != '/var/mobile':
         raise ValueError('Cydia User compatibility symlink readback differs')
     if image.readlink('/private/etc/apt/sources.list.d/cydia.list') != \
             '/var/mobile/Library/Caches/com.saurik.Cydia/sources.list':
         raise ValueError('Cydia source cache symlink readback differs')
+    if image.read('/'+OLSRO_SOURCE_PATH) != OLSRO_SOURCES:
+        raise ValueError('Olsro repository sources readback differs')
     # SSH StrictModes checks every ancestor of the authorized-keys file.
     # Stock / can be group-writable too, despite safe /private/etc metadata.
     image.command('chown', '0:0', '/')
@@ -842,8 +851,11 @@ Subsystem sftp /usr/libexec/sftp-server
                   kernel_patch=kernel_patch,
                   service_loading=('stock-daemon-layout' if untether_name == 'panguaxe'
                                    else 'skip-registered-jobs-before-creating-sockets'),
-                  setup_app_removed=remove_setup_app,
-                  activation=('intentionally omitted; Setup.app removed'
+                  setup_customized=remove_setup_app,
+                  setup_app_removed=remove_setup_app and hacktiv8 is None,
+                  hacktiv8=hacktiv8,
+                  activation=('intentionally omitted; Hacktiv8 applied, Setup.app preserved'
+                              if hacktiv8 else 'intentionally omitted; Setup.app removed'
                               if remove_setup_app else
                               'official activation required for the selected device'),
                   restore_ready=False, filesystem_check_required=True, physical_boot_validated=False,

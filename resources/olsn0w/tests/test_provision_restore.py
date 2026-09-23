@@ -58,6 +58,15 @@ class ProvisionSequence(unittest.TestCase):
             state=json.loads((args[1]/'pipeline.json').read_text())
             self.assertFalse(state['complete']);self.assertEqual(state['stage'],'signed-base')
 
+    def test_authenticated_pwned_ibss_resume_is_forwarded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args,reports=self.fixture(Path(tmp))
+            with patch.object(pipeline,'checked_manifest',side_effect=reports), \
+                 patch.object(pipeline,'provision',side_effect=RuntimeError('stop')) as restore:
+                with self.assertRaisesRegex(RuntimeError,'stop'):
+                    pipeline.run(*args,erase=True,pwned=True)
+            self.assertTrue(restore.call_args.kwargs['pwned'])
+
     def test_dfu_failure_removes_only_retryable_pipeline_marker(self):
         from provision_run import DfuPreparationError
         with tempfile.TemporaryDirectory() as tmp:

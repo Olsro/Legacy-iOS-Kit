@@ -15,7 +15,7 @@ def main():
     if not __debug__:
         raise RuntimeError('Run without Python optimization; binary validation is required')
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['supports','list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','prepare-provision','provision-restore','menu'])
+    parser.add_argument('action',choices=['supports','list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','rescue','prepare-provision','provision-restore','menu'])
     parser.add_argument('--product',required=True,choices=sorted(MODELS))
     parser.add_argument('--version')
     parser.add_argument('--udid',help='Connected normal-mode device from the Kit menu')
@@ -35,12 +35,12 @@ def main():
     parser.add_argument('--bundle',type=Path,help='Prepared device-bound restoration bundle')
     parser.add_argument('--erase',action='store_true',help='Erase the selected device during restoration')
     parser.add_argument('--ram-ready',action='store_true',help='Resume from an already authenticated RAM rescue')
-    parser.add_argument('--remove-setup-app',action='store_true',
-                        help='Remove Setup.app before first boot and skip target activation')
+    parser.add_argument('--hacktiv8','--remove-setup-app',dest='remove_setup_app',action='store_true',
+                        help='Apply Hacktiv8 keeping Setup.app, or remove Setup.app when unsupported')
     args=parser.parse_args()
     if (args.remove_setup_app and
             args.action not in ('prepare-system','prepare-restore','provision-restore')):
-        parser.error('--remove-setup-app applies to system and restoration preparation')
+        parser.error('--hacktiv8 applies to system and restoration preparation')
     if args.action=='supports':
         return
     if args.action == 'provision-restore' and not all((args.session,args.bundle,args.bootstrap,args.ticket,args.base_keys,args.version,args.erase)):
@@ -66,8 +66,17 @@ def main():
         if json.loads((args.session/'device.json').read_text())['identity']['product'] != args.product:
             raise ValueError('Rescue session product differs from selection')
         from rescue_prepare import prepare as prepare_rescue
-        prepare_rescue(args.session,args.ipsw,args.keys,args.port)
+        from restore_environment import selected_build
+        prepare_rescue(args.session,args.ipsw,args.keys,args.port,
+                       environment_build=selected_build(args.product,args.version))
         print('Prepared model-specific RAM rescue; no device was modified: '+str(args.session))
+        return
+    if args.action == 'rescue':
+        if not args.session:parser.error('rescue requires --session')
+        if json.loads((args.session/'device.json').read_text())['identity']['product'] != args.product:
+            raise ValueError('Rescue session product differs from selection')
+        from rescue import interactive
+        interactive(args.session,ram_ready=args.ram_ready)
         return
     if args.action == 'restore':
         if not args.session or not args.bundle or not args.erase:
@@ -107,21 +116,23 @@ def main():
     print('Prepared '+metadata['product']+' / iOS '+metadata['version']+': '+str(relay))
     if args.action in ('prepare-system','prepare-restore','provision-restore'):
         from system import prepare as prepare_system
-        system_folder=folder.parent/('system-no-setup' if args.remove_setup_app else 'system')
+        system_folder=folder.parent/('system-hacktiv8-v1' if args.remove_setup_app else 'system')
         if system_folder.exists():
             from restore import checked_manifest
             from system import RECIPE_VERSION as SYSTEM_RECIPE_VERSION
             system_report=checked_manifest(system_folder)
             if system_report.get('recipe_version') != SYSTEM_RECIPE_VERSION:
                 raise ValueError('Prepared system uses an older recipe; preserve it and prepare a new system')
-            if system_report.get('setup_app_removed') is not args.remove_setup_app:
-                raise ValueError('Prepared system uses another Setup.app policy')
+            if system_report.get('setup_customized') is not args.remove_setup_app:
+                raise ValueError('Prepared system uses another Hacktiv8/Setup.app policy')
         else:
             system_folder, system_report = prepare_system(
                 folder,relay,remove_setup_app=args.remove_setup_app)
         print('Prepared target filesystem and Data seed: '+str(system_folder))
         if args.remove_setup_app:
-            print('Setup.app removal is verified; target activation will be skipped.')
+            print('Hacktiv8 applied; Setup.app preserved.' if system_report.get('hacktiv8') else
+                  'Setup.app removed; Hacktiv8 unavailable for this device/build.')
+            print('Official target activation will be skipped.')
         else:
             print('Device-specific baseband, activation, and bootstrap installation remain required.')
     if args.action == 'provision-restore':

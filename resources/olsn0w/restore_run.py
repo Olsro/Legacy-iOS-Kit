@@ -150,9 +150,8 @@ def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
 def qualify(bundle, prefix, udid, timeout=360, progress=print,
             verify_writable_root=False):
     report=checked_manifest(bundle)
-    activation_skipped=report.get('activation_mode')=='skipped-setup-removed'
-    if activation_skipped is not (report.get('setup_app_removed') is True):
-        raise ValueError('Target activation and Setup.app policies differ')
+    from hacktiv8 import activation_skipped as selected_activation_skipped
+    activation_skipped=selected_activation_skipped(report)
     started=time.monotonic();deadline=started+timeout;last_notice=started
     status='Waiting for the target USB connection.'
     values=None;activation_acknowledgement=None

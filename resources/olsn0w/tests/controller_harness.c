@@ -31,6 +31,9 @@ int mock_fflush(void *p){return 0;}
 int geteuid(void){return 0;}
 int getppid(void){return 1;}
 int sysctlbyname(const char *n,void *p,ios_size_t *z,void *v,ios_size_t l){
+ if(!strcmp(n,"kern.boottime")){
+  struct boot_identity value={1234,5678};memcpy(p,&value,sizeof(value));*z=sizeof(value);return 0;
+ }
  const char *value=!strcmp(n,"hw.model")?(wrong_board?"OTHER":OLSN0W_BOARD):!strcmp(n,"kern.osrelease")?"14.0.0":"";
  strcpy(p,value);*z=strlen(value)+1;return 0;
 }
@@ -39,6 +42,7 @@ int mock_open(const char *p,int flags,...){
  if(!strcmp(p,MARKER))return 1;
  if(!strcmp(p,ENABLED))return enabled?2:-1;
  if(!strcmp(p,"/var/run/olsn0w-wake.ready"))return 3;
+ if(!strcmp(p,SERVICES_READY))return 5;
  return log_failure?-1:4;
 }
 int mock_close(int fd){return 0;}
@@ -51,7 +55,7 @@ long mock_read(int fd,void *p,unsigned long n){
  const char *s=fd==1?OLSN0W_ROOT_MARKER:fd==2?OLSN0W_TARGET_MARKER:"ready\n";
  memcpy(p,s,strlen(s));return strlen(s);
 }
-long mock_write(int fd,const void *p,unsigned long n){return log_failure?-1:n;}
+long mock_write(int fd,const void *p,unsigned long n){return log_failure && fd!=5?-1:n;}
 int mock_unlink(const char *p){return log_failure?-1:0;}
 void mock_sync(void){}
 int posix_spawn(int *pid,const char *p,const void *a,const void *b,char *const *v,char *const *e){

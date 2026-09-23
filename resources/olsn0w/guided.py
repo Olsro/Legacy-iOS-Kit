@@ -14,6 +14,7 @@ from common import KIT, MODELS, STATE, integer, profile, run, save, tools, versi
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
+from rescue import has_checkm8_marker
 
 
 def connected(product, ecid, udid=None):
@@ -76,6 +77,9 @@ def preparation_space(product, selected, records_provider=releases, *, remove_se
     requested={(product,selected['version'],selected['buildid']),
                (product,'8.4.1','12H321'),
                (source['product'],source['release'],source['build'])}
+    from restore_environment import selected_build
+    if selected_build(product,selected['version'])=='10B329':
+        requested.add((product,'6.1.3','10B329'))
     records=[]
     for item_product,item_version,item_build in requested:
         if (item_product,item_version,item_build)==(product,selected['version'],selected['buildid']):
@@ -98,7 +102,7 @@ def preparation_space(product, selected, records_provider=releases, *, remove_se
             extraction_scratch=max(extraction_scratch,size)
         if (item_product,record['version'],record['buildid'])==(product,selected['version'],selected['buildid']):
             selected_firmware=firmware;selected_record=record
-    system_name='system-no-setup' if remove_setup_app else 'system'
+    system_name='system-hacktiv8-v1' if remove_setup_app else 'system'
     system=STATE/'targets'/product/selected['buildid']/system_name/'manifest.json'
     if not system.is_file():
         root=selected_firmware/'rootfs.hfs'
@@ -183,11 +187,11 @@ def _prepare(session, release, display):
         if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest):
             relay_prepare(firmware)
         relay_report=checked_manifest(relay)
-        system=firmware.parent/('system-no-setup' if remove_setup_app else 'system')
+        system=firmware.parent/('system-hacktiv8-v1' if remove_setup_app else 'system')
         system_inputs=dict(relay_recipe_version=relay_report['recipe_version'],
                            relay_devicetree_sha256=relay_report['files']['devicetree'],
                            relay_binary_sha256=relay_report['files']['relay.bin'],
-                           setup_app_removed=remove_setup_app)
+                           setup_customized=remove_setup_app)
         if not reusable_recipe(system,SYSTEM_RECIPE,checked_manifest,system_inputs):
             # Both caches are generated solely from verified firmware and
             # payload inputs. Rebuild an obsolete recipe in place so a safety
@@ -197,7 +201,11 @@ def _prepare(session, release, display):
     with activity('preparing the restore environment and compact bootstrap'):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-        rescue_prepare(session,base_ipsw,base_keys,port)
+        from restore_environment import selected_build
+        environment=selected_build(product,release['version'])
+        if environment=='10B329' and not profile(product).get('multipatch'):
+            show('Preparing the native iOS 6 RAM writer for a single DFU workflow; the signed base remains iOS 8.4.1. This complete restore path still requires hardware validation.')
+        rescue_prepare(session,base_ipsw,base_keys,port,environment_build=environment)
         serial=record.get('ram_udid') or hashlib.sha1(('olsn0w:'+str(identity['ecid'])).encode()).hexdigest()
         native=native_prepare(product,serial,session/'native')
         libraries=session/'libraries';(libraries/'usr/lib').mkdir(parents=True)
@@ -211,7 +219,9 @@ def _prepare(session, release, display):
             '/System/Library/Caches/com.apple.dyld/dyld_shared_cache_'+architecture))
         cache=session/'compact-cache';cache_prepare(cache_source,cache,architecture)
         bootstrap=session/'bootstrap'
-        bootstrap_prepare(product,base_firmware,libraries,native,relay/'relay.bin',base_firmware/'Kernelcache.img3',
+        bootstrap_kernel=base_firmware/(
+            'Kernelcache.orig' if profile(product)['soc'].startswith('a5') else 'Kernelcache.img3')
+        bootstrap_prepare(product,base_firmware,libraries,native,relay/'relay.bin',bootstrap_kernel,
                           cache,native/'root.hfs',native/'var.hfs',bootstrap)
         # Both cache inputs are reproducible; the verified bootstrap now contains them.
         cache_source.unlink();cache.unlink()
@@ -240,7 +250,7 @@ def enter_dfu(identity, read=input, show=print):
             result=subprocess.run([str(tools()/'irecovery'),'-i',hex(identity['ecid']),'-q'],
                                   capture_output=True,timeout=15)
             text=(result.stdout+result.stderr).decode(errors='replace')
-            return result.returncode==0 and ('PWND: [checkm8]' in text or 'PWND:[checkm8]' in text)
+            return result.returncode==0 and has_checkm8_marker(text)
         return True
     while not ready():
         show('Keep the selected device connected by USB. Prepared files are retained across every DFU attempt.')
@@ -285,10 +295,16 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             return result
     selected=choose(releases(product,refresh),read,show)
     if selected is None:return
-    show('Optional fast configuration: Setup.app can be removed before first boot. '
-         'In that mode olsn0w will not copy activation records or activate the device.')
-    remove_setup_app=(read('Remove Setup.app and skip activation? [y/N]: ').strip().lower()
-                      in ('y','yes'))
+    from hacktiv8 import available as hacktiv8_available
+    use_hacktiv8=hacktiv8_available(
+        selected['version'], product, selected['buildid'])
+    show('Optional configuration: official activation will be skipped if enabled.')
+    show('Apply Hacktiv8 while preserving Setup.app.'
+         if use_hacktiv8 else
+         'Hacktiv8 does not support this device/build. Setup.app can still be removed.')
+    prompt=('Apply Hacktiv8 and keep Setup.app? [y/N]: ' if use_hacktiv8 else
+            'Remove Setup.app and skip activation? [y/N]: ')
+    remove_setup_app=read(prompt).strip().lower() in ('y','yes')
     session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
     record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
                 remove_setup_app=remove_setup_app)
@@ -296,7 +312,8 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     save(session/'device.json',record)
     show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
     plan=prepare(session,selected,show)
-    setup_note=(' Setup.app will be removed and activation will be skipped.'
+    setup_note=((' Hacktiv8 will be applied; Setup.app will be kept.' if use_hacktiv8 else
+                 ' Setup.app will be removed.')+' Official activation will be skipped.'
                 if remove_setup_app else '')
     show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.'+setup_note)
     if read('Continue with restoration? [y/N]: ').strip().lower() not in ('y','yes'):
@@ -314,10 +331,12 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             break
         except DfuPreparationError as error:
             show('DFU exploit failed before any erase: '+str(error))
-            show('All preparation is retained. Re-enter DFU to retry, or press Ctrl+C to cancel.')
+            show('All preparation is retained. Force-restart the device, re-enter DFU and run the matching A5Mate profile before retrying.')
+            read('Press Enter once the freshly pwned DFU device is reconnected (Ctrl+C to cancel): ')
     if remove_setup_app:
         show('Restoration verified: iOS '+selected['version']+
-             '. Setup.app was removed before first boot; activation was intentionally skipped.')
+             ('. Hacktiv8 applied; Setup.app preserved; activation was intentionally skipped.'
+              if use_hacktiv8 else '. Setup.app was removed before first boot; activation was intentionally skipped.'))
     else:
         show('Restoration verified: iOS '+selected['version']+'. Complete Setup Assistant on the device.')
     return result

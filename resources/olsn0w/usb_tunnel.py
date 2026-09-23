@@ -19,9 +19,10 @@ def normal_serial():
         try:
             value=usb.util.get_string(device,device.iSerialNumber) or ''
             if re.fullmatch('[0-9a-fA-F]{40}',value):serials.add(value.lower())
-        except usb.core.USBError:
+        except (usb.core.USBError,ValueError):
             # Restore-to-normal transitions can leave a disappearing Apple USB
-            # interface in the libusb snapshot. It is not a selectable target.
+            # interface, or one without a readable language descriptor, in the
+            # libusb snapshot. It is not a selectable target.
             pass
         finally:
             usb.util.dispose_resources(device)

@@ -7,7 +7,7 @@ from common import MODELS, digest, run
 from restore import checkpoint
 from signing import resign
 
-PROGRAMS = ('controller', 'root_start', 'untether_supervisor', 'power_ready', 'wake')
+PROGRAMS = ('controller', 'root_start', 'untether_supervisor', 'service_gate', 'power_ready', 'wake', 'wake_a5')
 LIBRARIES = ('usr/lib/libSystem.B.dylib',
              'System/Library/Frameworks/CoreFoundation.framework/CoreFoundation',
              'System/Library/Frameworks/IOKit.framework/Versions/A/IOKit')

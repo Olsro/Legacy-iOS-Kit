@@ -1,7 +1,9 @@
 """Collect newly restored signed firmware while the original RAM stays alive."""
+import io
 import json
 from pathlib import Path
 import plistlib
+import zipfile
 
 from common import baseband_files, baseband_strategy, digest, profile
 from device import same_hardware
@@ -9,6 +11,7 @@ from img3 import img3
 from layout import HFS_TYPE, inspect
 from provision import read_handoff, require_completed_restore
 from restore import checked_manifest, checkpoint
+from restore_environment import report_build
 
 KERNEL='System/Library/Caches/com.apple.kernelcaches/kernelcache'
 
@@ -21,9 +24,23 @@ def modem_components(product):
     return 'usr/local/standalone/firmware/Baseband/'+family+'/',baseband_files(family)
 
 
+def personalized_modem(data, names):
+    """Read the complete, personalized modem set from Apple's restore ZIP."""
+    expected=set(names)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        listed=archive.namelist()
+        if len(listed)!=len(expected) or set(listed)!=expected:
+            raise ValueError('Personalized modem archive has an unexpected component set')
+        result={name:archive.read(name) for name in names}
+    if any(not value for value in result.values()):
+        raise ValueError('Personalized modem archive contains an empty component')
+    return result
+
+
 def collect(bundle, ram, destination):
     bundle,destination=Path(bundle),Path(destination)
     report=checked_manifest(bundle)
+    native6=report_build(report)=='10B329'
     state=json.loads((bundle/'run.json').read_text())
     if not same_hardware(report['identity'],ram.identity) or not state.get('complete') or state.get('stage')!='authenticated-ram-handoff':
         raise ValueError('A completed selected-device restore handoff is required')
@@ -52,8 +69,22 @@ def collect(bundle, ram, destination):
         names=['System/Library/CoreServices/SystemVersion.plist',KERNEL]
         modem,modem_files=modem_components(report['product'])
         if modem:names += [modem+name for name in modem_files]
+        packed_modem={}
+        if modem and native6:
+            family=profile(report['product'])['baseband_family']
+            packed=ram.run('cat /mnt1/'+modem+family+'-personalized.zip')
+            packed_modem=personalized_modem(packed,modem_files)
+        carrier_version=ram.run('cat /mnt1/'+names[0])
+        carrier=plistlib.loads(carrier_version)
+        expected_carrier=('8.4.1','12H321')
+        if (carrier['ProductVersion'],carrier['ProductBuildVersion'])!=expected_carrier:
+            raise ValueError('Unexpected newly restored carrier system version')
         for name in names:
-            data=ram.run('cat /mnt1/'+name)
+            modem_name=(name[len(modem):] if modem and name.startswith(modem) else None)
+            seeded=native6 and modem_name is None
+            data=(packed_modem[modem_name] if modem_name in packed_modem else
+                  (bundle/'signed-technical'/name).read_bytes() if seeded else
+                  ram.run('cat /mnt1/'+name))
             if not data:raise ValueError('Empty signed-base artifact: '+name)
             path=destination/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
             files[name]=dict(bytes=len(data),sha256=digest(path))
@@ -69,6 +100,10 @@ def collect(bundle, ram, destination):
     if ram.table()!=(primary,secondary):raise ValueError('Partition table changed during collection')
     checkpoint(destination/'modem-files.json',
                {n:v for n,v in files.items() if modem and n.startswith(modem)})
-    checkpoint(destination/'collection.json',dict(identity=ram.identity,source='completed-signed-base-restore',
-        build='12H321',activation_collected=False,files=files))
+    checkpoint(destination/'collection.json',dict(
+        identity=ram.identity,source='completed-signed-base-restore',build='12H321',
+        restore_filesystem_build=report.get('restore_filesystem_build','12H321'),
+        technical_source=('verified-signed-base-bundle' if native6
+                          else 'restored-system-volume'),
+        activation_collected=False,files=files))
     return destination

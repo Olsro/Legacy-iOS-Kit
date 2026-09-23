@@ -1,0 +1,9 @@
+deb http://cydia.olsro.fr/bigboss/ ./
+deb http://cydia.olsro.fr/cydiavn/ ./
+deb http://cydia.olsro.fr/eatmyphone/ ./
+deb http://cydia.olsro.fr/hackyouriphone/ ./
+deb http://cydia.olsro.fr/modmyi/ ./
+deb http://cydia.olsro.fr/personal/ ./
+deb http://cydia.olsro.fr/rpetrich/ ./
+deb http://cydia.olsro.fr/saurik/ ./
+deb http://cydia.olsro.fr/zodttd/ ./

@@ -3,12 +3,27 @@ import json
 from pathlib import Path
 import shutil
 
-from common import clone_or_copy, digest
+from common import clone_or_copy, digest, profile
+from img3 import img3
 from hfs import HFS
 from hfs_policy import require_reserve
 from layout import inspect
 from provision_collect import KERNEL
 from restore import checked_manifest, checkpoint
+
+
+def bootstrap_kernel(product, technical_source, existing, collected):
+    a5=profile(product)['soc'].startswith('a5')
+    # Native6 restore uses host-seeded 8.4.1 technical files, not a newly
+    # personalized 8.4.1 kernel. Retain the already verified encrypted stock
+    # bootstrap kernel: replacing it with the decrypted technical image makes
+    # ordinary A5 iBoot reject the cache before the bootstrap can run.
+    retain=a5 and technical_source=='verified-signed-base-bundle'
+    selected=existing if retain else collected
+    kind,tags,_=img3(selected)
+    if kind!='krnl' or (a5 and 'KBAG' not in tags):
+        raise ValueError('Bound bootstrap kernel differs from the signed A5 boot contract')
+    return selected
 
 
 def prepare(collection, bootstrap, destination):
@@ -37,8 +52,10 @@ def prepare(collection, bootstrap, destination):
         raise ValueError('Invalid compact bootstrap marker')
     # Personalization belongs to this completed restore, even if an earlier
     # same-model kernel was used while preparing the host image.
-    root.replace_regular('/'+KERNEL, (collection/KERNEL).read_bytes())
-    if root.read('/'+KERNEL) != (collection/KERNEL).read_bytes():
+    selected_kernel=bootstrap_kernel(compact['product'],technical.get('technical_source'),
+                                   root.read('/'+KERNEL),(collection/KERNEL).read_bytes())
+    root.replace_regular('/'+KERNEL, selected_kernel)
+    if root.read('/'+KERNEL) != selected_kernel:
         raise ValueError('Fresh signed kernel readback differs')
     for name in ('root8.hfs', 'data8.hfs'):require_reserve(destination/name)
     for name in ('gpt-primary.bin', 'gpt-secondary.bin'):

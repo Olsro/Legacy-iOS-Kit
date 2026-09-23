@@ -42,7 +42,8 @@ def cleanup_completed(session, bundle, bootstrap):
 
 
 def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
-        baseband=None, baseband_manifest=None, erase=False, progress=print):
+        baseband=None, baseband_manifest=None, erase=False, pwned=False,
+        progress=print):
     session,bundle,bootstrap,system,relay=map(Path,(session,bundle,bootstrap,system,relay))
     device=json.loads((session/'device.json').read_text())
     reports=[checked_manifest(p) for p in (bundle,bootstrap,system,relay)]
@@ -57,6 +58,12 @@ def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
         raise ValueError('Target first-boot integration is unavailable; no erase started')
     if reports[1].get('base_build')!='12H321':
         raise ValueError('Expected the prepared compact signed base')
+    # Reject an old iOS 8 writer before even restoring the temporary base.
+    # The selected RAM must handle the complete installation in one DFU run.
+    from restore_environment import selected_build
+    from restore import require_data_environment
+    require_data_environment(device['identity']['product'],reports[2]['version'],
+        reports[0].get('restore_environment_build',selected_build(device['identity']['product'])))
     journal=bundle/'pipeline.json'
     if journal.exists() or (bundle/'run.json').exists():
         raise ValueError('Inspect the existing provisioning attempt before retrying')
@@ -69,7 +76,8 @@ def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
     ram=None
     try:
         ram=provision(session,bundle,ticket,keys,baseband=baseband,
-                      baseband_manifest=baseband_manifest,erase=True,progress=progress)
+                      baseband_manifest=baseband_manifest,erase=True,pwned=pwned,
+                      progress=progress)
         stage('collecting-signed-artifacts')
         progress('Signed base verified. Collecting its kernel and modem for the compact installation; the phone bar may stay unchanged.')
         collect(bundle,ram,bundle/'technical')

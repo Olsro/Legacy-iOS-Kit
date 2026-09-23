@@ -20,6 +20,9 @@ extern int task_for_pid(unsigned int, int, unsigned int *), mach_port_deallocate
 #define ENABLED "/olsn0w/autoboot.enabled"
 #define FAILURE "/var/log/autoboot.failure"
 #define STAGE "/var/log/autoboot.stage"
+#define SERVICES_READY "/var/run/olsn0w-services-ready"
+
+struct boot_identity { long seconds; int microseconds; };
 
 static char *const environment[] = {"PATH=/bin:/sbin:/usr/bin:/usr/sbin", "HOME=/var/root", 0};
 
@@ -66,6 +69,19 @@ static void stage(const char *value) {
     sync();
 }
 
+static int release_services(void) {
+    struct boot_identity boot = {0, 0};
+    size_t size = sizeof(boot);
+    if (sysctlbyname("kern.boottime", &boot, &size, 0, 0)) return 1;
+    if (size != sizeof(boot)) return 2;
+    int fd = open(SERVICES_READY, 0x601, 0600);
+    if (fd < 0) return 3;
+    long count = write(fd, &boot, sizeof(boot));
+    close(fd);
+    sync();
+    return count == sizeof(boot) ? 0 : 4;
+}
+
 static int fail(int code) {
     char text[16];
     int count = 0, value = code;
@@ -85,6 +101,7 @@ int main(void) {
     if (!exact_file(ENABLED, OLSN0W_TARGET_MARKER)) {
         printf("OLSN0W-AUTONOMOUS disarmed\n"); fflush(0); return 0;
     }
+    unlink(SERVICES_READY);
     /* Enablement is persistent and read-only. A power cut must not consume
      * the next boot; writable stage/failure records are diagnostic only. */
     stage("controller-starting-held");
@@ -131,9 +148,22 @@ int main(void) {
     /* Allow the kernel changes to settle before starting power services. */
     usleep(2000000);
     stage("controller-untether-ready");
-    char *notify[] = {"/bin/launchctl", "load", "/olsn0w/disabled/com.apple.notifyd.plist", 0};
-    char *power[] = {"/bin/launchctl", "load", "/olsn0w/disabled/com.apple.powerd.plist", 0};
-    if (run(notify) || run(power)) return fail(104);
+    /* launchd registered powerd's Mach services from its embedded registry
+     * before clients could request them.  Release its already-running gate only
+     * after the held untether reports a patched kernel.  The boot-time token
+     * prevents a persistent /var marker from releasing a later boot early. */
+    int release_status = 0;
+    for (int i = 0; i < 100; i++) {
+        release_status = release_services();
+        if (!release_status) break;
+        if (!(i % 10)) {
+            printf("OLSN0W-AUTONOMOUS services-release=%d attempt=%d\n",
+                   release_status, i + 1);
+            fflush(0);
+        }
+        usleep(100000);
+    }
+    if (release_status) return fail(104);
     stage("controller-power-services");
     char *pm[] = {"/olsn0w/bootstrap_pm_ready", "--complete", 0};
     if (run(pm)) return fail(105);
