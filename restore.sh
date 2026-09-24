@@ -10827,7 +10827,7 @@ menu_miscutilities() {
                     warn "Some options are currently unavailable. Pair your device to access them."
                     menu_items+=("Pair Device")
                 fi
-                menu_items+=("Activation Records")
+                menu_items+=("hactiv8" "Activation Records")
             fi
             if [[ $device_proc != 1 ]] && (( device_proc < 7 )); then
                 if [[ $device_mode != "Normal" ]]; then
@@ -10880,6 +10880,7 @@ menu_miscutilities() {
             "Enter Recovery Mode" ) mode="enterrecovery";;
             "Attempt Activation" ) device_activate;;
             "Dump Baseband" ) mode="baseband";;
+            "hactiv8" ) device_hacktiv8;;
             "Activation Records" ) mode="actrec";;
             "Enable Flags" ) menu_flags;;
             "(Re-)Install Dependencies" ) install_depends;;
@@ -11480,6 +11481,50 @@ device_dumprd() {
         warn "Activation record not found in tar. Will not save activation dump."
     fi
     $ssh -p $ssh_port root@127.0.0.1 "rm -f $tmp/*.tar"
+}
+
+device_hacktiv8() {
+    if [[ $device_mode != "Normal" ]]; then
+        warn "Hacktiv8 requires the connected device in normal mode."
+        return
+    fi
+    if ! python3 ../resources/olsn0w/hacktiv8.py --check --product "$device_type" \
+        --version "$device_vers" --build "$device_build" >/dev/null; then
+        warn "Hacktiv8 does not support this device/build. No changes made."
+        pause
+        return
+    fi
+    print "* Apply Hacktiv8 to the connected jailbroken device, keeping Setup.app."
+    print "* Requires root OpenSSH. The original file is backed up before patching."
+    print "* This is not official activation or a carrier/Apple account unlock."
+    print "* The device will restart after a verified change; no restoration is performed."
+    select_yesno "Apply Hacktiv8 to this device?" 0
+    [[ $? != 1 ]] && return
+    local status selected
+    local menu_items=("Retry SSH" "Jailbreak Device" "Go Back")
+    while true; do
+        python3 ../resources/olsn0w/hacktiv8_live.py --product "$device_type" \
+            --version "$device_vers" --build "$device_build" --udid "$device_udid"
+        status=$?
+        [[ $status != 20 ]] && break
+        warn "Root SSH is unavailable: jailbreak, OpenSSH, password or pairing may need attention."
+        print "* Already jailbroken? Install OpenSSH in Cydia, then retry with its root password."
+        print "* Not jailbroken? Select Jailbreak Device for the Kit's supported workflow."
+        input "Select an option:"
+        select_option "${menu_items[@]}"
+        selected="${menu_items[$?]}"
+        case $selected in
+            "Retry SSH" ) continue;;
+            "Jailbreak Device" )
+                print "* After jailbreaking, install OpenSSH and return to Misc Utilities -> hactiv8."
+                device_jailbreak_confirm
+                return
+            ;;
+            * ) return;;
+        esac
+    done
+    [[ $status != 0 ]] && warn "Hacktiv8 did not complete; inspect the reported error and retained backup."
+    pause
 }
 
 device_activate() {
