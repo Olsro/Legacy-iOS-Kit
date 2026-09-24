@@ -193,8 +193,51 @@ class GuidedTest(unittest.TestCase):
 
     def test_preparation_failure_never_requests_dfu_or_erase(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',side_effect=RuntimeError('checksum')):
-            with self.assertRaisesRegex(RuntimeError,'checksum'):guided.menu('iPhone5,2','123',read=lambda _:'1',show=lambda _:None)
+            answers=iter(['1','n'])
+            with self.assertRaisesRegex(RuntimeError,'checksum'):guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             dfu.assert_not_called()
+
+    def test_activation_policy_requires_an_explicit_choice_before_preparing(self):
+        for available in (True, False):
+            for answer, expected in (('y',True), (' YES ',True), ('n',False), (' NO ',False)):
+                with self.subTest(available=available,answer=answer), \
+                     tempfile.TemporaryDirectory() as folder, \
+                     patch.object(guided,'STATE',Path(folder)), \
+                     patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+                     patch.object(guided,'releases',return_value=[RELEASE]), \
+                     patch('hacktiv8.available',return_value=available), \
+                     patch.object(guided,'prepare',return_value={}) as prepare, \
+                     patch.object(guided,'enter_dfu') as dfu:
+                    answers=iter(['1','','  ','invalid',answer,'n'])
+                    prompts=[]
+                    def read(prompt):
+                        prompts.append(prompt)
+                        if len(prompts)<=5:
+                            prepare.assert_not_called()
+                            self.assertFalse((Path(folder)/'sessions').exists())
+                        return next(answers)
+                    guided.menu('iPhone5,2','123',read=read,show=lambda _:None)
+                    self.assertEqual(len(prompts),6)
+                    self.assertEqual(prompts[1:5],[prompts[1]]*4)
+                    self.assertIn('[y/n]',prompts[1])
+                    prepare.assert_called_once()
+                    session=prepare.call_args.args[0]
+                    self.assertIs(json.loads((session/'device.json').read_text())['remove_setup_app'],expected)
+                    dfu.assert_not_called()
+
+    def test_activation_policy_eof_cancels_without_preparing(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(guided,'STATE',Path(folder)), \
+             patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+             patch.object(guided,'releases',return_value=[RELEASE]), \
+             patch.object(guided,'prepare') as prepare:
+            def read(prompt):
+                if prompt.startswith('Select a number'):return '1'
+                raise EOFError
+            with self.assertRaises(EOFError):
+                guided.menu('iPhone5,2','123',read=read,show=lambda _:None)
+            prepare.assert_not_called()
+            self.assertFalse((Path(folder)/'sessions').exists())
 
     def test_wrong_dfu_identity_rejected(self):
         with patch.object(guided,'query_recovery',return_value=dict(IDENTITY,ecid=456,mode='DFU')):

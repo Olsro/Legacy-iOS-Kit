@@ -451,8 +451,12 @@ qualification. All three mini variants retain their existing iOS 7/8 policy
 DFU workflow without that reset: normal boot, official activation, writable
 System, Data generation, boot-success and Cydia first-start checks passed.
 The user confirmed end-to-end functionality. This run used the existing Pangu
-profile, without an untether retry reboot; it does not qualify forced resets
-or the cellular variants. All three iPad 4 variants already receive it on iOS 6/7/8;
+profile, without an untether retry reboot. P105 was also restored to 8.3
+(`12F69`) through one DFU workflow with EverUntether and official activation,
+without Hacktiv8 or a forced TriStar reset. Normal boot, Data generation,
+SpringBoard, boot-success and Cydia first-start checks passed; the user
+confirmed full functionality. Neither run qualifies forced resets or the
+cellular variants. All three iPad 4 variants already receive it on iOS 6/7/8;
 the iPad 2/3 and iPhone 4S profiles remain excluded. Preparation still requires
 exactly one TriStar node and verifies the packed DeviceTree by readback; a
 missing or ambiguous node is an error, not a silently skipped patch. Stale

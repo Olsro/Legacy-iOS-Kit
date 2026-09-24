@@ -302,9 +302,14 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     show('Apply Hacktiv8 while preserving Setup.app.'
          if use_hacktiv8 else
          'Hacktiv8 does not support this device/build. Setup.app can still be removed.')
-    prompt=('Apply Hacktiv8 and keep Setup.app? [y/N]: ' if use_hacktiv8 else
-            'Remove Setup.app and skip activation? [y/N]: ')
-    remove_setup_app=read(prompt).strip().lower() in ('y','yes')
+    prompt=('Apply Hacktiv8 and keep Setup.app? [y/n]: ' if use_hacktiv8 else
+            'Remove Setup.app and skip activation? [y/n]: ')
+    while True:
+        answer=read(prompt).strip().lower()
+        if answer in ('y','yes','n','no'):
+            remove_setup_app=answer in ('y','yes')
+            break
+        show('Please explicitly choose y or n.')
     session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
     record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
                 remove_setup_app=remove_setup_app)
