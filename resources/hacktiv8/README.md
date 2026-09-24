@@ -38,6 +38,14 @@ to an unknown binary. iOS 7/8 uses the MobileGestalt flag or a bundled exact
 profile; later supported builds require their bundled profile. A missing live
 cache is an error, not grounds for removing Setup.app or guessing its contents.
 
+The pinned 4S 5.1.1 recipe is shared with custom IPSW preparation (including
+DRA) and olsn0w. Installation and filesystem readback use the same recipe;
+it is not limited to the live-device menu.
+The 5.1.1 DRA custom IPSW was checked through extraction, patching, DMG/ZIP
+reconstruction and filesystem readback on a disposable copy. Its other 37
+archive entries were unchanged. This validates preparation, not a new hardware
+restore.
+
 The host reports file-patch verification, not successful official activation.
 After restart, verify Setup Assistant, device connectivity and normal use.
 

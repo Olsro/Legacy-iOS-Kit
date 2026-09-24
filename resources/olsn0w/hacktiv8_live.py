@@ -17,16 +17,10 @@ import uuid
 
 from common import KIT, tools
 import hacktiv8
-from signing import rehash_adhoc, verify
 
 ROOT_CHECK = ('if command -v id >/dev/null 2>&1; then id -u; '
               'elif test "$EUID" = 0 && test "$UID" = 0; then echo 0; '
               'else exit 1; fi')
-
-# Exact 4S 5.1.1 binary and result of the Kit's historic 9B206 lockdownd.patch.
-# The full-file pin prevents borrowing an offset from a different firmware.
-LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
-LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
 class SSHUnavailable(RuntimeError):
     pass
@@ -48,25 +42,7 @@ def require_identity(info, product, release, build, udid):
 
 def patched_bytes(method, original, product, build):
     if method == 'lockdownd-patch':
-        checksum = hashlib.sha256(original).hexdigest()
-        if (product, build) == ('iPhone4,1', '9B206'):
-            if checksum == LOCKDOWN_511_PATCHED:
-                verify(original)
-                return original
-            if checksum == LOCKDOWN_511_ORIGINAL:
-                changed = bytearray(original)
-                if changed[0xb932:0xb936] != bytes.fromhex('fff733fe'):
-                    raise ValueError('Unexpected 5.1.1 lockdownd instruction')
-                changed[0xb932:0xb936] = bytes.fromhex('01200120')
-                result = rehash_adhoc(original, changed)
-                if hashlib.sha256(result).hexdigest() != LOCKDOWN_511_PATCHED:
-                    raise ValueError('Legacy 5.1.1 patch does not match the qualified result')
-                return result
-        patched = hacktiv8.patch_lockdownd(original)[0]
-        if patched != original:
-            return rehash_adhoc(original, patched)
-        verify(original)
-        return original
+        return hacktiv8.patch_lockdownd(original, product, build, sign=True)[0]
     if method == 'mobilegestalt-flag':
         return hacktiv8._patch_gestalt(original)
     if method == 'mobilegestalt-profile':

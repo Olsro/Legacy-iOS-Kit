@@ -4,12 +4,14 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import hacktiv8
@@ -31,6 +33,66 @@ def tar_entry(name, data=None, mode=0o644, uid=501, gid=501, directory=False):
     elif data is not None:
         item.size = len(data)
     return item, data
+
+
+class Legacy511Regression(unittest.TestCase):
+    def setUp(self):
+        # Synthetic executable layout exercises the pinned recipe without
+        # distributing Apple's binary. Real code signing is checked separately.
+        source = bytearray(0xb940)
+        source[0xb932:0xb936] = bytes.fromhex('fff733fe')
+        self.original = bytes(source)
+        source[0xb932:0xb936] = bytes.fromhex('01200120')
+        self.patched = bytes(source)
+        for name, value in (
+                ('LOCKDOWN_511_ORIGINAL', hashlib.sha256(self.original).hexdigest()),
+                ('LOCKDOWN_511_PATCHED', hashlib.sha256(self.patched).hexdigest())):
+            replacement = patch.object(hacktiv8, name, value)
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        signer = patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new))
+        signer.start()
+        self.addCleanup(signer.stop)
+        verifier = patch.object(hacktiv8, 'verify')
+        verifier.start()
+        self.addCleanup(verifier.stop)
+
+    def test_exact_recipe_and_idempotency(self):
+        self.assertEqual(hacktiv8.patch_lockdownd(self.original, 'iPhone4,1', '9B206'),
+                         (self.patched, 0xb932, True))
+        self.assertEqual(hacktiv8.patch_lockdownd(self.patched, 'iPhone4,1', '9B206'),
+                         (self.patched, 0xb932, False))
+
+    def test_unknown_bytes_model_or_build_never_borrow_fixed_offset(self):
+        for data, product, build in (
+                (self.original+b'x', 'iPhone4,1', '9B206'),
+                (self.original, 'iPhone3,1', '9B206'),
+                (self.original, 'iPhone4,1', '9B208')):
+            with self.assertRaisesRegex(ValueError, 'does not recognize'):
+                hacktiv8.patch_lockdownd(data, product, build)
+
+    def test_image_install_readback_and_live_share_recipe(self):
+        import hacktiv8_live
+        files = {
+            hacktiv8.LOCKDOWN: self.original,
+            '/System/Library/CoreServices/SystemVersion.plist': plistlib.dumps(
+                dict(ProductVersion='5.1.1', ProductBuildVersion='9B206')),
+        }
+        image = Mock()
+        image.read.side_effect = files.__getitem__
+        image.add.side_effect = lambda path, data, **kwargs: files.__setitem__(path, data)
+        image.ls.side_effect = lambda path: (
+            [dict(name='Setup.app', mode=stat.S_IFDIR | 0o755)]
+            if path == '/Applications' else
+            [dict(name=Path(name).name, mode=stat.S_IFREG | 0o755, uid=0, gid=0)
+             for name in files if str(Path(name).parent) == path])
+        report = hacktiv8.install(image, '5.1.1', 'iPhone4,1', '9B206')
+        hacktiv8.verify_installed(image, report, '5.1.1', 'iPhone4,1')
+        self.assertEqual(files[hacktiv8.LOCKDOWN], self.patched)
+        self.assertEqual(files[hacktiv8.LOCKDOWN_BACKUP], self.original)
+        self.assertEqual(hacktiv8.install(image, '5.1.1', 'iPhone4,1', '9B206'), report)
+        self.assertEqual(hacktiv8_live.patched_bytes(
+            'lockdownd-patch', self.original, 'iPhone4,1', '9B206'), self.patched)
 
 
 class Selection(unittest.TestCase):

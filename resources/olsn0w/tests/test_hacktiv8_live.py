@@ -48,10 +48,10 @@ class FakeConnection:
 class LivePatchTests(unittest.TestCase):
     def setUp(self):
         # Synthetic pattern fixtures are not complete Mach-O executables.
-        signer = patch.object(live, 'rehash_adhoc', side_effect=lambda original, changed: bytes(changed))
+        signer = patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda original, changed: bytes(changed))
         signer.start()
         self.addCleanup(signer.stop)
-        verifier = patch.object(live, 'verify')
+        verifier = patch.object(hacktiv8, 'verify')
         self.verifier = verifier.start()
         self.addCleanup(verifier.stop)
 

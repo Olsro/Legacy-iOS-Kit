@@ -10,6 +10,7 @@ import zipfile
 
 from common import KIT, run, tools, version
 from hfs import HFS
+from signing import rehash_adhoc, verify
 
 
 HACKTIV8 = KIT / 'resources/hacktiv8'
@@ -27,6 +28,11 @@ FIRSTBOOT_HELPER = '/usr/local/libexec/hacktiv8-mobilegestalt'
 FIRSTBOOT_PROFILE = '/usr/local/share/hacktiv8-mobilegestalt.plist'
 HELPER_ASSET = Path(__file__).parent / 'target/hacktiv8-mobilegestalt'
 HELPER_SHA256 = 'c4a693b6610c176319a1e1e126cad1df0806893cb628fc52adfd556c9150befe'
+
+# Shared by IPSW preparation, olsn0w and the live-device utility. Only this
+# exact 4S/9B206 executable may use the historic patch's fixed offset.
+LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
+LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
 LOCKDOWN_PATCHES = (
     (
@@ -64,11 +70,28 @@ def _patched_signature(signature, replacements):
     return result
 
 
-def patch_lockdownd(data):
+def patch_lockdownd(data, product=None, build=None, *, sign=False):
+    if (product, build) == ('iPhone4,1', '9B206'):
+        checksum = hashlib.sha256(data).hexdigest()
+        if checksum == LOCKDOWN_511_PATCHED:
+            verify(data)
+            return bytes(data), 0xb932, False
+        if checksum == LOCKDOWN_511_ORIGINAL:
+            changed = bytearray(data)
+            if changed[0xb932:0xb936] != bytes.fromhex('fff733fe'):
+                raise ValueError('Unexpected 5.1.1 lockdownd instruction')
+            changed[0xb932:0xb936] = bytes.fromhex('01200120')
+            result = rehash_adhoc(data, changed)
+            if hashlib.sha256(result).hexdigest() != LOCKDOWN_511_PATCHED:
+                raise ValueError('Legacy 5.1.1 patch does not match the qualified result')
+            return result, 0xb932, True
+    original = bytes(data)
     data = bytearray(data)
     for signature, replacements in LOCKDOWN_PATCHES:
         matches = _find(data, _patched_signature(signature, replacements))
         if matches:
+            if sign:
+                verify(data)
             return bytes(data), matches[0], False
     for signature, replacements in LOCKDOWN_PATCHES:
         matches = _find(data, signature)
@@ -78,7 +101,8 @@ def patch_lockdownd(data):
             for offset, replacement in replacements:
                 start = matches[0]+offset
                 data[start:start+len(replacement)] = replacement
-            return bytes(data), matches[0]+replacements[0][0], True
+            result = rehash_adhoc(original, data) if sign else bytes(data)
+            return result, matches[0]+replacements[0][0], True
     raise ValueError('Hacktiv8 does not recognize this lockdownd')
 
 
@@ -235,12 +259,12 @@ def install(image, release, product, build=None):
         backup_name = Path(LOCKDOWN_BACKUP).name
         if backup_name in entries:
             original = image.read(LOCKDOWN_BACKUP)
-            patched, offset, _ = patch_lockdownd(original)
+            patched, offset, _ = patch_lockdownd(original, product, build)
             if current != patched:
                 raise ValueError('Existing Hacktiv8 lockdownd backup conflicts with target')
         else:
             original = current
-            patched, offset, changed = patch_lockdownd(original)
+            patched, offset, changed = patch_lockdownd(original, product, build)
             if not changed:
                 raise ValueError('Patched lockdownd has no original Hacktiv8 backup')
             image.add(LOCKDOWN_BACKUP, original, mode=0o755)
@@ -300,7 +324,9 @@ def verify_installed(image, report, release, product):
     if method == 'lockdownd-patch':
         current = image.read(LOCKDOWN)
         original = image.read(LOCKDOWN_BACKUP)
-        patched, offset, _ = patch_lockdownd(original)
+        build = plistlib.loads(image.read(
+            '/System/Library/CoreServices/SystemVersion.plist'))['ProductBuildVersion']
+        patched, offset, _ = patch_lockdownd(original, product, build)
         if (current != patched or
                 hashlib.sha256(current).hexdigest() != report.get('sha256') or
                 hashlib.sha256(original).hexdigest() != report.get('original_sha256') or
