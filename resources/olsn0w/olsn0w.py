@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from common import MODELS, STATE
+from common import MODELS, STATE, SUPPORT_MESSAGE
 from firmware import releases, extract
 
 
@@ -86,6 +86,7 @@ def main():
             raise ValueError('Restore bundle product differs from selection')
         from restore_run import run as restore_run
         restore_run(args.session,args.bundle,erase=args.erase,ram_ready=args.ram_ready)
+        print(SUPPORT_MESSAGE)
         return
     if args.action=='list':
         for f in releases(args.product,args.refresh):
@@ -139,6 +140,7 @@ def main():
         from provision_restore import run as provision_restore
         provision_restore(args.session,args.bundle,args.bootstrap,system_folder,relay,args.ticket,args.base_keys,
                           baseband=args.baseband,baseband_manifest=args.baseband_manifest,erase=args.erase)
+        print(SUPPORT_MESSAGE)
         return
     if args.action == 'prepare-restore':
         if not args.session or not args.base or not args.bundle:

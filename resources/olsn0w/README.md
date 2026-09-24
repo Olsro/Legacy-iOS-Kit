@@ -1,19 +1,22 @@
 # olsn0w
 
-Start `./restore.sh`, connect an iPhone 4S, iPhone 5 or iPad 4, and open **Restore →
+Part of **Olsro's Legacy iOS Kit**. See the [current hardware validation table](../../README.md#hardware-validation)
+for successful device/version tests; the recipe history below also records earlier limitations.
+
+Start `./restore.sh`, connect a supported A5/A5X/A6/A6X device, and open **Restore →
 olsn0w (choose iOS version)**. Select the desired release by its menu number or version; olsn0w prepares and
 checks its firmware, Apple signing ticket, modem, restore environment and compact
 bootstrap automatically. No developer paths or build tools for the ARM helpers
 are requested. The Python runtime is installed on first use.
 
-After selecting the release, the guided menu optionally removes the stock
-`/Applications/Setup.app` before the target's first boot. This provides the
-short path directly to SpringBoard for a device whose owner does not want to
-run Setup Assistant. The choice is bound to a separate checked system cache.
-In this mode olsn0w deliberately copies no activation records, sends no
-activation request, performs no activation acknowledgement, and accepts an
-`Unactivated` state during final boot qualification. The normal choice retains
-the existing official activation and Setup Assistant flow.
+After selecting the release, the guided menu requires an explicit activation
+choice (`y` or `n`; empty input repeats the question). On a supported build,
+the optional Hacktiv8 policy preserves `/Applications/Setup.app` and skips
+official activation. If no Hacktiv8 recipe exists, the offered alternative
+removes Setup.app and skips activation. The choice uses a separate checked
+system cache. Neither bypass policy performs official activation or an
+activation acknowledgement; the ordinary choice retains the official
+activation and Setup Assistant flow. See the [Hacktiv8 guide](../hacktiv8/README.md).
 
 Preparation calculates the remaining disk requirement from firmware and system
 images that are not already cached, and reports it before creating large files.
@@ -22,20 +25,17 @@ After preparation, confirm the erase and follow the instructions for the initial
 manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate downloads.
 The signed 8.4.1 restore, RAM handoff, compact installation,
 target boot and, in normal mode, official activation verification then run automatically. Only
-one manual DFU entry is intended for a successful A6 run; recovery after a failure
-can require another. The iPhone 4S additionally requires A5Mate's A5_8940
-`PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
+one manual DFU entry is used by the integrated A5 and A6 workflow; recovery after a failure
+can require another. A5 devices require external pwnDFU, such as A5Mate's
+model-appropriate `PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
 the completed firmware preparation. The current pipeline still restores the full signed base
 before reducing it to the 30 MiB + 2 MiB bootstrap.
 
-The intended target range is every iOS 6, 7, 8, 9 and 10 release published for
-the connected iPhone 5 or iPad 4 model. This is a development objective, not a
-claim that every release already boots with olsn0w.
-
-The menu shows releases for the connected product. iOS 6 and 7 have installation
-recipes; later releases are marked unavailable until their first-boot integration
-exists. Preparation rejects firmware that does not match the checked patch
-patterns. This does not claim physical qualification of every listed build.
+The menu follows releases published for the connected product across the
+32-bit 8.4.1 OTA family. iOS 6, 7 and 8 have installation recipes; iOS 9/10
+remain outside the implemented target path. Preparation rejects firmware that
+does not match checked patch patterns. Catalog availability is not physical
+qualification of every listed build or hardware revision.
 
 Preparation displays a live, single-line percentage for downloads, archive
 extraction, decryption, checksums and firmware assembly. Percentages refer to the
@@ -47,9 +47,9 @@ Follow the computer's phase messages: the device can display stationary progress
 bars, black screens and successive Apple logos during transitions. Success is
 reported only after target verification and the activation policy selected in
 the menu. Failures retain logs and
-stop without silently repeating an erase. The guided frontend and renamed assets
-have host tests; a complete physical restore through this new menu remains to be
-qualified.
+stop without silently repeating an erase. The guided frontend has host tests
+and physical restore validation on the device/version combinations listed in
+the main README; this does not qualify every profile.
 
 After final target boot and its selected activation qualification, olsn0w retains manifests,
 logs and the small device-bound technical collection while pruning reconstructible
@@ -164,15 +164,16 @@ the installed stock system is unchanged. Unknown or ambiguous instruction
 patterns stop preparation. A successful metadata check or transfer alone does
 not qualify the entire restoration.
 
-The experimental iPhone4,1 path always follows Legacy iOS Kit's battery-safe
+The iPhone4,1 path follows upstream Legacy iOS Kit's battery-safe
 `multipatch` policy. It keeps the signed 8.4.1 base and ticket, but restores it
 through the checked 6.1.3 iBSS, iBEC, DeviceTree, kernel and restore ramdisk;
 the target 8.4.1 restore options and library are copied into that environment.
 The Kit's checked multipatch ASR and `restored_external` replacements are used,
 and only the erase BuildIdentity is routed to the added `Downgrade` components.
 The Trek modem donor is 9.3.6 (Trek 6.7.00). A complete 4S provisioning IPSW
-and 32 MiB ARMv7 bootstrap reproduce successfully on the host; physical restore
-qualification is deliberately deferred to the connected-device test.
+and 32 MiB ARMv7 bootstrap reproduce successfully on the host. Subsequent 4S
+restores to 6.1.3, 7.1.2 and 8.3 were confirmed functional, including Cydia;
+this does not establish compatibility for all manufacturing revisions.
 
 After a successful signed restore, the held RAM can collect its personalized
 kernel, modem and partition table, then install the selected target. Official
@@ -378,8 +379,9 @@ The selected root path and guarded job loader are retargeted and signed by the
 existing checked Aquila preparation. Root read-write, generation, SpringBoard
 and Cydia readiness remain mandatory for successful qualification.
 Two normal boots and Cydia package installation were verified on the iPod under
-7.1.2; the iPhone 4S, cold/forced-reset behavior and other 7.1 releases are not
-hardware-qualified by that test. The 4S multipatch/baseband path is unchanged.
+7.1.2. The 4S was subsequently restored to 7.1.2 with user-confirmed working
+interface and Cydia. Cold/forced-reset behavior and other 7.1 releases are not
+qualified by those tests. The 4S multipatch/baseband path is unchanged.
 Other devices and iOS 6/7.0/8 retain their existing recipes.
 The guided flow rebuilds recipe-38 System caches automatically. This does not
 modify already restored devices, the activation choice or Cydia sources.
@@ -533,8 +535,9 @@ including normal autonomous boot with USB attached and user-confirmed Cydia/APT.
 The integrated image is also rebuilt/read back offline within 30+2 MiB. Target
 diagnostics are now opt-in on A5, as on A6; the signed bootstrap's normal entry
 uses stock boot arguments. The newly packaged
-preparation still needs its own end-to-end restore test. Other A5 models and
-releases are not hardware-qualified by this result. The single-DFU native
+preparation was subsequently exercised in the restore runs summarized in the
+main README. Other A5 models and releases are not hardware-qualified by this
+individual result. The single-DFU native
 iOS 6 installation test and its remaining qualification limits are recorded below.
 
 The restore completion check waits for Cydia preparation to exit successfully,
@@ -569,7 +572,7 @@ Existing kit code is reused where applicable:
 | Bootloader patches | Bundled `iBoot32Patcher` | Each selected binary must match the relay's checked instruction patterns. |
 | iOS 6/7 jailbreak payloads | Kit package layout, with the pinned upstream Aquila 2.1.1 device binary | The iOS 6 and 7 image recipes integrate root selection and first-boot services. Hardware qualification remains specific to each build and product. |
 | iOS 7/8 daemon placement | `jailbreak/daibutsu/move.sh` | Must be adapted to the selected image/layout rather than run blindly on a device. |
-| iOS 8 | Kit EverUntether and daibutsu cache admission | Portable preparation is implemented; complete device qualification is pending. |
+| iOS 8 | Kit EverUntether and daibutsu cache admission | Preparation and restores validated on the builds/devices in the main README, not every catalog entry. |
 | iOS 9 | The Kit selects EverUntether for releases before 9.3.5 | Target service and boot integration remains to be implemented and validated. |
 | iOS 10 | The kit documents socket and has newer restore tooling | There is no integrated olsn0w iOS 10 restore path yet. Its boot and filesystem handling must be validated separately. |
 

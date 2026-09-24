@@ -52,11 +52,11 @@ exit_message() {
     echo
     print "* Save the terminal output now if needed. (macOS: Cmd+S, Linux: Ctrl+Shift+S)"
     if [[ -n $commits_current ]]; then
-        print "* Legacy iOS Kit $version_current-$commits_current ($git_hash $branch_current)"
+        print "* Olsro's Legacy iOS Kit $version_current-$commits_current ($git_hash $branch_current)"
     elif [[ -n $version_current ]]; then
-        print "* Legacy iOS Kit $version_current ($git_hash $branch_current)"
+        print "* Olsro's Legacy iOS Kit $version_current ($git_hash $branch_current)"
     else
-        print "* Legacy iOS Kit"
+        print "* Olsro's Legacy iOS Kit"
     fi
     if [[ -n $platform ]]; then
         print "* Platform: $platform ($platform_ver - $platform_arch) $live_session_str"
@@ -117,8 +117,9 @@ clean_usbmuxd() {
 }
 
 display_help() {
-    echo ' *** Legacy iOS Kit ***
-  - Script by LukeZGD -
+    echo " *** Olsro's Legacy iOS Kit ***"
+    echo '  - Olsro fork; original script by LukeZGD -
+Visit https://olsro.fr for cool stuff and to support Olsro with a donation.
 
 Usage: ./restore.sh [Options]
 
@@ -445,13 +446,13 @@ set_tool_paths() {
             if [[ $(pwd) == "/home/"* ]]; then
                 df . -h # just display items
                 if [[ $(lsblk -o label | grep -c "casper-rw") == 1 || $(lsblk -o label | grep -c "persistence") == 1 ]]; then
-                    log "Detected Legacy iOS Kit running on persistent storage."
+                    log "Detected Olsro's Legacy iOS Kit running on persistent storage."
                     live_session_str+=" - Persistent storage"
                 else
-                    warn "Detected Legacy iOS Kit running on temporary storage."
+                    warn "Detected Olsro's Legacy iOS Kit running on temporary storage."
                     print "* You may run out of space and get errors during the restore process."
-                    print "* Please move Legacy iOS Kit to a drive that is NOT used for the live USB."
-                    print "* This may mean using another external HDD/flash drive to store Legacy iOS Kit on."
+                    print "* Please move Olsro's Legacy iOS Kit to a drive that is NOT used for the live USB."
+                    print "* This may mean using another external HDD/flash drive to store Olsro's Legacy iOS Kit on."
                     print "* To use one USB drive only, create the live USB using Rufus with Persistent Storage enabled."
                     sleep 5
                     pause
@@ -463,7 +464,7 @@ set_tool_paths() {
         # if "/media/" is detected in pwd, warn user of possible permission issues
         if [[ $(pwd) == *"/media/"* ]]; then
             warn "You might get permission errors like \"Permission denied\" on getting device info."
-            print "* If this is the case, try moving Legacy iOS Kit to the Desktop or Documents folder."
+            print "* If this is the case, try moving Olsro's Legacy iOS Kit to the Desktop or Documents folder."
             live_session_str+=" - External storage"
         fi
 
@@ -527,7 +528,7 @@ set_tool_paths() {
                     $sudo -b $dir/usbmuxd -pf &>../saved/usbmuxd.log
                 fi
             else
-                warn "Detected existing tmp folder(s), there might be other Legacy iOS Kit instance(s) running"
+                warn "Detected existing tmp folder(s), there might be other Olsro's Legacy iOS Kit instance(s) running"
                 warn "Not running usbmuxd"
             fi
         fi
@@ -537,7 +538,7 @@ set_tool_paths() {
         gaster+="$dir/gaster"
 
     elif [[ $(uname -m) == "iP"* ]]; then
-        error "Running Legacy iOS Kit on iOS is not supported (yet)" \
+        error "Running Olsro's Legacy iOS Kit on iOS is not supported (yet)" \
               "* Supported platforms: Linux, macOS"
 
     elif [[ $OSTYPE == "darwin"* ]]; then
@@ -610,12 +611,12 @@ set_tool_paths() {
     fi
     if [[ ! -d $dir ]]; then
         error "Failed to find bin directory ($dir), cannot continue." \
-              "* Re-download Legacy iOS Kit from releases (or do a git clone/reset)"
+              "* Re-download Olsro's Legacy iOS Kit from releases (or do a git clone/reset)"
     fi
     if [[ $device_sudoloop == 1 ]]; then
         $sudo chmod +x $dir/*
         if [[ $? != 0 ]]; then
-            error "Failed to set up execute permissions of binaries, cannot continue. Try to move Legacy iOS Kit somewhere else."
+            error "Failed to set up execute permissions of binaries, cannot continue. Try to move Olsro's Legacy iOS Kit somewhere else."
         fi
     else
         chmod +x $dir/*
@@ -676,7 +677,7 @@ install_depends() {
     rm -f "../saved/firstrun"
 
     if [[ $platform == "linux" ]]; then
-        print "* Legacy iOS Kit will be installing dependencies from your distribution's package manager"
+        print "* Olsro's Legacy iOS Kit will be installing dependencies from your distribution's package manager"
         print "* Enter your user password when prompted"
         print "* Your password input may not be visible, but it is still being entered."
 
@@ -753,95 +754,11 @@ download_from_url() {
     wget "$url"
 }
 
-version_update_check() {
-    pushd "tmp$$" >/dev/null
-    if [[ $platform == "macos" && ! -s ../saved/firstrun ]]; then
-        /usr/bin/xattr -cr ../bin/macos
-    fi
-    log "Checking for updates..."
-    if [[ $branch_current == "main" || -z $branch_current ]]; then
-        download_from_url "https://api.github.com/repos/LukeZGD/Legacy-iOS-Kit/releases/latest" latest
-        github_api=$(cat latest 2>/dev/null)
-        version_latest=$(echo "$github_api" | $jq -r '.name')
-        version_latest=${version_latest#Latest-}
-        git_hash_latest=$(echo "$github_api" | $jq -r '.target_commitish')
-    else
-        # A local development branch has no update endpoint in the official
-        # repository.  Treat the checked-out revision as current instead of
-        # asking GitHub for a branch that cannot exist there.
-        if ! git -C .. rev-parse --verify --quiet "${branch_current}@{upstream}" >/dev/null; then
-            git_hash_latest=$git_hash
-            commits_latest=$commits_current
-            popd >/dev/null
-            return
-        fi
-        local response=$($curl -sS -D - "https://api.github.com/repos/LukeZGD/Legacy-iOS-Kit/commits?sha=$branch_current&per_page=1&page=1")
-        git_hash_latest=$(printf '%s\n' "$response" | awk 'BEGIN { found = 0 } found { print; next } /^(\r)?$/ { found = 1 }' |
-            $jq -r 'if type == "array" and length > 0 then .[0].sha // empty else empty end')
-        commits_latest=$(printf '%s\n' "$response" | sed -n 's/.*[Ll]ink:.*page=\([0-9][0-9]*\)>; rel="last".*/\1/p')
-        [[ -n $git_hash_latest && -z $commits_latest ]] && commits_latest=1
-    fi
-    git_hash_latest=${git_hash_latest:0:7}
-    popd >/dev/null
-}
-
-version_update() {
-    select_yesno "Do you want to update now?" 1
-    if [[ $? != 1 ]]; then
-        log "User selected N, cannot continue. Exiting."
-        exit
-    fi
-    if [[ -d .git ]]; then
-        log "Running git reset..."
-        git reset --hard
-        log "Running git pull..."
-        git pull origin $(git rev-parse --abbrev-ref HEAD)
-        pushd "tmp$$" >/dev/null
-        log "Done! Please run the script again"
-        exit
-    fi
-    pushd "tmp$$" >/dev/null
-    log "Downloading..."
-    git clone --filter=blob:none "https://github.com/LukeZGD/Legacy-iOS-Kit"
-    if [[ $? != 0 ]]; then
-        git clone "https://github.com/LukeZGD/Legacy-iOS-Kit"
-        if [[ $? != 0 ]]; then
-            local error_msg=$'* If you have not installed/updated git, please install git from your package manager.'
-            if [[ $platform == "macos" ]]; then
-                error_msg+=$'\n* On macOS, you may just need to install Xcode Command Line Tools with this command: xcode-select --install'
-                error_msg+=$'\n* If the above command does not work, try this: sudo xcode-select --reset'
-                xcode-select --install
-            fi
-            error "git clone failed. Please run the script again" "$error_msg"
-        fi
-    fi
-    popd >/dev/null
-    log "Updating..."
-    rm -rf bin/ LICENSE README.md restore.sh
-    if [[ $device_sudoloop == 1 ]]; then
-        $sudo rm -rf resources/
-    fi
-    rm -rf resources/
-    mv tmp$$/Legacy-iOS-Kit/* tmp$$/Legacy-iOS-Kit/.git* .
-    pushd "tmp$$" >/dev/null
-    log "Done! Please run the script again"
-    exit
-}
-
 version_get() {
     pushd .. >/dev/null
     if [[ -d .git ]]; then
-        if [[ -e .git/shallow ]]; then
-            log "Shallow git repository detected. Unshallowing..."
-            git fetch --unshallow --filter=blob:none
-            if [[ $? != 0 ]]; then
-                git fetch --unshallow
-                if [[ $? != 0 ]]; then
-                    error "git fetch failed. Please run the script again" \
-                          "* If you have not installed/updated git, please install git from your package manager."
-                fi
-            fi
-        fi
+        # Version display uses local metadata only, including shallow clones.
+        # Never fetch or replace this fork as part of startup.
         git_hash=$(git rev-parse HEAD | cut -c -7)
         [[ -n $(git status --porcelain --untracked-files=no) ]] && git_hash+="-dirty"
 
@@ -875,52 +792,12 @@ version_get() {
         :
     else
         log ".git directory and git_hash file not found, cannot determine version."
-        if [[ $no_version_check != 1 ]]; then
-            warn "Your copy of Legacy iOS Kit is downloaded incorrectly. Do not use the \"Code\" button in GitHub."
-            print "* Please download Legacy iOS Kit using git clone or from GitHub releases: https://github.com/LukeZGD/Legacy-iOS-Kit/releases"
-        fi
+        print "* Local version metadata is unavailable; automatic updates are disabled in this fork."
     fi
     if [[ -n $commits_current ]]; then
         print "* Version: $version_current-$commits_current ($git_hash $branch_current)"
     elif [[ -n $version_current ]]; then
         print "* Version: $version_current ($git_hash $branch_current)"
-    fi
-    popd >/dev/null
-}
-
-version_check() {
-    if [[ $no_version_check == 1 && ! -e ../resources/new ]]; then
-        warn "No version check flag detected, update check is disabled and no support will be provided."
-        return
-    fi
-    pushd .. >/dev/null
-    version_update_check
-    if [[ -z $git_hash_latest || $git_hash_latest == "null" ]]; then
-        warn "Failed to check for updates. GitHub may be down or blocked by your network."
-    elif [[ $git_hash_latest != "$git_hash" ]]; then
-        if [[ -z $branch_current ]]; then
-            print "* Latest version: $version_latest ($git_hash_latest)"
-            print "* Please download/pull the latest version before proceeding."
-            version_update
-        elif [[ $branch_current != "main" ]]; then
-            if (( commits_current >= commits_latest )); then
-                warn "Current branch is newer/different than remote: $commits_latest ($git_hash_latest)"
-            else
-                print "* A newer version of Legacy iOS Kit is available."
-                print "* Current branch: $commits_current ($git_hash)"
-                print "* Latest branch:  $commits_latest ($git_hash_latest)"
-                print "* Please pull the latest version before proceeding."
-                version_update
-            fi
-        elif (( $(echo "$version_current" | cut -c 2- | sed -e 's/\.//g') >= $(echo "$version_latest" | cut -c 2- | sed -e 's/\.//g') )); then
-            warn "Current version is newer/different than remote: $version_latest ($git_hash_latest)"
-        else
-            print "* A newer version of Legacy iOS Kit is available."
-            print "* Current version: $version_current ($git_hash)"
-            print "* Latest version:  $version_latest ($git_hash_latest)"
-            print "* Please download/pull the latest version before proceeding."
-            version_update
-        fi
     fi
     popd >/dev/null
 }
@@ -1288,7 +1165,7 @@ device_get_info() {
         if [[ $platform == "linux" ]]; then
             print "* If it gets stuck here, try to restart your PC"
             if [[ $othertmp != 0 ]]; then
-                print "* If it fails to detect devices, try to delete all \"tmp\" folders in your Legacy iOS Kit folder"
+                print "* If it fails to detect devices, try to delete all \"tmp\" folders in your Olsro's Legacy iOS Kit folder"
             fi
         fi
         $ideviceinfo -s >/dev/null
@@ -1618,7 +1495,7 @@ device_get_info() {
         print "* iOS Version: $device_vers"
         print "* ECID: $device_ecid"
         echo
-        warn "This device is mostly not supported by Legacy iOS Kit."
+        warn "This device is mostly not supported by Olsro's Legacy iOS Kit."
         print "* You may still continue but options will be limited to sideloading and other basic features."
         pause
     fi
@@ -2303,7 +2180,8 @@ device_enter_mode() {
                 fi
                 echo
                 print "* DFU mode for A5(X) device - Make sure that your device is in PWNED DFU mode."
-                print "* You need to have an Raspberry Pi Pico or Arduino+USB Host Shield for checkm8-a5."
+                print "* Use A5Mate Wii, a Raspberry Pi Pico or Arduino+USB Host Shield for checkm8-a5."
+                print "* A5Mate Wii: see resources/a5mate-wii/README.md; choose the matching chip profile (8945 is not hardware-tested yet)."
                 print "* For more details, go to: https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/checkm8-a5"
                 echo
                 print "* As much as possible, RESTART YOUR DEVICE IN NORMAL MODE AND USE THE JAILBREAK/KDFU METHOD INSTEAD."
@@ -2325,6 +2203,7 @@ device_enter_mode() {
                     fi
                     error_msg+=$'\n* Exit DFU mode first by holding the TOP and HOME buttons for about 10 seconds.'
                     error_msg+=$'\n* For more info about kDFU/pwnDFU, read the "Troubleshooting" wiki page in GitHub'
+                    error_msg+=$'\n* A5Mate Wii instructions: resources/a5mate-wii/README.md'
                     error_msg+=$'\n* Troubleshooting link: https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Troubleshooting#dfu-advanced-menu-a5x-pwndfu-mode-with-arduino-and-usb-host-shield'
                     error "32-bit A5 device is NOT in PWNED DFU mode. Already pwned iBSS mode?" "$error_msg"
                 fi
@@ -2477,7 +2356,8 @@ device_send_unpacked_ibss() {
         log "Device should now be in $pwnrec mode."
     elif [[ $device_proc == 5 ]]; then
         error "Device failed to enter $pwnrec mode." \
-              "* If you are using Arduino for checkm8-a5, make sure you are using my (LukeZGD) or synackuk fork of checkm8-a5. Do not use a1exdandy checkm8-a5."
+              "* If you are using Arduino for checkm8-a5, use the LukeZGD or synackuk fork, not a1exdandy checkm8-a5." \
+              "* A5Mate Wii is another option: see resources/a5mate-wii/README.md and select the matching chip profile."
     else
         error "Device failed to enter $pwnrec mode."
     fi
@@ -6567,7 +6447,8 @@ device_buttons() {
     print "* This device needs to be in pwnDFU/kDFU mode before proceeding."
     if [[ $device_proc == 5 ]]; then
         print "* Selecting kDFU is recommended. Your device must be jailbroken and have OpenSSH installed for this option."
-        print "* Selecting pwnDFU is only for those that have the option to use checkm8-a5 (needs Arduino+USB Host Shield or Pi Pico)."
+        print "* Selecting pwnDFU requires checkm8-a5 using A5Mate Wii, Arduino+USB Host Shield or Raspberry Pi Pico."
+        print "* A5Mate Wii: see resources/a5mate-wii/README.md; choose the matching chip profile (8945 is not hardware-tested yet)."
         warn "Selecting pwnDFU will require usage of checkm8-a5. For more info, go here: https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/checkm8-a5"
     elif [[ $device_proc == 6 && $platform != "macos" ]] || [[ $platform_cpu == "AMD"* ]]; then
         print "* Selecting kDFU is recommended. Your device must be jailbroken and have OpenSSH installed for this option."
@@ -8506,8 +8387,9 @@ menu_print_info() {
     if [[ $debug_mode != 1 ]]; then
         clear
     fi
-    print " *** Legacy iOS Kit ***"
-    print " - Script by LukeZGD -"
+    print " *** Olsro's Legacy iOS Kit ***"
+    print " - Olsro fork; original script by LukeZGD -"
+    print "Visit https://olsro.fr for cool stuff and to support Olsro with a donation."
     echo
     if [[ -n $commits_current ]]; then
         print "* Version: $version_current-$commits_current ($git_hash $branch_current)"
@@ -8517,16 +8399,8 @@ menu_print_info() {
     if [[ $no_internet_check == 1 ]]; then
         warn "No internet check flag detected, check is disabled and no support will be provided."
     fi
-    if [[ $no_version_check == 1 ]]; then
-        warn "No version check flag detected, check is disabled and no support will be provided."
-    fi
     if [[ $EUID == 0 && $run_as_root == 1 ]]; then
         warn "Script is running as root. This is not supported, proceed with caution."
-    fi
-    if [[ -z $git_hash_latest || $git_hash_latest == "null" ]]; then
-        warn "Failed to check for updates. GitHub may be down or blocked by your network."
-    elif [[ $git_hash_latest != "$git_hash" ]]; then
-        warn "Current version is newer/different than remote: $version_latest ($git_hash_latest)"
     fi
     print "* Platform: $platform ($platform_ver - $platform_arch) $live_session_str"
     if [[ $platform == "macos" && $platform_arch == "arm64" ]]; then
@@ -10958,7 +10832,7 @@ menu_usefulutilities() {
         selected="${menu_items[$?]}"
         case $selected in
             "Hacktivate Device" )
-                print "* Note: This is for hacktivating devices that are already restored and jailbroken with Legacy iOS Kit."
+                print "* Note: This is for hacktivating devices that are already restored and jailbroken with Olsro's Legacy iOS Kit."
                 print "* If this is not what you want, you might be looking for the \"Restore/Downgrade\" option instead."
                 print "* From there, enable both \"Jailbreak Option\" and \"Hacktivate Option.\""
                 echo
@@ -10972,7 +10846,7 @@ menu_usefulutilities() {
             ;;
             "Revert Hacktivation" )
                 print "* This will use revert hacktivation for this device."
-                print "* This option can only be used if the hacktivation is done using Legacy iOS Kit's \"Hacktivate Device\" option."
+                print "* This option can only be used if the hacktivation is done using Olsro's Legacy iOS Kit's \"Hacktivate Device\" option."
                 select_yesno
                 if [[ $? != 1 ]]; then
                     continue
@@ -11000,7 +10874,7 @@ menu_usefulutilities() {
             "Run uicache" )
                 print "* This will run the uicache command via SSH to help fix missing jailbreak app icons."
                 print "* In order for this to work, OpenSSH must be installed on your device."
-                print "* If your device is restored/jailbroken with Legacy iOS Kit, OpenSSH is already installed."
+                print "* If your device is restored/jailbroken with Olsro's Legacy iOS Kit, OpenSSH is already installed."
                 select_yesno
                 if [[ $? != 1 ]]; then
                     continue
@@ -11137,7 +11011,7 @@ device_jailbreak_confirm() {
         esac
         if [[ $platform == "linux" ]]; then
             case $device_vers in
-                [689]* | 10* ) print "* Note: If you need to sideload, you can use Legacy iOS Kit's \"Sideload IPA\" option.";;
+                [689]* | 10* ) print "* Note: If you need to sideload, you can use Olsro's Legacy iOS Kit's \"Sideload IPA\" option.";;
             esac
         fi
     fi
@@ -11176,13 +11050,13 @@ device_jailbreak_confirm() {
         ;;
         [7654]* | 3.2* | 3.1.3 )
             if [[ $device_type == "iPhone2,1" && $device_vers == "3.1.3" ]]; then
-                warn "To jailbreak iOS 3.x for the 3GS, make sure your device is restored with Legacy iOS Kit's \"Restore/Downgrade\" first."
+                warn "To jailbreak iOS 3.x for the 3GS, make sure your device is restored with Olsro's Legacy iOS Kit's \"Restore/Downgrade\" first."
                 print "* If you have not done this, do not continue."
             fi
         ;;
         3.[10]* )
             if [[ $device_type == "iPhone2,1" ]]; then
-                warn "To jailbreak iOS 3.x for the 3GS, make sure your device is restored with Legacy iOS Kit's \"Restore/Downgrade\" first."
+                warn "To jailbreak iOS 3.x for the 3GS, make sure your device is restored with Olsro's Legacy iOS Kit's \"Restore/Downgrade\" first."
                 print "* If you have not done this, do not continue."
             else
                 warn "This version ($device_vers) is not supported for jailbreaking with ramdisk method."
@@ -11643,12 +11517,12 @@ device_reverthacktivate() {
 
 restore_customipsw_confirm() {
     print "* You are about to restore with a custom IPSW."
-    print "* This option is only for restoring with IPSWs NOT made with Legacy iOS Kit, like whited00r or GeekGrade."
+    print "* This option is only for restoring with IPSWs NOT made with Olsro's Legacy iOS Kit, like whited00r or GeekGrade."
     if [[ $device_newbr == 1 ]]; then
         warn "Your device is a new bootrom model and some custom IPSWs might not be compatible."
         [[ $device_type == "iPhone2,1" ]] && print "* For iPhone 3GS, after restoring you will need to go to Useful Utilities -> Install alloc8 Exploit"
     else
-        warn "Do NOT use this option for powdersn0w or jailbreak IPSWs made with Legacy iOS Kit!"
+        warn "Do NOT use this option for powdersn0w or jailbreak IPSWs made with Olsro's Legacy iOS Kit!"
     fi
     if [[ $platform == "macos" ]] && [[ $device_type == "iPod2,1" || $device_proc == 1 ]]; then
         echo
@@ -12636,8 +12510,9 @@ main() {
     if [[ $debug_mode != 1 ]]; then
         clear
     fi
-    print " *** Legacy iOS Kit ***"
-    print " - Script by LukeZGD -"
+    print " *** Olsro's Legacy iOS Kit ***"
+    print " - Olsro fork; original script by LukeZGD -"
+    print "Visit https://olsro.fr for cool stuff and to support Olsro with a donation."
     echo
     version_get
 
@@ -12697,7 +12572,10 @@ main() {
         install_depends
     fi
 
-    version_check
+    # Retain first-run macOS quarantine handling independently of the removed updater.
+    if [[ $platform == "macos" && ! -s ../saved/firstrun ]]; then
+        /usr/bin/xattr -cr ../bin/macos
+    fi
 
     device_get_info
     mkdir -p ../saved/baseband ../saved/$device_type ../saved/shsh
@@ -12725,7 +12603,7 @@ main() {
         "baseband" )
             device_dump baseband
             log "Baseband dumping is done"
-            print "* To stitch baseband to IPSW, run Legacy iOS Kit with --disable-bbupdate flag:"
+            print "* To stitch baseband to IPSW, run Olsro's Legacy iOS Kit with --disable-bbupdate flag:"
             print "    > ./restore.sh --disable-bbupdate"
         ;;
         "actrec" )
@@ -12734,7 +12612,7 @@ main() {
             print "* The output tar file contains the plist file(s) dumped. Activation record plist is all you need for activation"
             print "* Note: Using the activation records only works on iOS 9.2.1 or lower. It will not work on iOS 9.3+"
             if (( device_proc < 7 )); then
-                print "* To stitch activation to IPSW, run Legacy iOS Kit with --activation-records flag:"
+                print "* To stitch activation to IPSW, run Olsro's Legacy iOS Kit with --activation-records flag:"
                 print "    > ./restore.sh --activation-records"
             fi
         ;;
@@ -12824,7 +12702,7 @@ for i in "$@"; do
 
         # please dont use these, unless you know what youre doing
         "--no-internet-check") no_internet_check=1;;
-        "--no-version-check" ) no_version_check=1;;
+        "--no-version-check" ) :;; # Compatibility: this fork never self-updates.
         "--run-as-root"      ) run_as_root=1;;
     esac
 done
@@ -12854,9 +12732,9 @@ othertmp=$(ls "$(dirname "$0")" | grep -c tmp)
 if [[ $othertmp != 0 ]]; then
     noclean=1
     log "Detected existing tmp folder(s)."
-    print "* There might be other Legacy iOS Kit instance(s) running, or residual tmp folder(s) not deleted."
+    print "* There might be other Olsro's Legacy iOS Kit instance(s) running, or residual tmp folder(s) not deleted."
     print "* Running multiple instances is not fully supported and can cause unexpected behavior."
-    print "* It is recommended to only use a single instance and/or delete all existing \"tmp\" folders in your Legacy iOS Kit folder before continuing."
+    print "* It is recommended to only use a single instance and/or delete all existing \"tmp\" folders in your Olsro's Legacy iOS Kit folder before continuing."
     select_yesno "Select Y to remove all tmp folders, N to run as is" 1
     if [[ $? == 1 ]]; then
         noclean=

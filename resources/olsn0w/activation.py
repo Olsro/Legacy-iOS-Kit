@@ -43,7 +43,7 @@ def library(name):
         candidates=list((tools()/'lib').glob('lib'+name+'.*.dylib'))
         if len(candidates)==1:return C.CDLL(str(candidates[0]))
     path=C.util.find_library(name)
-    if not path:raise RuntimeError('Legacy iOS Kit dependency is missing: '+name)
+    if not path:raise RuntimeError("Olsro's Legacy iOS Kit dependency is missing: "+name)
     return C.CDLL(path)
 
 

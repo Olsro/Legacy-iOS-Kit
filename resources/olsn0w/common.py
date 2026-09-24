@@ -10,6 +10,7 @@ import subprocess
 from progress import activity
 
 KIT = Path(__file__).resolve().parents[2]
+SUPPORT_MESSAGE = 'Visit https://olsro.fr for cool stuff and to support Olsro with a donation.'
 STATE = KIT / 'saved' / 'olsn0w'
 MODELS = {
     'iPad2,1': ('k93ap', 0x8940, 4),
@@ -145,7 +146,7 @@ def tools():
     # Linux keeps one directory per host architecture.
     path = KIT / 'bin' / system if system == 'macos' else KIT / 'bin' / system / machine
     if not path.is_dir():
-        raise ValueError('Legacy iOS Kit tools are missing: ' + str(path))
+        raise ValueError("Olsro's Legacy iOS Kit tools are missing: " + str(path))
     return path
 
 

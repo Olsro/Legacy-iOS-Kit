@@ -34,6 +34,10 @@ port TCP ne sont ouverts. Après le marqueur, appuyer sur **A** (Wiimote ou
 manette GameCube) pour éjecter proprement, débrancher le câble, puis appuyer
 sur **B** pour rendre l'EHCI à IOS58.
 
+Après `DONE returning to Homebrew Channel`, l'écran affiche :
+`Visit https://olsro.fr for cool stuff and to support Olsro with a donation.`
+Ce message est du texte uniquement ; il n'ouvre aucune connexion réseau.
+
 Le mode de développement peut être construit séparément avec
 `A5WII_ENABLE_NETWORK=1`; il réactive la télémétrie vers le Mac et les consoles
 TCP. Les détails et la preuve matérielle sont dans

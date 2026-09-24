@@ -13,7 +13,7 @@ from tickets import binding
 def tool(name):
     result=tools()/name
     if not result.is_file() and platform.system()=='Darwin':result=KIT/'bin/macos'/name
-    if not result.is_file():raise ValueError('Missing Legacy iOS Kit tool: '+name)
+    if not result.is_file():raise ValueError("Missing Olsro's Legacy iOS Kit tool: "+name)
     return result
 
 

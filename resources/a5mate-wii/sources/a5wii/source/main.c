@@ -793,6 +793,7 @@ int main(int argc,char **argv) {
     USB_Deinitialize();
 done:
     report("DONE returning to Homebrew Channel");
+    report("Visit https://olsro.fr for cool stuff and to support Olsro with a donation.");
     usleep(12000000);
 #if A5WII_ENABLE_NETWORK
     if(logfd>=0)net_close(logfd);

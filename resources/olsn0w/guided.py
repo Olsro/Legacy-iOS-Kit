@@ -10,7 +10,7 @@ import subprocess
 import time
 import uuid
 
-from common import KIT, MODELS, STATE, integer, profile, run, save, tools, version
+from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, integer, profile, run, save, tools, version
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
@@ -344,4 +344,5 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
               if use_hacktiv8 else '. Setup.app was removed before first boot; activation was intentionally skipped.'))
     else:
         show('Restoration verified: iOS '+selected['version']+'. Complete Setup Assistant on the device.')
+    show(SUPPORT_MESSAGE)
     return result

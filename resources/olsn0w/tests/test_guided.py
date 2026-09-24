@@ -147,6 +147,30 @@ class GuidedTest(unittest.TestCase):
             self.assertTrue(restore.call_args.kwargs['erase'])
             self.assertEqual(restore.call_args.kwargs['session'],'prepared')
 
+    def test_support_message_only_after_successful_restore(self):
+        for policy in ('y', 'n'):
+            for outcome in ('success', 'cancel', 'failure'):
+                messages=[]
+                with self.subTest(policy=policy,outcome=outcome), \
+                     tempfile.TemporaryDirectory() as folder, \
+                     patch.object(guided,'STATE',Path(folder)), \
+                     patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+                     patch.object(guided,'releases',return_value=[RELEASE]), \
+                     patch.object(guided,'enter_dfu'), \
+                     patch.object(guided,'prepare',return_value={'session':'prepared'}), \
+                     patch('provision_restore.run',return_value={'success':True}) as restore:
+                    answers=iter(['1',policy,'n' if outcome=='cancel' else 'y'])
+                    if outcome=='failure':
+                        restore.side_effect=RuntimeError('qualification failed')
+                        with self.assertRaisesRegex(RuntimeError,'qualification failed'):
+                            guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
+                    else:
+                        guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
+                    self.assertEqual(messages.count(guided.SUPPORT_MESSAGE),int(outcome=='success'))
+                    if outcome=='success':
+                        self.assertEqual(messages[-1],guided.SUPPORT_MESSAGE)
+                        self.assertTrue(messages[-2].startswith('Restoration verified:'))
+
     def test_retryable_dfu_failure_reuses_prepared_plan(self):
         from provision_run import DfuPreparationError
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare,patch('provision_restore.run',side_effect=[DfuPreparationError('checkm8'),{'success':True}]) as restore:
