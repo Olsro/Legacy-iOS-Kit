@@ -12,7 +12,7 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 23
+RECIPE_VERSION = 24
 
 
 def memory_layout(product):
@@ -346,6 +346,26 @@ def ram_autoboot(data):
     return data[:at]+replacement+data[at+4:],dict(offset=at,before=data[at:at+4].hex(),after=replacement.hex(),persistent=False)
 
 
+def target_bootargs(*, verbose=False):
+    """Normal A5/A6 boots are graphical; diagnostics must be requested."""
+    args = 'rd=disk0s1s3 amfi=0xff cs_enforcement_disable=1'
+    return args + (' -v debug=0x14e' if verbose else '')
+
+
+def prepare_display(data, out, *, verbose=False):
+    """Use the same checked logo hook for normal boots on every SoC."""
+    if verbose:
+        save(out/'display-validation.json', dict(mode='verbose', logo_hook=False))
+        return data, None
+    params = logo.discover(data, logo.digest(data), 0x2a0)
+    code = logo.trampoline(params)
+    (out/'stub.bin').write_bytes(code)
+    (out/'iBEC.before-logo.raw').write_bytes(data)
+    data = logo.apply(data, params, code)
+    save(out/'display-validation.json', display(data, params))
+    return data, params
+
+
 def prepare(firmware, *, verbose=False):
     firmware=Path(firmware)
     source=json.loads((firmware/'manifest.json').read_text())
@@ -358,11 +378,7 @@ def prepare(firmware, *, verbose=False):
     if destination.exists():
         raise ValueError('Prepared relay already exists: '+str(destination))
     out=Path(tempfile.mkdtemp(prefix='relay-pending-',dir=firmware.parent))
-    bootargs='rd=disk0s1s3 amfi=0xff cs_enforcement_disable=1'
-    # Keep the physically qualified A5 target diagnostics during integration;
-    # this does not add debug flags to the signed 8.4.1 bootstrap entry.
-    if verbose or selected_profile['soc'].startswith('a5'):
-        bootargs+=' -v debug=0x14e'
+    bootargs=target_bootargs(verbose=verbose)
     patches={}
     for name in ('iBSS','iBEC'):
         raw=(firmware/(name+'.raw')).read_bytes()
@@ -402,17 +418,9 @@ def prepare(firmware, *, verbose=False):
             data,patches['upgrade_autoboot']=preserve_upgrade_autoboot(data)
             if selected_profile['soc'].startswith('a5'):
                 data,patches['ram_autoboot']=ram_autoboot(data)
-            if verbose or selected_profile['soc'].startswith('a5'):
-                save(out/'display-validation.json',dict(
-                    mode='verbose' if verbose else 'stock',logo_hook=False))
-            else:
-                params=logo.discover(data,logo.digest(data),0x2a0)
-                code=logo.trampoline(params)
-                (out/'stub.bin').write_bytes(code)
-                (out/'iBEC.before-logo.raw').write_bytes(data)
-                data=logo.apply(data,params,code)
+            data, params = prepare_display(data, out, verbose=verbose)
+            if params is not None:
                 patches['logo']=params
-                save(out/'display-validation.json',display(data,params))
         patched.write_bytes(data)
     run([tools()/'xpwntool',out/'iBEC.patched.raw',out/'iBEC.img3','-t',firmware/'iBEC.orig'],out/'pack.log')
     container=(out/'iBEC.img3').read_bytes()

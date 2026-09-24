@@ -203,11 +203,11 @@ position. Waiting messages do not claim progress or a successful boot; target
 services and, in normal mode, official activation must still be observed within
 the timeout.
 Startup observation normally never reboots a device whose initialization did
-not finish. The Setup.app-removal mode has one bounded exception on iOS 7.1:
+not finish. The Setup.app-removal mode has one bounded exception on the iOS 7.1 Pangu path:
 after the selected Data generation, SpringBoard and Pangu completion marker are
 all observed repeatedly, a root volume that remains read-only receives one
 controlled reboot so Pangu can retry. A second failure is reported without
-another reboot.
+another reboot. The iPod touch 5G / iPhone 4S Aquila paths do not use this retry.
 On the iOS 7.1 Pangu path, its launchctl call is only an intermediate signal:
 Pangu still has to finish its kernel work and remount the selected System
 partition. The host therefore never treats that marker alone as completion and
@@ -248,11 +248,20 @@ SDK, Xcode project, or macOS image mount is needed. Linux compilation and image
 checks are exercised during development; native-tool setup is not yet integrated
 into the public restoration entry point. Docker is used for development checks.
 
-Verbose relays omit the logo display hook so it does not replace diagnostic
+Normal relays on A5/A5X and A6/A6X use graphical target boot arguments and the
+same checked Apple-logo display hook. Relay recipe 24 invalidates the older A5
+caches that forced `-v debug=0x14e` even in normal mode. The guided flow rebuilds
+the relay and its dependent System/bootstrap images; already restored devices
+are not modified. Explicit verbose relays omit the logo display hook so it does not replace diagnostic
 output. The image-address patch preserves the register used by the selected
 iBSS instead of assuming the same register across firmware versions. Prepared
 relay manifests record the recipe version; older cached relays
 must be rebuilt when the recipe changes.
+Recipe 24 was prepared offline for iPod5,1 and iPhone4,1 on 6.1.3, 7.1.2 and
+8.4.1, and iPad3,4 on 6.1.3 and 7.1.2. Each generated logo trampoline passed
+the emulator's success and two failure paths with preserved registers/stack.
+The explicit iPod 7.1.2 verbose relay was also checked. These checks do not
+replace visual hardware confirmation of the new graphical A5 boot.
 
 The bootstrap keeps a persistent enable marker on its read-only root. Diagnostic
 attempt/failure records do not consume that marker, so interrupted attempts do
@@ -349,7 +358,7 @@ see `resources/jailbreak/olsro/README.md` for the common payload and cache polic
 This is prepared offline because the Pangu
 path can still have a read-only System volume when `firmware.sh` runs. A failed
 `firmware.sh` no longer publishes a successful Cydia marker.
-For iOS 7.1.x, the restore recipe uses the Pangu untether already bundled and used
+For iOS 7.1.x outside the iPod touch 5G and iPhone 4S, the restore recipe uses the Pangu untether already bundled and used
 by Legacy iOS Kit, selecting its checked ARMv7 slice and retargeting it to the
 chosen root volume. Its original launch service and the stock daemon layout are
 retained, matching the Kit's A5X/A6X fallback instead of applying Aquila's daemon
@@ -358,15 +367,37 @@ it cannot invalidate lockdownd's live local socket. Earlier iOS 7 releases retai
 policy gives the selected untether an explicit 128 MiB ceiling; the stock fallback
 ceiling of 5 MiB can terminate the exploit before it remounts the selected root
 read-write, leaving Cydia preparation unable to finish.
+
+System recipe 39 selects the pinned Aquila 2.1.1 iOS 7 payload for the iPod touch
+5G (`iPod5,1`) and iPhone 4S (`iPhone4,1`) on iOS 7.1.x. It preserves the same 7.1 bootstrap and stock daemon
+layout (including native keybag ordering), not the relocated iOS 7.0 layout.
+The Pangu binary and startup job are excluded. A single native
+`org.olsn0w.aquila` job runs `/aquila` with `RunAtLoad`, `LaunchOnlyOnce` and a
+128 MiB jetsam budget; there is no delayed retry or second exploit launch.
+The selected root path and guarded job loader are retargeted and signed by the
+existing checked Aquila preparation. Root read-write, generation, SpringBoard
+and Cydia readiness remain mandatory for successful qualification.
+Two normal boots and Cydia package installation were verified on the iPod under
+7.1.2; the iPhone 4S, cold/forced-reset behavior and other 7.1 releases are not
+hardware-qualified by that test. The 4S multipatch/baseband path is unchanged.
+Other devices and iOS 6/7.0/8 retain their existing recipes.
+The guided flow rebuilds recipe-38 System caches automatically. This does not
+modify already restored devices, the activation choice or Cydia sources.
+
 The guarded Pangu launch wrapper accepts `/private` only when its existing
-read-only metadata is already exactly safe, then publishes an untether-completion
+read-only metadata is already exactly safe, then publishes a service-loading
 gate after all payload jobs have been registered. Cydia waits for that gate on
-iOS 7 and 8. Pangu's stock-jailbreak admission files are deliberately excluded:
+iOS 7 and 8. The gate alone does not prove a successful kernel patch or remount:
+the bundled Pangu can reach its launchctl endpoint after the remount failed.
+Final restoration qualification therefore still requires the writable root
+and Cydia completion, not just that marker.
+
+Pangu's stock-jailbreak admission files are deliberately excluded:
 olsn0w's boot relay already supplies `amfi=0xff cs_enforcement_disable=1`, so the
 ordinary Pangu LaunchDaemon can start without its reduced loose libmis, global
 dyld marker or system-only xpcd cache. Keeping those redundant overrides would
 remove MIS APIs used by Apple applications and make the mobile-user xpcd crash,
-which in turn blocks Messages and FaceTime. The Pangu untether itself and its
+which in turn blocks Messages and FaceTime. On devices selecting Pangu, its untether and
 checked launch job remain installed; Apple services and Cydia use the firmware's
 complete shared-cache implementations.
 
@@ -466,8 +497,8 @@ the normal recipe-version mechanism. No session/scratchpad files are inputs.
 This boot sequence was physically exercised on iPod5,1 with target 6.1.3,
 including normal autonomous boot with USB attached and user-confirmed Cydia/APT.
 The integrated image is also rebuilt/read back offline within 30+2 MiB. Target
-verbose diagnostics remain enabled on A5 while qualification continues; the
-signed bootstrap's normal entry uses stock boot arguments. The newly packaged
+diagnostics are now opt-in on A5, as on A6; the signed bootstrap's normal entry
+uses stock boot arguments. The newly packaged
 preparation still needs its own end-to-end restore test. Other A5 models and
 releases are not hardware-qualified by this result. The single-DFU native
 iOS 6 installation test and its remaining qualification limits are recorded below.

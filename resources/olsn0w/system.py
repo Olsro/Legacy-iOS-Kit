@@ -28,7 +28,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 38
+RECIPE_VERSION = 39
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -246,11 +246,36 @@ def remove_pangu_admission_overrides(entries):
         raise ValueError('Unrecognized Pangu dyld override marker')
 
 
-def jailbreak_payload(release):
+def uses_stock_daemon_layout(release):
+    """Both iOS 7.1 untethers retain the physically tested native job layout."""
+    return version(release)[0] == 7 and version(release) >= version('7.1')
+
+
+def selected_untether(release, product=None):
+    """Keep device-specific qualification separate from the daemon layout."""
+    if version(release)[0] == 8:
+        return 'everuntether'
+    if uses_stock_daemon_layout(release) and product not in {'iPod5,1', 'iPhone4,1'}:
+        return 'panguaxe'
+    return 'aquila'
+
+
+def aquila_startup_job():
+    """Single native launch, without a delayed/repeated exploit invocation."""
+    return plistlib.dumps(dict(
+        Label='org.olsn0w.aquila', ProgramArguments=['/aquila'],
+        RunAtLoad=True, LaunchOnlyOnce=True, POSIXSpawnType='Interactive',
+        UserName='root',
+        StandardOutPath='/var/logs/AppleSupport/olsn0w-untether.log',
+        StandardErrorPath='/var/logs/AppleSupport/olsn0w-untether.log'))
+
+
+def jailbreak_payload(release, product=None):
     major = version(release)[0]
     if major not in PREPARABLE_MAJORS:
         raise ValueError('This firmware needs its own first-boot service integration')
-    pangu71 = major == 7 and version(release) >= version('7.1')
+    pangu71 = uses_stock_daemon_layout(release)
+    untether = selected_untether(release, product)
     packages = (['daibutsu/untether.tar'] if major==8 else
                 ['panguaxe.tar'] if pangu71 else ['aquila_'+str(major)+'.tar'])
     packages += ['freeze.tar.gz', 'openssh.tar.gz', 'openssl.tar.gz','sshdeb.tar', 'LukeZGD.tar']
@@ -277,7 +302,15 @@ def jailbreak_payload(release):
             entries[name] = (item, data)
     if pangu71:
         remove_pangu_admission_overrides(entries)
-    if major != 6 and major != 8 and not pangu71:
+        if untether == 'aquila':
+            # Keep exactly the tested 7.1 bootstrap, replacing only its
+            # untether/trigger. The 7.0 Aquila archive has a different layout.
+            pangu_startup_job(entries.pop(
+                'System/Library/LaunchDaemons/io.pangu.axe.untether.plist')[1])
+            entries.pop('panguaxe')
+            name = 'System/Library/LaunchDaemons/org.olsn0w.aquila.plist'
+            entries[name] = entry(name, aquila_startup_job())
+    if major == 7 and untether == 'aquila':
         aquila, origin = ios7_payload()
         entries.pop('private/var/aquila/aquila', None)
         entries['aquila'] = entry('aquila', aquila, 0o755)
@@ -466,18 +499,28 @@ def pangu_startup_job(data):
     return plistlib.dumps(job)
 
 
-def prepare_pangu_daemon(image, product):
-    """Keep the Kit's proven stock-daemon layout for the iOS 7.1 untether."""
+def prepare_ios71_daemon(image, product, untether):
+    """Keep native jobs/keybag ordering for Pangu and the A5 Aquila paths."""
+    if untether not in ('panguaxe', 'aquila'):
+        raise ValueError('Unexpected iOS 7.1 untether')
     system = '/System/Library/LaunchDaemons'
     for name in ('com.apple.mobile.softwareupdated.plist',
                  'com.apple.softwareupdateservicesd.plist'):
         if any(r['name'] == name for r in image.ls(system)):
             image.command('rm', system+'/'+name)
-    path = system+'/io.pangu.axe.untether.plist'
-    configured = pangu_startup_job(image.read(path))
+    label = 'io.pangu.axe.untether' if untether == 'panguaxe' else 'org.olsn0w.aquila'
+    path = system+'/'+label+'.plist'
+    if untether == 'panguaxe':
+        configured = pangu_startup_job(image.read(path))
+    else:
+        configured = aquila_startup_job()
+        if plistlib.loads(image.read(path)) != plistlib.loads(configured):
+            raise ValueError('Unrecognized Aquila untether job')
     image.add(path, configured)
-    configure_untether_jetsam(image, product, 'io.pangu.axe.untether')
-    return configured
+    if image.read(path) != configured:
+        raise ValueError('Untether launch job readback differs')
+    configure_untether_jetsam(image, product, label)
+    return path.lstrip('/'), configured
 
 
 def move_daemons(image, major=7, product=None, untether=None):
@@ -542,10 +585,10 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     # The checked iBEC recipe selects the third GPT entry as the target volume.
     if root_device != '/dev/disk0s1s3' or data_device != '/dev/disk0s1s2':
         raise ValueError('Selected devices do not match this relay partition recipe')
-    payload, provenance = jailbreak_payload(source['version'])
+    payload, provenance = jailbreak_payload(source['version'], source['product'])
     major = version(source['version'])[0]
-    untether_name=('everuntether' if major==8 else
-                   'panguaxe' if major==7 and version(source['version'])>=version('7.1') else 'aquila')
+    untether_name = selected_untether(source['version'], source['product'])
+    stock_daemons = uses_stock_daemon_layout(source['version'])
     data_payload_checks = {}
     stock = HFS(firmware/'rootfs.hfs')
     system_version = plistlib.loads(stock.read('/System/Library/CoreServices/SystemVersion.plist'))
@@ -755,15 +798,14 @@ Subsystem sftp /usr/libexec/sftp-server
             if image.read(socket_job) != after:
                 raise ValueError('Local socket configuration readback differs')
     if major in (7,8):
-        if untether_name == 'panguaxe':
-            configured = prepare_pangu_daemon(image, source['product'])
-            name = 'System/Library/LaunchDaemons/io.pangu.axe.untether.plist'
+        if stock_daemons:
+            name, configured = prepare_ios71_daemon(image, source['product'], untether_name)
             item, _ = payload[name]
             payload[name] = entry(name, configured, item.mode)
         else:
             move_daemons(image,major,source['product'],untether_name)
         if major == 7:
-            if untether_name != 'panguaxe':
+            if not stock_daemons:
                 defer_profile_service(image)
         else:
             from ios8_cache import prepare as prepare_cache
@@ -805,7 +847,7 @@ Subsystem sftp /usr/libexec/sftp-server
     if kernel_patch is not None:
         kernel_path.unlink()
     if major in (7,8):
-        daemon_root = ('/System/Library/LaunchDaemons' if untether_name == 'panguaxe'
+        daemon_root = ('/System/Library/LaunchDaemons' if stock_daemons
                        else '/Library/LaunchDaemons')
         job_path = daemon_root+'/com.apple.mobile.keybagd.plist'
         job = plistlib.loads(image.read(job_path))
@@ -849,7 +891,7 @@ Subsystem sftp /usr/libexec/sftp-server
                   untether_signature=signature, payload_readback=checks,
                   data_payload_readback=data_payload_checks,
                   kernel_patch=kernel_patch,
-                  service_loading=('stock-daemon-layout' if untether_name == 'panguaxe'
+                  service_loading=('stock-daemon-layout' if stock_daemons
                                    else 'skip-registered-jobs-before-creating-sockets'),
                   setup_customized=remove_setup_app,
                   setup_app_removed=remove_setup_app and hacktiv8 is None,

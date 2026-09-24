@@ -123,7 +123,7 @@ def cydia_needs_start(text, initialized):
 
 
 def pangu_needs_writable_root(release):
-    """Return whether qualification must prove Pangu's writable root."""
+    """Require the writable root for both iOS 7.1 untether choices."""
     return version(release)[0] == 7 and version(release) >= version('7.1')
 
 
@@ -142,7 +142,7 @@ def pangu_writable_root_ready(lines, report):
 
 def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
                              progress=print):
-    """Qualify the first boot, including Pangu's completed root remount."""
+    """Qualify the first boot, including the iOS 7.1 root remount."""
     return qualify(bundle,prefix,udid,timeout=timeout,progress=progress,
                    verify_writable_root=pangu_needs_writable_root(release))
 
@@ -150,6 +150,9 @@ def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
 def qualify(bundle, prefix, udid, timeout=360, progress=print,
             verify_writable_root=False):
     report=checked_manifest(bundle)
+    from system import selected_untether
+    untether = selected_untether(report['version'], report.get('product'))
+    untether_label = 'Aquila' if untether == 'aquila' else 'Pangu'
     from hacktiv8 import activation_skipped as selected_activation_skipped
     activation_skipped=selected_activation_skipped(report)
     started=time.monotonic();deadline=started+timeout;last_notice=started
@@ -186,14 +189,15 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                     writable=(not verify_writable_root or
                               pangu_writable_root_ready(lines,report))
                     if not writable:
-                        # Pangu calls its launchctl endpoint before finishing
-                        # the kernel patch and root remount.  Its marker alone
-                        # is therefore not a completion signal. The ordinary
+                        # Pangu can reach its launchctl endpoint despite a
+                        # failed root remount. Its marker alone is therefore
+                        # not a completion signal. The ordinary
                         # path keeps waiting; the Setup.app-free path gets one
                         # bounded retry only after this state remains stable.
-                        status='Waiting for Pangu to remount the selected System volume read-write.'
+                        status='Waiting for '+untether_label+' to remount the selected System volume read-write.'
                         jobs=startup_jobs(text)
-                        if (report.get('setup_app_removed') is True and
+                        if (untether == 'panguaxe' and
+                                report.get('setup_app_removed') is True and
                                 len(lines)>=6 and lines[4]=='UNTETHER_READY:ready' and
                                 jobs.get('com.apple.SpringBoard',['-'])[0].isdigit()):
                             pangu_readonly_polls+=1
