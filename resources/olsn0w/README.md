@@ -384,6 +384,13 @@ Other devices and iOS 6/7.0/8 retain their existing recipes.
 The guided flow rebuilds recipe-38 System caches automatically. This does not
 modify already restored devices, the activation choice or Cydia sources.
 
+System recipe 40 validates the pre-relocation LaunchDaemons against the exact
+prepared overlay, including the boot-success job and optional Hacktiv8 job.
+The former Cydia-only allowlist rejected these generated services on iOS 8
+and the relocated iOS 7.0 path. Unexpected, missing, modified or non-regular
+jobs and destination-name collisions still abort preparation before relocation.
+This does not change the untether selection or the activation policy.
+
 The guarded Pangu launch wrapper accepts `/private` only when its existing
 read-only metadata is already exactly safe, then publishes a service-loading
 gate after all payload jobs have been registered. Cydia waits for that gate on

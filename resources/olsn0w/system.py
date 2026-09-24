@@ -28,7 +28,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 39
+RECIPE_VERSION = 40
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -523,18 +523,26 @@ def prepare_ios71_daemon(image, product, untether):
     return path.lstrip('/'), configured
 
 
-def move_daemons(image, major=7, product=None, untether=None):
+def move_daemons(image, major=7, product=None, untether=None, *, library_jobs):
     """Apply the Kit's daemon ordering while retaining the native DNS service."""
     system, library = '/System/Library/LaunchDaemons', '/Library/LaunchDaemons'
-    if {r['name'] for r in image.ls(library)} != {'com.saurik.Cydia.Startup.plist'}:
+    records = image.ls(library)
+    if ({r['name'] for r in records} != set(library_jobs) or
+            any(not stat.S_ISREG(r['mode']) for r in records)):
         raise ValueError('Unexpected daemons before kit daemon relocation')
+    for name, content in library_jobs.items():
+        if image.read(library+'/'+name) != content:
+            raise ValueError('Prepared launch daemon readback differs: '+name)
+    system_records = image.ls(system)
+    if any(r['name'] in library_jobs for r in system_records):
+        raise ValueError('Launch daemon relocation would overwrite a prepared job')
     keep = {'bootps.plist', 'com.apple.CrashHousekeeping.plist',
             'com.apple.MobileFileIntegrity.plist', 'com.apple.sandboxd.plist'}
     if major==8:keep.remove('com.apple.sandboxd.plist')
     ota = {'com.apple.mobile.softwareupdated.plist', 'com.apple.softwareupdateservicesd.plist'}
     # Move the jobs individually. The bundled HFS tool's directory move does
     # not update HFSX folder counts when crossing parent directories.
-    for record in image.ls(system):
+    for record in system_records:
         name = record['name']
         if not stat.S_ISREG(record['mode']):
             raise ValueError('Unexpected non-file launch daemon entry: '+name)
@@ -803,7 +811,16 @@ Subsystem sftp /usr/libexec/sftp-server
             item, _ = payload[name]
             payload[name] = entry(name, configured, item.mode)
         else:
-            move_daemons(image,major,source['product'],untether_name)
+            # The overlay includes Cydia, boot-success, and optionally
+            # Hacktiv8. Validate exactly those jobs before moving stock jobs;
+            # a fixed Cydia-only list predates these first-boot services.
+            library_jobs = {
+                PurePosixPath(name).name: data for name, (item, data) in payload.items()
+                if PurePosixPath(name).parent == PurePosixPath('Library/LaunchDaemons')
+                and item.isfile()
+            }
+            move_daemons(image,major,source['product'],untether_name,
+                         library_jobs=library_jobs)
         if major == 7:
             if not stock_daemons:
                 defer_profile_service(image)
