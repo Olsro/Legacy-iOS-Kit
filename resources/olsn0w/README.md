@@ -434,6 +434,29 @@ rule covers every iOS 6 release available for iPod5,1; its 6.1.3 kernel contains
 the same `AppleTriStarBuiltIn` reset-and-retry path and its parsed DeviceTree
 has the same THS7383 TriStar node. A physical N78 restore without the property
 reached the selected kernel but remained at the Apple logo before USB came up.
+Relay recipe 25 extends this iOS 6 reset policy to the iPad mini Wi-Fi P105
+(`iPad2,5`). Its 6.1.3 DeviceTree exposes the same THS7383-compatible TriStar
+node and its kernel recognizes `soft-reset`. A fresh restoration without the
+property stalled at the iOS 6 Apple logo without target USB. Adding only this
+property to the installed target DeviceTree allowed normal boot, official
+activation, the selected Data generation, SpringBoard and Cydia first-start
+qualification. The user also confirmed completion of Setup Assistant and a
+successful package installation through Cydia. The kernel, jailbreak, bootstrap
+and activation policy were unchanged. Other iOS 6 releases use the same
+major-version policy but have not been hardware-tested in this qualification.
+Relay recipe 26 extends that iOS 6 policy to the cellular mini variants P106
+and P107 (`iPad2,6` and `iPad2,7`) by family analogy, not by a separate hardware
+qualification. All three mini variants retain their existing iOS 7/8 policy
+(no forced reset). P105 (`iPad2,5`) was subsequently restored to 7.1.2 in one
+DFU workflow without that reset: normal boot, official activation, writable
+System, Data generation, boot-success and Cydia first-start checks passed.
+The user confirmed end-to-end functionality. This run used the existing Pangu
+profile, without an untether retry reboot; it does not qualify forced resets
+or the cellular variants. All three iPad 4 variants already receive it on iOS 6/7/8;
+the iPad 2/3 and iPhone 4S profiles remain excluded. Preparation still requires
+exactly one TriStar node and verifies the packed DeviceTree by readback; a
+missing or ambiguous node is an error, not a silently skipped patch. Stale
+relay caches and dependent System images are rebuilt on next preparation.
 For p101,
 6.1.2 is physically qualified, the 6.0/6.0.1 and 6.1 DeviceTrees were
 separately extracted, decrypted and parsed, and the 6.1, 6.1.2 and 6.1.3

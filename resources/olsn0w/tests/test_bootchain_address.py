@@ -71,9 +71,11 @@ class RelayAddressTests(unittest.TestCase):
                 self.assertEqual(dualboot_patcher_marker(product,10,0xbfd00000),
                                  movt(4,0xbfd0))
                 self.assertEqual(uses_tristar_soft_reset(product,'6.1.3'),
-                                 product == 'iPod5,1')
+                                 product in ('iPod5,1', 'iPad2,5', 'iPad2,6', 'iPad2,7'))
 
-    def test_tristar_reset_stays_on_explicitly_qualified_releases(self):
+
+class TriStarPolicyTests(unittest.TestCase):
+    def test_tristar_reset_stays_on_explicit_model_and_release_families(self):
         ios6_releases = {
             'iPhone5,1': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
             'iPhone5,2': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4'),
@@ -81,6 +83,9 @@ class RelayAddressTests(unittest.TestCase):
             'iPad3,5': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPad3,6': ('6.0.1', '6.1', '6.1.2', '6.1.3'),
             'iPod5,1': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3'),
+            'iPad2,5': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3'),
+            'iPad2,6': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3'),
+            'iPad2,7': ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3'),
         }
         for product, versions in ios6_releases.items():
             for release in versions:
@@ -92,14 +97,27 @@ class RelayAddressTests(unittest.TestCase):
             for release in ios7_releases:
                 self.assertTrue(uses_tristar_soft_reset(product, release),
                                 (product, release))
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,5', 'iPad2,6', 'iPad2,7'):
             self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '7.1.2'))
         for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
             self.assertTrue(uses_tristar_soft_reset(product, '8.0'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.1.3'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.4.1'))
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,5', 'iPad2,6', 'iPad2,7'):
             self.assertFalse(uses_tristar_soft_reset(product, '8.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '8.4.1'))
-        self.assertFalse(uses_tristar_soft_reset('iPhone4,1', '6.1.3'))
+
+    def test_non_tristar_profiles_remain_excluded(self):
+        for product in ('iPhone4,1', 'iPad2,1', 'iPad2,2', 'iPad2,3',
+                        'iPad2,4', 'iPad3,1', 'iPad3,2', 'iPad3,3'):
+            for release in ('6.0', '6.1.3', '7.1.2', '8.3', '8.4.1'):
+                with self.subTest(product=product, release=release):
+                    self.assertFalse(uses_tristar_soft_reset(product, release))
+
+    def test_ipad_variants_keep_the_same_family_policy(self):
+        for family in (('iPad2,5', 'iPad2,6', 'iPad2,7'),
+                       ('iPad3,4', 'iPad3,5', 'iPad3,6')):
+            for release in ('6.0', '6.0.2', '6.1.3', '7.0', '7.1.2', '8.0', '8.3', '8.4.1'):
+                with self.subTest(family=family, release=release):
+                    self.assertEqual(len({uses_tristar_soft_reset(p, release) for p in family}), 1)
