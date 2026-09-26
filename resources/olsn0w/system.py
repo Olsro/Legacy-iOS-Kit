@@ -28,7 +28,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 40
+RECIPE_VERSION = 45
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -47,11 +47,9 @@ OLSRO_SOURCES = (PACKAGE_ROOT/'olsro'/OLSRO_SOURCE_PATH).read_bytes()
 
 def uses_protected_data(release):
     """Return whether this recipe needs native HFS content protection."""
-    # iOS 6's stock fstab mounts Data without the `protect` option. Applying
-    # the iOS 7/8 protected-volume bootstrap to 6.1.3 makes the A6/A6X kernel
-    # stall while Aquila is restarting services. Keep the firmware's proven
-    # unprotected Data contract on iOS 6.
-    return version(release)[0] in (7, 8)
+    # iOS 6 uses a separate launchd.conf first-boot handoff. All releases
+    # require a freshly formatted protected volume; never convert Data in place.
+    return version(release)[0] in (6, 7, 8)
 
 
 def uses_protected_keybag_start(release):
@@ -330,18 +328,30 @@ def ios6_keybag_payload():
     return blob
 
 
+def ios6_protection_probe_payload():
+    root = Path(__file__).parent
+    report = json.loads((TARGET_SCRIPTS/'protection-probe.json').read_text())
+    expected = {'native/target/protection_probe.c',
+                'native/target/build-protection-probe.sh', 'target/protection-probe'}
+    if set(report['files']) != expected or any(
+            digest(root/name) != checksum for name, checksum in report['files'].items()):
+        raise ValueError('iOS 6 protection probe source or binary checksum mismatch')
+    blob = (TARGET_SCRIPTS/'protection-probe').read_bytes()
+    verify(blob)
+    return blob
+
+
 def ios6_launchd_conf(content):
     token = b'bsexec .. /private/var/aquila/aquila\n'
     if content.count(token) != 1:
         raise ValueError('Unrecognized Kit iOS 6 launchd configuration')
-    initializer = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/keybag-init.sh\n'
+    initializer = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-firstboot.sh\n'
     if initializer in content:
-        raise ValueError('iOS 6 keybag initializer is already present')
-    # Data is populated offline on iOS 6, but Apple's native keybagd still
-    # requires a system bag on a freshly formatted volume. Create only that
-    # missing bag before launchd starts Aquila; retain the historical Data
-    # path and every package command unchanged.
-    return initializer + content
+        raise ValueError('iOS 6 first-boot initializer is already present')
+    # launchd.conf does not abort on a failed command. The second wrapper
+    # prevents Aquila from running against an incomplete protected Data seed.
+    guarded = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-start-aquila.sh\n'
+    return initializer + content.replace(token, guarded)
 
 
 def keybag_tool():
@@ -660,6 +670,11 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
             'usr/local/libexec/olsn0w/keybag-init', ios6_keybag_payload(), 0o755)
         payload['usr/local/libexec/olsn0w/keybag-init.sh'] = entry(
             'usr/local/libexec/olsn0w/keybag-init.sh', (TARGET_SCRIPTS/'keybag-init.sh').read_bytes(), 0o755)
+        payload['usr/local/libexec/olsn0w/protection-probe'] = entry(
+            'usr/local/libexec/olsn0w/protection-probe', ios6_protection_probe_payload(), 0o755)
+        for script in ('ios6-firstboot.sh', 'ios6-start-aquila.sh'):
+            name = 'usr/local/libexec/olsn0w/'+script
+            payload[name] = entry(name, (TARGET_SCRIPTS/script).read_bytes(), 0o755)
 
     for name in ('ssh_host_rsa_key', 'ssh_client_rsa'):
         run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048', '-m', 'PEM', '-N', '', '-f', out/name])
@@ -886,6 +901,14 @@ Subsystem sftp /usr/libexec/sftp-server
             checks[name] = hashlib.sha256(data).hexdigest()
     if image.ls('/private/var'):
         raise ValueError('Target root still contains Data payload')
+    from filesystem_contract import verify_directory_contract, verify_ios6_contract
+    stock_contract = None
+    if major == 6:
+        stock_contract = verify_ios6_contract(
+            stock, image, data_entries, profile(source['product'])['cache_arch'])
+        stock_directories = stock_contract['directories']
+    else:
+        stock_directories = verify_directory_contract(stock, image, data_entries)
     # These archives and temporary binaries have all been read back from the
     # finished image. Keep the source provenance in the manifest, not another
     # copy of payload bytes already embedded in system.hfs.
@@ -907,6 +930,8 @@ Subsystem sftp /usr/libexec/sftp-server
                   packages=provenance, untether=untether_name,
                   untether_signature=signature, payload_readback=checks,
                   data_payload_readback=data_payload_checks,
+                  ios6_stock_contract=stock_contract,
+                  stock_directory_contract=stock_directories,
                   kernel_patch=kernel_patch,
                   service_loading=('stock-daemon-layout' if stock_daemons
                                    else 'skip-registered-jobs-before-creating-sockets'),

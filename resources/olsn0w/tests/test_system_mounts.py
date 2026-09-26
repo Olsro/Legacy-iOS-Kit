@@ -8,13 +8,13 @@ from system import relocate_fstab, uses_protected_data
 
 
 class TargetMounts(unittest.TestCase):
-    def test_only_ios7_and_ios8_use_protected_data_policy(self):
-        for release in ('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
+    def test_ios6_through_ios8_use_protected_data_policy(self):
+        for release in ('6.0', '6.0.1', '6.0.2', '6.1', '6.1.2', '6.1.3', '6.1.4',
+                        '7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
                         '7.1', '7.1.1', '7.1.2',
                         '8.0', '8.0.1', '8.0.2', '8.1', '8.1.1', '8.1.2',
                         '8.1.3', '8.2', '8.3', '8.4', '8.4.1'):
             self.assertTrue(uses_protected_data(release), release)
-        self.assertFalse(uses_protected_data('6.1.3'))
         self.assertFalse(uses_protected_data('9.3.5'))
 
     def test_protected_data_keeps_security_options_and_root_policy(self):

@@ -9,12 +9,12 @@ import zipfile
 from common import baseband_files, digest, version
 from hfs import HFS
 from system import entry, add_parents, PREPARABLE_MAJORS, uses_protected_data
-from archives import write_tar
+from archives import write_tar, preserve_directory_metadata
 
 
 def prepare(technical, target_version, destination, *, has_baseband=True,
             baseband_family='Mav5', include_modem=None, activate_on_target=False,
-            omit_activation=False):
+            omit_activation=False, data_seed=None):
     technical, destination = Path(technical), Path(destination)
     if destination.exists():
         raise ValueError('Preserve existing personalization output')
@@ -67,6 +67,8 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
             if name.startswith('mobile'):item.uid=item.gid=501
             elif name.startswith('wireless'):item.uid=item.gid=25
             if name in ('root','root/Library/Lockdown'):item.mode=0o700
+    retained_directories = (preserve_directory_metadata(data_entries, data_seed)
+                            if data_seed is not None else [])
     modem=json.loads((technical/'modem-files.json').read_text())
     root_entries = {}
     if not include_modem and modem:
@@ -102,6 +104,8 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
         activate_on_target=activate_on_target and not activation,target_version=target_version,has_baseband=has_baseband,
         activation_omitted=omit_activation,
         modem_payload_included=include_modem,
+        data_seed_sha256=digest(data_seed) if data_seed is not None else None,
+        preserved_data_directories=retained_directories,
         missing_optional_activation_files=missing,activation_on_target_verified=False,
         files={n:digest(destination/n) for n in ('data-personalization.tar','root-personalization.tar')})
     (destination/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')

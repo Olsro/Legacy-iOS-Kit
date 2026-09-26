@@ -72,3 +72,25 @@ def write_tar(path, entries):
             item.mtime = 0
             item.uname = item.gname = ''
             archive.addfile(item, io.BytesIO(data) if data is not None else None)
+
+
+def preserve_directory_metadata(entries, reference):
+    """Keep an overlay from changing existing directory ownership or modes.
+
+    Native tar extraction can apply directory metadata even when the directory
+    already exists. Copy metadata from the selected image's seed; never replace
+    an existing non-directory ancestor with an overlay directory.
+    """
+    existing = {item.name: item for item, _ in members(reference)}
+    retained = []
+    for name, (item, data) in list(entries.items()):
+        previous = existing.get(name)
+        if not item.isdir() or previous is None:
+            continue
+        if not previous.isdir():
+            raise ValueError('Overlay directory conflicts with Data seed: '+name)
+        item = copy.copy(item)
+        item.mode, item.uid, item.gid = previous.mode, previous.uid, previous.gid
+        entries[name] = item, data
+        retained.append(name)
+    return sorted(retained)

@@ -38,6 +38,7 @@ __pycache__/
 # Source/binary provenance shipped with the generic target helpers.
 !resources/olsn0w/target/load-jobs.json
 !resources/olsn0w/target/keybag-init.json
+!resources/olsn0w/target/protection-probe.json
 !resources/olsn0w/target/rescue-unmount.json
 
 !resources/olsn0w/target/bootstrap/manifest.json

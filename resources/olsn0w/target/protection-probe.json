@@ -1,0 +1,7 @@
+{
+  "files": {
+    "native/target/protection_probe.c": "5c204fdc5f37fb5908b057bc97f61c73c9d8194399c583a5bf32e246850ddec4",
+    "native/target/build-protection-probe.sh": "4bc6c648f31bcf434d116bcf4915f9db1f1e56b925ffd8b2fae53f82ae6949f0",
+    "target/protection-probe": "eb5674c743a8c4a9af765d7e368af2082214545af0935d2e76509bd2aa4c0d90"
+  }
+}

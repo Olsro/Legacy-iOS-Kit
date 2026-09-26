@@ -91,7 +91,10 @@ def prepare(session, system, relay, base, destination):
         baseband_family=selected_profile.get('baseband_family','Mav5'),
         include_modem=baseband_strategy(source['product'])=='update',
         activate_on_target=fresh and not skip_activation,
-        omit_activation=skip_activation)
+        omit_activation=skip_activation,
+        data_seed=system/'data-seed.tar')
+    if personalized.get('data_seed_sha256') != source['files']['data-seed.tar']:
+        raise ValueError('Personalization directory metadata belongs to another Data seed')
     if (personalized.get('activation_omitted') is not skip_activation or
             personalized.get('activate_on_target') is not (fresh and not skip_activation)):
         raise ValueError('Personalization activation policy differs from the target system')

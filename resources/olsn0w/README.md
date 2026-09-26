@@ -81,11 +81,13 @@ is read back before the partition layout is calculated.
 The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
 bootstrap, formats fresh target Data with the selected iOS formatter, seeds it,
-and checks every filesystem before requesting normal boot. iOS 6 keeps its stock
-unprotected Data mount and is populated completely before boot. A checked target
-helper creates only a missing Apple system keybag before Aquila, after verifying
-the selected build, board, mounts and Data generation; an existing keybag is
-never replaced. iOS 7 and 8 use the protected first-boot path. No host disk
+and checks every filesystem before requesting normal boot. iOS 6, 7 and 8
+format a fresh protected Data volume and write only its directory metadata
+offline. On iOS 6, a guarded launchd.conf handoff creates a missing Apple
+system keybag, then extracts the Data seed and personalization before Aquila;
+an existing keybag is never replaced. A failed handoff blocks Aquila rather
+than starting it against incomplete Data. iOS 7 and 8 use their protected
+keybag first-boot path. No host disk
 mounts or Docker are needed for this installation path. The same RAM connection
 covers all installation stages.
 
