@@ -107,29 +107,33 @@ data before any restore; the installation erases the device.
 
 The bundled [A5Mate Wii homebrew](resources/a5mate-wii/README.md) includes
 separate 8940, 8942 and 8945 builds for the Homebrew Channel SD card. PwnDFU
-was observed on the 4S (8940) and iPod touch 5G (8942); 8945 remains untested.
+was observed on the 4S (8940) and iPod touch 5G (8942); PwnDFU and ramdisk
+boot were also confirmed on the test iPad 3 (8945), as recorded in the homebrew guide.
 The 8942 payload preserves production keys for the subsequent signed iBSS.
 
 ### Hardware validation
 
 These are the successful physical tests reported for this fork, not a promise
 for all storage capacities, manufacturing revisions or cellular variants.
-Tests included reaching the interface, opening applications and Cydia, and
-package installation or APT updates. Activation was checked according to the
+Unless a row specifies otherwise, tests included reaching the interface,
+opening applications and Cydia, and package installation or APT updates.
+Activation was checked according to the
 policy chosen for each run; a bypass run does not validate official activation.
 
 | Device tested with olsn0w | Target versions validated | Notes |
 | --- | --- | --- |
 | iPhone 5 | 6.1.4, 7.1.2, 8.1.3, 8.3 | Apple apps, Cydia and activation; subsequent 8.1.3 reboot correction |
 | iPad 4 | 6.1.3, 7.1.2, 8.1.3, 8.3 | Working interface, jailbreak and Cydia; not every cellular variant tested |
+| iPad 3 | 6.1.3 | Successful olsn0w restoration confirmed by the user on 2026-09-28; exact variant, activation policy and individual functional checks not specified |
 | iPhone 4S | 6.1.3, 7.1.2, 8.3 | Multipatch; bypass on 6.1.3/7.1.2, official activation on 8.3 |
 | iPod touch 5G | 6.1.3, 7.1.2, 8.3 | Bypass runs; working Cydia/package installation |
 | iPad mini 1 Wi-Fi (`iPad2,5`) | 6.1.3, 7.1.2, 8.3 | Official activation and end-to-end user confirmation |
 
 The mini Wi-Fi iOS 6 path required the TriStar reset fix; its 7.1.2 and 8.3
 tests succeeded without forcing that reset. Related cellular mini profiles are
-covered by preparation policy, not by those physical tests. iPad 2/3 variants
-and unlisted builds still require their own hardware validation.
+covered by preparation policy, not by those physical tests. iPad 2 models,
+other iPad 3 variants and unlisted builds still require their own hardware
+validation; the iPad 3 report does not qualify every Wi-Fi/cellular variant.
 
 ### Hacktiv8 and activation choices
 
