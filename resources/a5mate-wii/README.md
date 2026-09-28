@@ -16,7 +16,7 @@ Trois builds explicitement séparés sont inclus. Tous démarrent avec
 | --- | --- | --- |
 | `a5mate-wii-8940` | `A5_8940` | PWNDFU observé sur le 4S de test |
 | `a5mate-wii-8942` | `A5_8942` | PWNDFU observé sur le iPod Touch 5G de test |
-| `a5mate-wii-8945` | `A5_8945` | Généré, à tester sur cible |
+| `a5mate-wii-8945` | `A5_8945` | PWNDFU et boot ramdisk confirmés sur l’iPad 3 de test |
 
 ## Préconditions et comportement
 
