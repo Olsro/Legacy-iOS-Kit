@@ -69,8 +69,8 @@ def plan(primary, secondary, target_bytes, release):
     source, previous = inspect(primary, secondary)
     if type(target_bytes) is not int or target_bytes <= 0 or target_bytes % 4096:
         raise ValueError('Target image must occupy whole allocation blocks')
-    if version(release) < (6,0,0):
-        raise ValueError('Expected an iOS release from 6.0 onward')
+    if version(release) < (5,0,0):
+        raise ValueError('Expected an iOS release from 5.0 onward')
     if any(item['type'] != HFS_TYPE for item in previous):
         raise ValueError('This layout recipe requires HFS source partitions')
     block, root_blocks, var_blocks = 4096, 30*256, 2*256
@@ -82,7 +82,7 @@ def plan(primary, secondary, target_bytes, release):
         raise ValueError('Insufficient capacity for target Data and bootstrap')
     # iOS 7+ receives its own newly generated keybag, without the iOS 6
     # effaceable-storage flags that its kernel cannot use on a secondary root.
-    data_attributes = 0x3000000000000 if version(release)[0] == 6 else 0
+    data_attributes = 0x3000000000000 if version(release)[0] in (5, 6) else 0
     partitions = [
         dict(index=1, role='bootstrap', first=root_start, last=root_start+root_blocks-1, attributes=0),
         dict(index=2, role='data', first=data_start, last=data_end, attributes=data_attributes),

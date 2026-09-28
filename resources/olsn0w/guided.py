@@ -37,10 +37,9 @@ def connected(product, ecid, udid=None):
 
 def support_reason(release):
     # This follows the implemented first-boot recipes, not an arbitrary ceiling.
-    from system import SUPPORTED_MAJORS, PREPARABLE_MAJORS
+    from system import SUPPORTED_MAJORS
     major=version(release)[0]
     if major in SUPPORTED_MAJORS:return None
-    if major in PREPARABLE_MAJORS:return 'device validation is pending'
     return 'first-boot integration is not implemented yet'
 
 
@@ -48,7 +47,8 @@ def choose(options, read=input, show=print):
     while True:
         for index,release in enumerate(options,1):
             reason=support_reason(release['version'])
-            show(str(index)+'. iOS '+release['version']+' ('+release['buildid']+')'+(' — unavailable: '+reason if reason else ''))
+            show(str(index)+'. iOS '+release['version']+' ('+release['buildid']+')'+
+                 (' — unavailable: '+reason if reason else ''))
         show('0. Go Back')
         answer=read('Select a number or iOS version (for example 6.1.2): ').strip()
         if answer=='0':return None

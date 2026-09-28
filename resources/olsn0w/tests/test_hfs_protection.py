@@ -16,6 +16,11 @@ TEMPLATE = os.environ.get('OLSN0W_TEST_PROTECTION_TEMPLATE')
 
 @unittest.skipUnless(TEMPLATE, 'Set OLSN0W_TEST_PROTECTION_TEMPLATE to a small empty journaled HFSX image')
 class ProtectionFormat(unittest.TestCase):
+    protection_version = 4
+
+    def initialize(self, image):
+        getattr(image, f'initialize_protection_v{self.protection_version}')()
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -25,7 +30,7 @@ class ProtectionFormat(unittest.TestCase):
 
     def test_root_attribute_is_on_cnid_one_and_cannot_be_reinitialized(self):
         image = HFS(self.path)
-        image.initialize_protection_v4()
+        self.initialize(image)
         with self.path.open('rb') as stream:
             stream.seek(1024)
             header = stream.read(512)
@@ -47,10 +52,10 @@ class ProtectionFormat(unittest.TestCase):
         record = node[offset+key_length+2:]
         self.assertEqual(struct.unpack_from('>I', record)[0], 0x10)
         self.assertEqual(struct.unpack_from('>I', record, 12)[0], 28)
-        self.assertEqual(record[16:44], b'\x04\x00'+bytes(26))
+        self.assertEqual(record[16:44], bytes((self.protection_version, 0))+bytes(26))
         before = hashlib.sha256(self.path.read_bytes()).digest()
         with self.assertRaises(Exception):
-            image.initialize_protection_v4()
+            self.initialize(image)
         self.assertEqual(hashlib.sha256(self.path.read_bytes()).digest(), before)
 
     def test_existing_plaintext_payload_is_rejected_without_mutation(self):
@@ -58,5 +63,9 @@ class ProtectionFormat(unittest.TestCase):
         image.add('/payload', b'Existing plaintext must not be silently converted')
         before = hashlib.sha256(self.path.read_bytes()).digest()
         with self.assertRaises(Exception):
-            image.initialize_protection_v4()
+            self.initialize(image)
         self.assertEqual(hashlib.sha256(self.path.read_bytes()).digest(), before)
+
+
+class ProtectionFormatIOS5(ProtectionFormat):
+    protection_version = 2

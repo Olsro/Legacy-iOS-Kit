@@ -129,9 +129,23 @@ def version(value):
     return tuple(map(int, value.split('.'))) + (0,) * (3 - len(value.split('.')))
 
 
+IOS5_MINIMUM = {
+    'iPad2,1': '5.0', 'iPad2,2': '5.0', 'iPad2,3': '5.0',
+    'iPad2,4': '5.1',
+    'iPad3,1': '5.1', 'iPad3,2': '5.1', 'iPad3,3': '5.1',
+    'iPhone4,1': '5.0',
+}
+
+
+def minimum_release(product):
+    if product not in MODELS:
+        raise ValueError('Unsupported product')
+    return IOS5_MINIMUM.get(product, '6.0')
+
+
 def target(product, release):
-    if product not in MODELS or version(release) < version('6.0'):
-        raise ValueError('Expected a supported 32-bit release from iOS 6.0 onward')
+    if version(release) < version(minimum_release(product)):
+        raise ValueError('Release predates the selected model support')
     return MODELS[product]
 
 

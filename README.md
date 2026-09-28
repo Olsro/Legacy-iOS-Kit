@@ -54,7 +54,7 @@ and required tool/dependency downloads still work normally.
 
 ## Additions and verified results in this fork
 
-### olsn0w: iOS 6, 7 and 8 restoration
+### olsn0w: iOS 5, 6, 7 and 8 restoration
 
 Start `./restore.sh`, connect the device, then choose **Restore → olsn0w
 (choose iOS version)**. Firmware, signing ticket, restore environment,
@@ -62,6 +62,10 @@ device-specific boot relay and jailbreak preparation are automated. The target
 must be a release actually published for the selected product; unknown or
 ambiguous patch patterns stop preparation instead of reusing another build's
 offsets. iOS 9/10 catalog entries are not an implemented olsn0w restore path.
+
+iOS 5 is available without an experimental opt-in on all compatible iPhone 4S,
+iPad 2 and iPad 3 variants, including those not yet physically tested. Only
+firmwares actually published for each model are offered.
 
 The menu covers the 32-bit iOS 8.4.1 OTA device family: iPhone 4S and 5,
 iPad 2/3/4 (including cellular variants), iPad mini 1 and iPod touch 5G.
@@ -125,7 +129,8 @@ policy chosen for each run; a bypass run does not validate official activation.
 | iPhone 5 | 6.1.4, 7.1.2, 8.1.3, 8.3 | Apple apps, Cydia and activation; subsequent 8.1.3 reboot correction |
 | iPad 4 | 6.1.3, 7.1.2, 8.1.3, 8.3 | Working interface, jailbreak and Cydia; not every cellular variant tested |
 | iPad 3 | 6.1.3 | Successful olsn0w restoration confirmed by the user on 2026-09-28; exact variant, activation policy and individual functional checks not specified |
-| iPhone 4S | 6.1.3, 7.1.2, 8.3 | Multipatch; bypass on 6.1.3/7.1.2, official activation on 8.3 |
+| iPad 3 Wi-Fi (`iPad3,1`) | 5.1.1 (9B206) | Official activation, French interface, Cydia, AppSync installation/reinstallation and respring validated on 2026-09-28 after the iOS 5 launchd socket correction; see [details](resources/olsn0w/IOS5-COMPATIBILITY.md) |
+| iPhone 4S | 5.1.1 (9B206), 6.1.3, 7.1.2, 8.3 | Multipatch; official activation on 5.1.1/8.3, bypass on 6.1.3/7.1.2. 5.1.1 validated on 2026-09-28 after DRA NVRAM cleanup and modem-path correction: Cydia updates and AppSync installation, with SpringBoard icons intact; see [details](resources/olsn0w/IOS5-COMPATIBILITY.md) |
 | iPod touch 5G | 6.1.3, 7.1.2, 8.3 | Bypass runs; working Cydia/package installation |
 | iPad mini 1 Wi-Fi (`iPad2,5`) | 6.1.3, 7.1.2, 8.3 | Official activation and end-to-end user confirmation |
 

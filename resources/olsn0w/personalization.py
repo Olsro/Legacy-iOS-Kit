@@ -88,8 +88,12 @@ def prepare(technical, target_version, destination, *, has_baseband=True,
                     raise ValueError('Modem artifact checksum mismatch')
                 content=source.read_bytes();root_entries[name]=entry(name,content)
                 archive.writestr(name[len(base):],content)
-        root_entries[base+baseband_family+'-personalized.zip']=entry(
-            base+baseband_family+'-personalized.zip',packed.getvalue())
+        # iOS 5 loads the personalized archive from the older standalone
+        # directory; the iOS 6+ Baseband/<family> location is not searched.
+        archive_base=('usr/standalone/firmware/' if version(target_version)[0]==5
+                      else base)
+        archive_name=archive_base+baseband_family+'-personalized.zip'
+        root_entries[archive_name]=entry(archive_name,packed.getvalue())
     add_parents(root_entries)
     destination.mkdir(parents=True)
     write_tar(destination/'data-personalization.tar',data_entries.values())

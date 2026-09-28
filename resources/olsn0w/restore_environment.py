@@ -5,7 +5,7 @@ from common import profile, version
 def selected_build(product, release=None):
     model = profile(product)
     if model.get('multipatch') or (release is not None and
-            model['soc'].startswith('a5') and version(release)[0] == 6):
+            model['soc'].startswith('a5') and version(release)[0] in (5, 6)):
         return '10B329'
     return '12H321'
 

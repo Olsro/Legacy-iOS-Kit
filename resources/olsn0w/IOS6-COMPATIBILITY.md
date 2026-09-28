@@ -134,3 +134,57 @@ not proof of which individual change caused them.
 Neither recipe converts an existing Data volume in place. The non-stock
 effaceable-storage policy remains; these tests do not establish equivalence
 to Apple's usual hardware-backed storage guarantees or class-A lock behavior.
+
+## iPad 3 / Peggle HD language regression (2026-09-28)
+
+On a freshly restored iPad3,1 running 6.1.3/10B329, Data was mounted with
+`protect`, the system keybag existed, and fresh diagnostic directory/file
+class-D operations both returned `before=4 set=0 after=4`. This checks those
+operations only, not all protection classes or lock/reboot behavior.
+
+Peggle Classic HD 2.0.9 crashed with `NSRangeException` during
+`-[NimbleApplicationEnvironmentImpl initWithCore:]`: the binary calls
+`[NSLocale preferredLanguages]` and indexes element zero without checking
+for an empty array. Setup Assistant preferences recorded `fr` / `fr_FR`,
+but `/var/mobile/Library/Preferences/.GlobalPreferences.plist` was absent.
+The app's preferences symlink existed, but pointed to that missing file.
+
+Reselecting French through Settings recreated the global preferences with
+`AppleLanguages[0] = fr`, and the user confirmed that Peggle launched normally.
+No game binary, save data or protection setting was modified. The cause of
+the missing global preferences remains unknown; this is not yet an automatic
+preparation fix, nor evidence that content protection caused the crash.
+
+The user subsequently confirmed that French survived a forced reboot.
+A second standard restore on the same iPad3,1 (6.1.3, official activation,
+Setup Assistant retained) was observed in session
+`455657d1-ada7-41b0-88a6-74e0395c0fc7`. No language repair was added to the
+preparation. The deferred `data-firstboot.tar.gz`, unlike the metadata-only
+`data-seed.tar`, contains the stock mobile global preferences with
+`AppleLocale = en_US` and a nonempty `AppleLanguages` array. Read-only SSH
+snapshots confirmed these preferences existed before Setup Assistant.
+Cydia initialization and official activation completed successfully.
+Selecting French in Setup then persisted `AppleLanguages[0] = fr` on disk.
+Choosing France persisted `AppleLocale = fr_FR`; both values survived
+completion of Setup Assistant (`SetupDone` / `SetupFinishedAllSteps` true),
+and the user confirmed the interface was French. These stages did not
+reproduce the earlier missing-file failure. The user then opened Cydia,
+allowed its first load to finish and confirmed the interface remained French.
+The preferences also survived a normal reboot initiated over SSH: a new
+`kern.boottime` and running SpringBoard were observed, and a fresh plist read
+still returned `AppleLanguages[0] = fr` and `AppleLocale = fr_FR`.
+Timestamped selected-key snapshots are retained in the session's
+`language-observation.jsonl`; the temporary watcher was stopped afterwards.
+The user subsequently installed the same Cydia tweaks (including AppSync),
+forced a reboot with the two hardware buttons, and installed Peggle HD.
+The user confirmed everything worked. This completes the functional retest
+after package installation and a forced reboot; the original disappearance
+was not reproduced.
+
+The user suspects a forced reboot immediately after Setup Assistant may
+interrupt persistence of the language preferences. This timing-dependent
+explanation remains a hypothesis: that exact early interruption has not
+been reproduced under observation, and no stock iOS 6 control has been
+tested. Do not label this a confirmed stock-iOS bug, restrict it to that
+single trigger, or infer a content-protection failure from the first incident.
+No speculative language workaround was added to the restoration code.

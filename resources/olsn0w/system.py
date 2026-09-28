@@ -28,7 +28,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 45
+RECIPE_VERSION = 46
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -49,7 +49,7 @@ def uses_protected_data(release):
     """Return whether this recipe needs native HFS content protection."""
     # iOS 6 uses a separate launchd.conf first-boot handoff. All releases
     # require a freshly formatted protected volume; never convert Data in place.
-    return version(release)[0] in (6, 7, 8)
+    return version(release)[0] in (5, 6, 7, 8)
 
 
 def uses_protected_keybag_start(release):
@@ -201,7 +201,7 @@ def merge_data_payload(data_entries, payload):
 
 # These releases have complete first-boot recipes and can be selected from the
 # guided restore menu.
-SUPPORTED_MAJORS = (6, 7, 8)
+SUPPORTED_MAJORS = (5, 6, 7, 8)
 PREPARABLE_MAJORS = SUPPORTED_MAJORS
 
 
@@ -341,17 +341,23 @@ def ios6_protection_probe_payload():
     return blob
 
 
-def ios6_launchd_conf(content):
+def ios6_launchd_conf(content, major=6):
+    if major not in (5, 6):
+        raise ValueError('Expected the iOS 5/6 launchd.conf path')
     token = b'bsexec .. /private/var/aquila/aquila\n'
     if content.count(token) != 1:
         raise ValueError('Unrecognized Kit iOS 6 launchd configuration')
-    initializer = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-firstboot.sh\n'
+    initializer = ('bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios%d-firstboot.sh\n' % major).encode()
     if initializer in content:
         raise ValueError('iOS 6 first-boot initializer is already present')
     # launchd.conf does not abort on a failed command. The second wrapper
     # prevents Aquila from running against an incomplete protected Data seed.
     guarded = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-start-aquila.sh\n'
-    return initializer + content.replace(token, guarded)
+    configured = initializer + content.replace(token, guarded)
+    if major == 5:
+        configured += (b'bsexec .. /bin/sh '
+                       b'/usr/local/libexec/olsn0w/ios5-launchd-socket.sh save\n')
+    return configured
 
 
 def keybag_tool():
@@ -621,7 +627,7 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     out = Path(tempfile.mkdtemp(prefix='system-pending-', dir=firmware.parent))
     # iOS 6's shipped launchd contract executes Aquila from Data. Retarget the
     # qualified binary before Data entries are split out of the root overlay.
-    if major == 6:
+    if major in (5, 6):
         aquila_path = 'private/var/aquila/aquila'
         untether_item, original = payload[aquila_path]
         untether = out/'aquila'
@@ -651,7 +657,7 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     else:
         write_tar(out/'data-seed.tar', data_entries.values())
 
-    if major != 6:
+    if major not in (5, 6):
         untether_item, original = payload[untether_name]
         untether = out/untether_name
         prepare_untether={'everuntether':prepare_ios8_payload,
@@ -663,16 +669,32 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
         loader, wrapper = job_loader()
         payload['olsn0w/load-jobs'] = entry('olsn0w/load-jobs', loader, 0o755)
         payload['olsn0w/lctl'] = entry('olsn0w/lctl', wrapper, 0o755)
-    if major == 6:
+    if major in (5, 6):
         item, conf = payload['private/etc/launchd.conf']
-        payload['private/etc/launchd.conf'] = entry(item.name, ios6_launchd_conf(conf), item.mode)
+        payload['private/etc/launchd.conf'] = entry(item.name, ios6_launchd_conf(conf, major), item.mode)
+        if major == 5:
+            from ios5_helpers import payloads
+            helpers = payloads()
+            # Native iOS 5 clears /var/tmp after launchd.conf. Preserve the
+            # already-open launchd socket or later package loads cannot work.
+            if any(r['name'] == 'dirhelper' for r in stock.ls('/usr/libexec')):
+                payload['usr/local/libexec/olsn0w/dirhelper.stock'] = entry(
+                    'usr/local/libexec/olsn0w/dirhelper.stock',
+                    stock.read('/usr/libexec/dirhelper'), 0o755)
+            for name in ('ios5-launchd-socket.sh', 'ios5-dirhelper.sh'):
+                path = ('usr/libexec/dirhelper' if name == 'ios5-dirhelper.sh'
+                        else 'usr/local/libexec/olsn0w/'+name)
+                payload[path] = entry(path, (TARGET_SCRIPTS/name).read_bytes(), 0o755)
+        else:
+            helpers = {'keybag-init': ios6_keybag_payload(),
+                       'protection-probe': ios6_protection_probe_payload()}
         payload['usr/local/libexec/olsn0w/keybag-init'] = entry(
-            'usr/local/libexec/olsn0w/keybag-init', ios6_keybag_payload(), 0o755)
+            'usr/local/libexec/olsn0w/keybag-init', helpers['keybag-init'], 0o755)
         payload['usr/local/libexec/olsn0w/keybag-init.sh'] = entry(
             'usr/local/libexec/olsn0w/keybag-init.sh', (TARGET_SCRIPTS/'keybag-init.sh').read_bytes(), 0o755)
         payload['usr/local/libexec/olsn0w/protection-probe'] = entry(
-            'usr/local/libexec/olsn0w/protection-probe', ios6_protection_probe_payload(), 0o755)
-        for script in ('ios6-firstboot.sh', 'ios6-start-aquila.sh'):
+            'usr/local/libexec/olsn0w/protection-probe', helpers['protection-probe'], 0o755)
+        for script in ('ios%d-firstboot.sh' % major, 'ios6-start-aquila.sh'):
             name = 'usr/local/libexec/olsn0w/'+script
             payload[name] = entry(name, (TARGET_SCRIPTS/script).read_bytes(), 0o755)
 
@@ -923,9 +945,11 @@ Subsystem sftp /usr/libexec/sftp-server
                   relay_binary_sha256=chain['files']['relay.bin'],
                   generation=generation, root_device=root_device, data_device=data_device,
                   early_keybag_initialization=early_keybag,
-                  data_attributes=0x3000000000000 if major == 6 else 0,
+                  data_attributes=0x3000000000000 if major in (5, 6) else 0,
                   data_seed_entries=len(metadata if protected_data else data_entries), volume=image.info(),
-                  data_initialization=('native-newfs-hfs-P-cprotect-v4-metadata-only-then-target-firstboot'
+                  data_initialization=('native-newfs-hfs-P-cprotect-v2-metadata-only-then-target-firstboot'
+                                       if major == 5 else
+                                       'native-newfs-hfs-P-cprotect-v4-metadata-only-then-target-firstboot'
                                        if protected_data else 'offline-seed'),
                   packages=provenance, untether=untether_name,
                   untether_signature=signature, payload_readback=checks,

@@ -297,6 +297,19 @@ def preloaded_ibss_length(original, data, log):
     if len(matches)!=1:raise ValueError('Ambiguous iBSS receive call')
     at=int(matches[0],16)
     ins=list(md.disasm(original[at:at+10],at))
+    # iOS 5 passes a 1 MiB bound immediately before BL and compares r0
+    # before copying it to r10. Validate this distinct contract in full.
+    early=list(md.disasm(original[max(0,at-8):at],max(0,at-8)))
+    if ([(i.mnemonic,i.op_str) for i in early] ==
+            [('str','r4, [sp, #0xc]'), ('mov','r0, r4'),
+             ('mov.w','r1, #0x100000')]
+            and len(ins)==4
+            and [i.mnemonic for i in ins]==['bl','cmp','mov','blt']
+            and ins[1].op_str=='r0, #0' and ins[2].op_str=='sl, r0'
+            and data[at:at+4]==bytes.fromhex('00bf00bf')
+            and data[at+8:at+10]==bytes.fromhex('00bf')):
+        result=data[:at]+bytes.fromhex('084600bf')+data[at+4:]
+        return result,dict(offset=at,before='00bf00bf',after='084600bf',length=WINDOW)
     # The image-pointer store is 16-bit for r4 and 32-bit for r10 (iOS 7).
     prior=[]
     for distance in (10,12):
@@ -334,6 +347,14 @@ def ram_autoboot(data):
         if mem.type!=ARM_OP_MEM or mem.mem.base!=ARM_REG_PC:continue
         literal=((at+4)&~3)+mem.mem.disp
         if not 0<=literal<=len(data)-4 or struct.unpack_from('<I',data,literal)[0]!=pointer:continue
+        if (len(ins)>13 and
+                [i.mnemonic for i in ins[1:13]] ==
+                ['movs','bl','movs','mov','bl','ldr','ldr','strd','movs','mov','bl','cmp']
+                and [ins[i].op_str for i in (1,3,4,9,10,12)] ==
+                ['r1, #0','r4, #0','r5, r0','r1, #1','r0, r3','r5, #0']
+                and ins[13].mnemonic=='beq'):
+            matches.append(ins[2].address)
+            continue
         if len(ins)<6 or ins[1].mnemonic!='movs' or ins[1].op_str!='r1, #0':continue
         call=next((j for j in range(2,min(5,len(ins))) if ins[j].mnemonic=='bl'),None)
         if call is None or ins[call+1].mnemonic!='mov':continue
@@ -438,7 +459,12 @@ def prepare(firmware, *, verbose=False):
     (out/'relay.bin').write_bytes(relay)
     raw=(firmware/'DeviceTree.raw').read_bytes();nodes=devicetree.parse(raw)
     root=next(n for n in nodes if n['path']=='/device-tree')
-    value=next(p['value'] for p in root['properties'] if p['name']=='firmware-min-capacity')
+    if version(source['version'])[0] == 5:
+        # Older DeviceTrees omit firmware-min-capacity. This property is a
+        # boolean policy, not a capacity: supply an explicit nonzero u32.
+        value=struct.pack('<I',1)
+    else:
+        value=next(p['value'] for p in root['properties'] if p['name']=='firmware-min-capacity')
     raw,_=devicetree.add_property(raw,'/device-tree/defaults','no-effaceable-storage',value)
     if uses_tristar_soft_reset(source['product'], source['version']):
         paths=[n['path'] for n in nodes if n['path'].endswith('/tristar')]

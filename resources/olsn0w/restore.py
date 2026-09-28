@@ -103,7 +103,7 @@ def prepare(session, system, relay, base, destination):
         (clone_or_copy if name.endswith('.hfs') else shutil.copyfile)(source_path,destination/name)
     target=HFS(destination/'system.hfs')
     # Use the selected firmware's formatter, never a host-specific filesystem API.
-    if version(source['version'])[0]==6:
+    if version(source['version'])[0] in (5, 6):
         formatter=target.read('/sbin/newfs_hfs')
     else:
         formatter=target.read('/System/Library/Filesystems/hfs.fs/Contents/Resources/newfs_hfs')
@@ -288,7 +288,7 @@ def data_formatter(rescue_build):
 
 
 def require_data_environment(product, release, rescue_build):
-    """Reject the A5/iOS6 cross-kernel crypto view before changing storage.
+    """Reject the A5/iOS5-6 cross-kernel crypto view before changing storage.
 
     On N78AP, writing encrypted Data through 12H321 passes its own fsck but
     10B329 reads different first AES blocks and cannot mount it. Native6 writes
@@ -296,9 +296,9 @@ def require_data_environment(product, release, rescue_build):
     Keep the already-qualified A6/A6X and iOS7/8 paths unchanged. This is a
     fail-closed guard, not qualification of a new signed-base restore route.
     """
-    if (profile(product)['soc'].startswith('a5') and version(release)[0] == 6
+    if (profile(product)['soc'].startswith('a5') and version(release)[0] in (5, 6)
             and rescue_build != '10B329'):
-        raise ValueError('A5 iOS 6 Data requires the native iOS 6 RAM environment (10B329); '
+        raise ValueError('A5 iOS 5/6 Data requires the native iOS 6 RAM environment (10B329); '
                          'do not format or repair it through the iOS 8 rescue')
 
 
@@ -349,7 +349,11 @@ def _finish_data(bundle,ram,report,layout,expected,state,stage,progress):
     path=bundle/'data-native.hfs'
     read_fresh_image(ram,'/dev/rdisk0s1s2',path,part['bytes'])
     image=HFS(path)
-    if protect:image.initialize_protection_v4()
+    if protect:
+        if version(report['version'])[0] == 5:
+            image.initialize_protection_v2()
+        else:
+            image.initialize_protection_v4()
     image.command('untar',bundle/'data-seed.tar')
     if not protect:image.command('untar',bundle/'personalization/data-personalization.tar')
     image.normalize_root()

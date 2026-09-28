@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IOS6ProtectedBoot(unittest.TestCase):
+    firstboot_script = 'ios6-firstboot.sh'
+    expected_events = ['keybag', 'probe:d', 'probe:d', 'probe:f', 'aquila']
+
     def test_keybag_precedes_content_and_failed_personalization_blocks_aquila(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -62,7 +65,7 @@ class IOS6ProtectedBoot(unittest.TestCase):
                 path.write_text(source)
                 return path
 
-            firstboot = script('ios6-firstboot.sh')
+            firstboot = script(self.firstboot_script)
             aquila = script('ios6-start-aquila.sh')
 
             def run(path):
@@ -87,9 +90,14 @@ class IOS6ProtectedBoot(unittest.TestCase):
             self.assertEqual((var/'official.txt').read_bytes(), b'personalization')
             self.assertEqual(run(aquila).returncode, 0)
             self.assertEqual(events.read_text().splitlines(),
-                             ['keybag', 'probe:d', 'probe:d', 'probe:f', 'aquila'])
+                             self.expected_events)
             personal.unlink()
             (staging/'data-firstboot.tar.gz').unlink()
             self.assertEqual(run(firstboot).returncode, 0)
             self.assertEqual(events.read_text().splitlines(),
-                             ['keybag', 'probe:d', 'probe:d', 'probe:f', 'aquila'])
+                             self.expected_events)
+
+
+class IOS5ProtectedBoot(IOS6ProtectedBoot):
+    firstboot_script = 'ios5-firstboot.sh'
+    expected_events = ['keybag', 'probe:f', 'probe:f', 'aquila']

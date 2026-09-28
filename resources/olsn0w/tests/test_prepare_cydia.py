@@ -50,6 +50,19 @@ class PrepareCydia(unittest.TestCase):
             self.assertFalse((root/'etc/ssh/sshd_config.distrib').exists())
             self.assertNotIn('dpkg-divert',script)
             self.assertNotIn('mkdir -p /usr/share',script)
+            # iOS 5 must prove the named-job IPC endpoint, not just the
+            # unrelated all-jobs Mach query that hid the hardware failure.
+            script=script.replace('/usr/local/libexec/olsn0w/ios5-launchd-socket.sh',str(no_op))
+            lctl=root/'launchctl'
+            script=script.replace('/bin/launchctl',str(lctl))
+            command.write_text(script)
+            lctl.write_text('#!/bin/sh\necho "launch_msg(): Socket is not connected" >&2\nexit 1\n')
+            lctl.chmod(0o755)
+            self.assertNotEqual(subprocess.run(['/bin/sh',str(command)],capture_output=True).returncode,0)
+            lctl.write_text('#!/bin/sh\necho unrelated\n')
+            self.assertNotEqual(subprocess.run(['/bin/sh',str(command)],capture_output=True).returncode,0)
+            lctl.write_text('#!/bin/sh\necho \'"Label" = "com.apple.mobile.installd";\'\n')
+            self.assertEqual(subprocess.run(['/bin/sh',str(command)],capture_output=True).returncode,0)
 
     def test_pangu_gate_requires_the_selected_root_to_be_writable(self):
         script=(ROOT/'target/prepare-cydia.sh').read_text()

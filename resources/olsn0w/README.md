@@ -32,10 +32,15 @@ the completed firmware preparation. The current pipeline still restores the full
 before reducing it to the 30 MiB + 2 MiB bootstrap.
 
 The menu follows releases published for the connected product across the
-32-bit 8.4.1 OTA family. iOS 6, 7 and 8 have installation recipes; iOS 9/10
+32-bit 8.4.1 OTA family. iOS 5, 6, 7 and 8 have installation recipes; iOS 9/10
 remain outside the implemented target path. Preparation rejects firmware that
 does not match checked patch patterns. Catalog availability is not physical
 qualification of every listed build or hardware revision.
+
+[iOS 5 preparation](IOS5-COMPATIBILITY.md) is available in the normal menu for
+all compatible A5/A5X models, including models not yet physically tested.
+iPad3,1 and iPhone4,1 / 5.1.1 are validated; no experimental flag is required for other
+compatible models. The firmware catalog retains each model's real minimum OS.
 
 Preparation displays a live, single-line percentage for downloads, archive
 extraction, decryption, checksums and firmware assembly. Percentages refer to the
@@ -81,9 +86,9 @@ is read back before the partition layout is calculated.
 The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
 bootstrap, formats fresh target Data with the selected iOS formatter, seeds it,
-and checks every filesystem before requesting normal boot. iOS 6, 7 and 8
+and checks every filesystem before requesting normal boot. iOS 5, 6, 7 and 8
 format a fresh protected Data volume and write only its directory metadata
-offline. On iOS 6, a guarded launchd.conf handoff creates a missing Apple
+offline. On iOS 5 and 6, a guarded launchd.conf handoff creates a missing Apple
 system keybag, then extracts the Data seed and personalization before Aquila;
 an existing keybag is never replaced. A failed handoff blocks Aquila rather
 than starting it against incomplete Data. iOS 7 and 8 use their protected
@@ -347,7 +352,7 @@ link and its Data-backed default-source link at the real `/private/etc` HFS
 catalog path before first boot. The link's mobile-owned cache target is seeded
 with the five default Cydia repositories as well; Cydia returning status 0
 without creating that cache can therefore no longer yield an empty source list.
-All iOS 6/7/8 target images also include the nine repositories listed at
+All iOS 5/6/7/8 target images also include the nine repositories listed at
 http://cydia.olsro.fr/ (checked 2026-09-24): BigBoss, Cydia.vn, Eat My Phone,
 Hack Your iPhone, ModMyi, Personal (Olsro), Ryan Petrich, Saurik and ZodTTD.
 They use a separate root-owned `/private/etc/apt/sources.list.d/Olsro.list`,
@@ -572,7 +577,7 @@ Existing kit code is reused where applicable:
 | Component | Existing implementation | Integration limit |
 | --- | --- | --- |
 | Bootloader patches | Bundled `iBoot32Patcher` | Each selected binary must match the relay's checked instruction patterns. |
-| iOS 6/7 jailbreak payloads | Kit package layout, with the pinned upstream Aquila 2.1.1 device binary | The iOS 6 and 7 image recipes integrate root selection and first-boot services. Hardware qualification remains specific to each build and product. |
+| iOS 5/6/7 jailbreak payloads | Kit package layout, with the pinned upstream Aquila 2.1.1 device binary | The iOS 5, 6 and 7 image recipes integrate root selection and first-boot services. Hardware qualification remains specific to each build and product. |
 | iOS 7/8 daemon placement | `jailbreak/daibutsu/move.sh` | Must be adapted to the selected image/layout rather than run blindly on a device. |
 | iOS 8 | Kit EverUntether and daibutsu cache admission | Preparation and restores validated on the builds/devices in the main README, not every catalog entry. |
 | iOS 9 | The Kit selects EverUntether for releases before 9.3.5 | Target service and boot integration remains to be implemented and validated. |
@@ -582,7 +587,7 @@ Prepared manifests distinguish host preparation from physical boot validation.
 They must not be used to claim that all catalog versions have been restored or
 that every supported product type has been tested on hardware.
 
-`prepare-system` implements iOS 6/7 Aquila recipes and an iOS 8 EverUntether
+`prepare-system` implements iOS 5/6/7 Aquila recipes and an iOS 8 EverUntether
 recipe using the Kit's daibutsu layout. It separates the
 stock Data contents from the system image, preserves bundled dictionary and font
 assets, relocates launch services for iOS 7, disables OTA services, and installs guarded

@@ -88,7 +88,8 @@ static void require_metadata_only(Volume *volume, uint32_t folder, unsigned dept
     }
     releaseCatalogRecordList(list);
 }
-static int initialize_protection_v4(const char *path) {
+static int initialize_protection(const char *path, uint8_t version) {
+    if (version != 2 && version != 4) fail("Unsupported protection version");
     struct stat st;
     if (lstat(path, &st) || !S_ISREG(st.st_mode)) fail("Expected a regular image");
     io_func *image = openFlatFile(path);
@@ -105,7 +106,8 @@ static int initialize_protection_v4(const char *path) {
     /* Apple's cp_root_xattr is little endian and belongs to CNID 1, not the
      * root directory (CNID 2). Version 4 is the iOS 6/7 protection format.
      * This supplies format metadata only; the target creates all file keys. */
-    uint8_t value[28] = {4, 0};
+    uint8_t value[28] = {0};
+    value[0] = version;
     if (!setAttribute(volume, 1, "com.apple.system.cprotect", value, sizeof(value)) || !updateVolume(volume))
         fail("Cannot initialize protection version");
     uint8_t *readback = NULL;
@@ -147,7 +149,8 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 3 && !strcmp(argv[2], "--normalize-root")) return normalize_root(argv[1]);
-    if (argc == 3 && !strcmp(argv[2], "--initialize-protection-v4")) return initialize_protection_v4(argv[1]);
+    if (argc == 3 && !strcmp(argv[2], "--initialize-protection-v4")) return initialize_protection(argv[1], 4);
+    if (argc == 3 && !strcmp(argv[2], "--initialize-protection-v2")) return initialize_protection(argv[1], 2);
     if (argc == 4 && !strcmp(argv[2], "--untar")) {
         if (lstat(argv[1], &image_stat) || !S_ISREG(image_stat.st_mode) ||
             lstat(argv[3], &input_stat) || !S_ISREG(input_stat.st_mode) ||

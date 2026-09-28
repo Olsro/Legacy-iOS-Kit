@@ -38,6 +38,15 @@ def discover(raw, expected_sha, cave):
         if mem.type!=ARM_OP_MEM or mem.mem.base!=ARM_REG_PC:continue
         at=((ins[0].address+4)&~3)+mem.mem.disp-base
         if not 0<=at<len(raw)-4 or struct.unpack_from('<I',raw,at)[0]!=base+logo:continue
+        # iOS 5 schedules the low half of the logo type before the path LDR.
+        prior=list(md.disasm(raw[max(0,offset-4):offset],base+max(0,offset-4)))
+        if (len(prior)==1 and prior[0].size==4
+                and (prior[0].mnemonic,prior[0].op_str)==('movw','r1, #0x676f')
+                and len(ins)>=3
+                and (ins[1].mnemonic,ins[1].op_str)==('movt','r1, #0x6c6f')
+                and ins[2].mnemonic=='bl'):
+            candidates.append((ins[2].address-base,ins[2].operands[0].imm & 0xffffffff))
+            continue
         if len(ins)>=3 and ins[1].mnemonic=='ldr' and ins[1].op_str.startswith('r1, [pc,') and ins[2].mnemonic=='bl':
             mem=ins[1].operands[1]
             if mem.type!=ARM_OP_MEM or mem.mem.base!=ARM_REG_PC:continue

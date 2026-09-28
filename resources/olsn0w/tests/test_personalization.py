@@ -1,5 +1,6 @@
 """Wi-Fi products retain activation without requiring nonexistent modem files."""
 import hashlib
+import io
 import json
 from pathlib import Path
 import plistlib
@@ -10,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from personalization import prepare
@@ -18,6 +20,31 @@ from system import entry
 
 
 class RadioCapability(unittest.TestCase):
+    def test_modem_archive_uses_ios5_standalone_path_only_on_ios5(self):
+        from common import baseband_files
+        for family in ('Trek', 'Mav5'):
+            for release in ('5.0', '5.0.1', '5.1', '5.1.1', '6.1.3', '7.1.2', '8.3'):
+                with self.subTest(family=family, release=release), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    base = 'usr/local/standalone/firmware/Baseband/' + family + '/'
+                    modem = {}
+                    for name in baseband_files(family):
+                        data = ('fixture-' + name).encode()
+                        source = root / (base + name)
+                        source.parent.mkdir(parents=True, exist_ok=True)
+                        source.write_bytes(data)
+                        modem[base + name] = dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+                    self.technical(root, modem)
+                    prepare(root, release, root/'output', baseband_family=family)
+                    expected = ('usr/standalone/firmware/' if release.startswith('5.') else base)
+                    expected += family + '-personalized.zip'
+                    with tarfile.open(root/'output/root-personalization.tar') as archive:
+                        self.assertEqual([n for n in archive.getnames() if n.endswith('-personalized.zip')], [expected])
+                        with zipfile.ZipFile(io.BytesIO(archive.extractfile(expected).read())) as packed:
+                            self.assertEqual(set(packed.namelist()), set(baseband_files(family)))
+                            for name in packed.namelist():
+                                self.assertEqual(packed.read(name), ('fixture-' + name).encode())
+
     def test_personalization_preserves_selected_seed_permissions_on_ios6_7_8(self):
         for release in ('6.1.3', '7.1.2', '8.3'):
             with self.subTest(release=release), tempfile.TemporaryDirectory() as tmp:

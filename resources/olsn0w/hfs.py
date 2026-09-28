@@ -276,3 +276,8 @@ class HFS:
         """
         from native_tools import hfscompress
         run([hfscompress(), self.path, '--initialize-protection-v4'], timeout=120)
+
+    def initialize_protection_v2(self):
+        """Initialize fresh iOS 5 metadata, never convert an existing volume."""
+        from native_tools import hfscompress
+        run([hfscompress(), self.path, '--initialize-protection-v2'], timeout=120)

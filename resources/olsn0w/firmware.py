@@ -10,7 +10,7 @@ import subprocess
 import time
 from progress import activity, display_if_needed, copy_stream, message
 
-from common import KIT, STATE, MODELS, target, version, tools, run, digest, save, integer
+from common import KIT, STATE, MODELS, target, version, tools, run, digest, save, integer, minimum_release
 
 
 def content_length(headers):
@@ -68,7 +68,7 @@ def releases(product, refresh=False):
     if data['identifier'] != product:
         raise ValueError('Firmware catalog product mismatch')
     return sorted([f for f in data['firmwares'] if
-                   version('6.0') <= version(f['version'])],
+                   version(minimum_release(product)) <= version(f['version'])],
                   key=lambda f: (version(f['version']), f['buildid']))
 
 
