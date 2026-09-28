@@ -52,6 +52,14 @@ and required tool/dependency downloads still work normally.
 - [Data Management](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Data-Management) - Backup and restore, mount device, erase all content and settings
 - [Misc Utilities](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Misc-Utilities) - Pair device, export data and battery info, shutdown/restart device, and more
 
+## Ethics / Legal
+- If you resell a modified or hacktivated device, your buyer should always know it. For example osn0w has little compromises a native restored OS won't have (slower restores/boot times, etc)
+- This program is free of charge & open source. If you paid for it anywhere, ask for a refund, you got scammed.
+- This fork was not free to build & to maintain, see in https://olsro.fr how you can support me
+- There's no guarantees this program will work right for you, though it should not harm your device in a unrecoverable way (you can always enter DFU to factory restore)
+- This program was created to fight ewaste and to allow anyone to use their legacy iOS device how they like to enjoy the super speed & the vibes (skeuomorphic, cover flow, etc) of older iOS versions. You regain even a few GB of storage by using very old iOS versions compared to the latest ones so you can just store more content. Easy Hacktivation is provided in the only intent to fight ewaste. Apple remote locking a device so much you can't even use YOUR device as an mp3 player is super anti-consumer to me and many legitimate users just forget their Apple ID over time.
+- Hacktivated devices can be used as an iPod Touch basically and even synced through iTunes, but the baseband remains unactivated (no mobile networks like 2G/3G/4G but wifi/bluetooth works). This is not a bug and won't be addressed
+
 ## Additions and verified results in this fork
 
 ### olsn0w: iOS 5, 6, 7 and 8 restoration
