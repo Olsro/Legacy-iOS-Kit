@@ -30,7 +30,7 @@ HELPER_ASSET = Path(__file__).parent / 'target/hacktiv8-mobilegestalt'
 HELPER_SHA256 = 'c4a693b6610c176319a1e1e126cad1df0806893cb628fc52adfd556c9150befe'
 
 # Shared by IPSW preparation, olsn0w and the live-device utility. Only this
-# exact 4S/9B206 executable may use the historic patch's fixed offset.
+# exact 3GS/4S 9B206 executable may use the historic patch's fixed offset.
 LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
 LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
@@ -71,7 +71,7 @@ def _patched_signature(signature, replacements):
 
 
 def patch_lockdownd(data, product=None, build=None, *, sign=False):
-    if (product, build) == ('iPhone4,1', '9B206'):
+    if product in ('iPhone2,1', 'iPhone4,1') and build == '9B206':
         checksum = hashlib.sha256(data).hexdigest()
         if checksum == LOCKDOWN_511_PATCHED:
             verify(data)

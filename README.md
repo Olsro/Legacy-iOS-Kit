@@ -165,7 +165,7 @@ validation; the iPad 3 report does not qualify every Wi-Fi/cellular variant.
 - If SSH is unavailable, the menu offers retrying or the existing jailbreak
   workflow with confirmation. A missing SSH connection alone is not treated
   as proof that the device is unjailbroken.
-- The iPhone 4S **5.1.1/9B206** patch is shared between live application and
+- The iPhone 3GS/4S **5.1.1/9B206** patch is shared between live application and
   IPSW preparation, with exact binary hashes and signature verification.
   Live activation and Setup Assistant completion were validated on one 4S;
   DRA IPSW reconstruction/readback was tested separately.

@@ -31,20 +31,32 @@ keep them private and retain them for recovery.
 
 iOS 4–6 uses the existing lockdownd signature recipe, with code-page hashes
 updated while preserving the original Apple ad-hoc signature metadata and
-entitlements. The iPhone 4S 5.1.1/9B206 additionally has an exact SHA-256-pinned
+entitlements. The iPhone 3GS and 4S 5.1.1/9B206 share an exact SHA-256-pinned
 case, reproduced byte-for-byte from the Kit's historic
 `Down_iPhone2,1_5.1.1_9B206.bundle/lockdownd.patch`; it is never applied by offset
 to an unknown binary. iOS 7/8 uses the MobileGestalt flag or a bundled exact
 profile; later supported builds require their bundled profile. A missing live
 cache is an error, not grounds for removing Setup.app or guessing its contents.
 
-The pinned 4S 5.1.1 recipe is shared with custom IPSW preparation (including
+The pinned 3GS/4S 5.1.1 recipe is shared with custom IPSW preparation (including
 DRA) and olsn0w. Installation and filesystem readback use the same recipe;
 it is not limited to the live-device menu.
 The 5.1.1 DRA custom IPSW was checked through extraction, patching, DMG/ZIP
 reconstruction and filesystem readback on a disposable copy. Its other 37
 archive entries were unchanged. This validates preparation, not a new hardware
 restore.
+
+The 3GS (`iPhone2,1`) 9B206 custom IPSW contains the identical stock lockdownd
+SHA-256 as the qualified 4S binary. Its former rejection was a product allowlist
+omission, not a different instruction layout. Both products now use the same
+hash-checked recipe; unknown hashes, other builds and other products cannot
+borrow the fixed offset. This preparation correction does not itself establish
+successful activation or restoration on 3GS hardware.
+On 2026-09-29, a disposable copy of the 3GS 9B206 custom IPSW passed the full
+Hacktiv8 preparation and DMG/ZIP reconstruction. Readback verified the exact
+historic patched binary, original backup, file metadata and preserved Setup.app;
+all 30 other archive entries were unchanged. Host regression tests cover both
+products, reapplication, shared image/live paths and rejection of unknown inputs.
 
 The host reports file-patch verification, not successful official activation.
 After restart, verify Setup Assistant, device connectivity and normal use.

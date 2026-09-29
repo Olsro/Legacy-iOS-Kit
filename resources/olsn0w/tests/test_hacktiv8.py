@@ -58,20 +58,30 @@ class Legacy511Regression(unittest.TestCase):
         self.addCleanup(verifier.stop)
 
     def test_exact_recipe_and_idempotency(self):
-        self.assertEqual(hacktiv8.patch_lockdownd(self.original, 'iPhone4,1', '9B206'),
-                         (self.patched, 0xb932, True))
-        self.assertEqual(hacktiv8.patch_lockdownd(self.patched, 'iPhone4,1', '9B206'),
-                         (self.patched, 0xb932, False))
+        for product in ('iPhone2,1', 'iPhone4,1'):
+            for sign in (False, True):
+                with self.subTest(product=product, sign=sign):
+                    self.assertEqual(hacktiv8.patch_lockdownd(self.original, product, '9B206', sign=sign),
+                                     (self.patched, 0xb932, True))
+                    self.assertEqual(hacktiv8.patch_lockdownd(self.patched, product, '9B206', sign=sign),
+                                     (self.patched, 0xb932, False))
 
     def test_unknown_bytes_model_or_build_never_borrow_fixed_offset(self):
         for data, product, build in (
                 (self.original+b'x', 'iPhone4,1', '9B206'),
+                (self.original+b'x', 'iPhone2,1', '9B206'),
+                (self.original, 'iPhone2,1', '9B208'),
                 (self.original, 'iPhone3,1', '9B206'),
                 (self.original, 'iPhone4,1', '9B208')):
             with self.assertRaisesRegex(ValueError, 'does not recognize'):
                 hacktiv8.patch_lockdownd(data, product, build)
 
     def test_image_install_readback_and_live_share_recipe(self):
+        for product in ('iPhone2,1', 'iPhone4,1'):
+            with self.subTest(product=product):
+                self.check_image_install_readback_and_live_share_recipe(product)
+
+    def check_image_install_readback_and_live_share_recipe(self, product):
         import hacktiv8_live
         files = {
             hacktiv8.LOCKDOWN: self.original,
@@ -86,13 +96,13 @@ class Legacy511Regression(unittest.TestCase):
             if path == '/Applications' else
             [dict(name=Path(name).name, mode=stat.S_IFREG | 0o755, uid=0, gid=0)
              for name in files if str(Path(name).parent) == path])
-        report = hacktiv8.install(image, '5.1.1', 'iPhone4,1', '9B206')
-        hacktiv8.verify_installed(image, report, '5.1.1', 'iPhone4,1')
+        report = hacktiv8.install(image, '5.1.1', product, '9B206')
+        hacktiv8.verify_installed(image, report, '5.1.1', product)
         self.assertEqual(files[hacktiv8.LOCKDOWN], self.patched)
         self.assertEqual(files[hacktiv8.LOCKDOWN_BACKUP], self.original)
-        self.assertEqual(hacktiv8.install(image, '5.1.1', 'iPhone4,1', '9B206'), report)
+        self.assertEqual(hacktiv8.install(image, '5.1.1', product, '9B206'), report)
         self.assertEqual(hacktiv8_live.patched_bytes(
-            'lockdownd-patch', self.original, 'iPhone4,1', '9B206'), self.patched)
+            'lockdownd-patch', self.original, product, '9B206'), self.patched)
 
 
 class Selection(unittest.TestCase):
