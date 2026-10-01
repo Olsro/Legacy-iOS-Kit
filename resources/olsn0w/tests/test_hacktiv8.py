@@ -105,6 +105,65 @@ class Legacy511Regression(unittest.TestCase):
             'lockdownd-patch', self.original, product, '9B206'), self.patched)
 
 
+class Legacy4Regression(unittest.TestCase):
+    def test_pinned_435_recipe_and_idempotency(self):
+        original = bytearray(0xbc00)
+        patched = bytearray(original)
+        for offset, before, after in hacktiv8.LOCKDOWN_435_EDITS:
+            original[offset:offset+len(before)] = before
+            patched[offset:offset+len(after)] = after
+        original, patched = bytes(original), bytes(patched)
+        with patch.object(hacktiv8, 'LOCKDOWN_435_ORIGINAL', hashlib.sha256(original).hexdigest()), \
+             patch.object(hacktiv8, 'LOCKDOWN_435_PATCHED', hashlib.sha256(patched).hexdigest()), \
+             patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new)), \
+             patch.object(hacktiv8, 'verify'):
+            for product in ('iPhone2,1', 'iPhone3,1', None):
+                for sign in (True, False):
+                    self.assertEqual(hacktiv8.patch_lockdownd(original, product, '8L1', sign=sign),
+                                     (patched, 0xbb0e, True))
+                    self.assertEqual(hacktiv8.patch_lockdownd(patched, product, '8L1', sign=sign),
+                                     (patched, 0xbb0e, False))
+            with self.assertRaisesRegex(ValueError, 'does not recognize'):
+                hacktiv8.patch_lockdownd(original+b'x', 'iPhone2,1', '8L1')
+            with patch.object(hacktiv8, 'rehash_adhoc', return_value=b'wrong'):
+                with self.assertRaisesRegex(ValueError, 'qualified result'):
+                    hacktiv8.patch_lockdownd(original, 'iPhone2,1', '8L1')
+
+    def test_setup_absence_is_only_accepted_before_ios5(self):
+        image = Mock()
+        for release in ('4.0', '4.2.1', '4.3.5', '5.0', '5.1.1', '6.1.3', '7.1.2', '8.3'):
+            image.ls.return_value = []
+            if release.startswith('4.'):
+                hacktiv8._require_setup(image, release)
+            else:
+                with self.assertRaisesRegex(ValueError, 'Setup.app'):
+                    hacktiv8._require_setup(image, release)
+            for mode in (stat.S_IFREG, stat.S_IFLNK):
+                image.ls.return_value = [dict(name='Setup.app', mode=mode | 0o755)]
+                with self.assertRaisesRegex(ValueError, 'Setup.app'):
+                    hacktiv8._require_setup(image, release)
+            image.ls.return_value = [dict(name='Setup.app', mode=stat.S_IFDIR | 0o755)]
+            hacktiv8._require_setup(image, release)
+
+    def test_ios4_install_and_readback_without_setup(self):
+        files = {hacktiv8.LOCKDOWN: stock_lockdownd(),
+                 '/System/Library/CoreServices/SystemVersion.plist': plistlib.dumps(
+                     dict(ProductVersion='4.3.5', ProductBuildVersion='8L1'))}
+        image = Mock()
+        image.read.side_effect = files.__getitem__
+        image.add.side_effect = lambda path, data, **kwargs: files.__setitem__(path, data)
+        image.ls.side_effect = lambda path: [
+            dict(name=Path(name).name, mode=stat.S_IFREG | 0o755, uid=0, gid=0)
+            for name in files if str(Path(name).parent) == path]
+        report = hacktiv8.install(image, '4.3.5', 'iPhone2,1', '8L1')
+        hacktiv8.verify_installed(image, report, '4.3.5', 'iPhone2,1')
+        self.assertEqual(hacktiv8.install(image, '4.3.5', 'iPhone2,1', '8L1'), report)
+        image.command.assert_not_called()
+        self.assertFalse(any(name.startswith(hacktiv8.SETUP) for name in files))
+        with self.assertRaisesRegex(ValueError, 'Setup.app'):
+            hacktiv8.verify_installed(image, report, '5.1.1', 'iPhone2,1')
+
+
 class Selection(unittest.TestCase):
     def test_techniques_cover_hacktiv8_ranges(self):
         cases = [
@@ -219,6 +278,17 @@ ipsw_hacktiv8_option
 echo "$ipsw_hacktiv8:$ipsw_jailbreak"
 ''')
             self.assertIn('1:1', result)
+
+    def test_ios4_menu_does_not_claim_setup_is_present(self):
+        result = self.shell(self.function('ipsw_hacktiv8_option') + '''
+input() { :; }; print() { echo "$*"; }
+python3() { echo lockdownd-patch; }
+select_yesno() { echo "$1"; return 1; }
+device_proc=3; device_target_vers=4.3.5; device_target_build=8L1
+ipsw_hacktiv8_option
+''')
+        self.assertIn('Apply Hacktiv8?', result)
+        self.assertNotIn('keep Setup.app', result)
 
     def test_deferred_payload_uses_bundled_arm_helper(self):
         report = dict(method='mobilegestalt-flag', target=hacktiv8.GESTALT_OLD,

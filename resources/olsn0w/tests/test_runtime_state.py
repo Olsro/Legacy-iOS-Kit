@@ -14,9 +14,54 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import common
 import firmware
 import restore_run
-from activation import ActivationPending
+from activation import ActivationPending, SavedActivationRestored, ActivationRequiresInput
 
 class DistributedState(unittest.TestCase):
+    def test_restored_certificate_is_not_reinstalled_or_assumed_activated(self):
+        report=dict(setup_app_removed=False,product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+                    identity={'board':'p101ap','product':'iPad3,4','ecid':123},
+                    activation_mode='official-on-target')
+        jobs=('P101AP\n11D257\nselected\nCYDIA_READY:selected\nBOOT_SUCCESS:selected\n'
+              '10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n'
+              '- 0 com.apple.accountsd\n- 0 com.apple.managedconfiguration.profiled\n')
+        replies=[]
+        for state in ('Unactivated','Unactivated','Activated'):
+            values=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
+                                      BuildVersion='11D257',ActivationState=state))
+            replies.extend([subprocess.CompletedProcess([],0,jobs.encode(),b''),
+                            subprocess.CompletedProcess([],0,values,b'')])
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run.subprocess,'run',side_effect=replies), \
+             patch.object(restore_run.time,'sleep'), \
+             patch.object(restore_run.time,'monotonic',side_effect=range(0,1000,20)), \
+             patch('activation.activate',side_effect=[SavedActivationRestored('reloading'),
+                    ActivationPending('not ready')]) as activate, \
+             patch('activation.acknowledge',return_value={'acknowledged':True}) as acknowledge:
+            result=restore_run.qualify(Path(work),['ssh'],'fixture',timeout=1000,progress=lambda _:None)
+            self.assertEqual(result['activation_state'],'Activated')
+            self.assertEqual(activate.call_count,2)
+            self.assertTrue(activate.call_args_list[0].kwargs['try_saved'])
+            self.assertFalse(activate.call_args_list[1].kwargs['try_saved'])
+            self.assertEqual(activate.call_args_list[0].kwargs['target_prefix'],['ssh'])
+            acknowledge.assert_called_once()
+
+    def test_account_challenge_stops_qualification_without_retry(self):
+        report=dict(setup_app_removed=False,product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
+                    identity={'board':'p101ap','product':'iPad3,4','ecid':123},
+                    activation_mode='official-on-target')
+        values=plistlib.dumps(dict(ProductType='iPad3,4',ProductVersion='7.1.2',
+                                  BuildVersion='11D257',ActivationState='Unactivated'))
+        with tempfile.TemporaryDirectory() as work, \
+             patch.object(restore_run,'checked_manifest',return_value=report), \
+             patch.object(restore_run.subprocess,'run',side_effect=[
+                 subprocess.CompletedProcess([],1,b'',b''),subprocess.CompletedProcess([],0,values,b'')]), \
+             patch('activation.activate',side_effect=ActivationRequiresInput('owner input')) as activate:
+            with self.assertRaises(ActivationRequiresInput):
+                restore_run.qualify(Path(work),['ssh'],'fixture',progress=lambda _:None)
+            activate.assert_called_once()
+            self.assertFalse((Path(work)/'qualification.json').exists())
+
     def test_central_qualification_waits_for_pangu_without_rebooting(self):
         result_record={'writable_root_verified':True}
         with patch.object(restore_run,'qualify',return_value=result_record) as qualify:

@@ -78,6 +78,16 @@ class LivePatchTests(unittest.TestCase):
         self.assertIs(cache[hacktiv8.GESTALT_KEY], True)
         self.assertNotIn('/sbin/mount -u -w /', connection.commands)
 
+    def test_ios4_live_does_not_require_absent_setup(self):
+        connection = FakeConnection('4.3.5', '8L1')
+        with tempfile.TemporaryDirectory() as folder:
+            report = live.apply(connection, Path(folder), 'iPhone4,1', '4.3.5', '8L1')
+        self.assertTrue(report['verified'])
+        self.assertNotIn('test -d /Applications/Setup.app', connection.commands)
+        self.assertIn('test -d /Applications/Setup.app || '
+                      '{ test ! -e /Applications/Setup.app && test ! -L /Applications/Setup.app; }',
+                      connection.commands)
+
     def test_backup_conflict_never_overwrites_target_or_backup(self):
         connection = FakeConnection()
         connection.files[hacktiv8.LOCKDOWN_BACKUP] = b'earlier backup'

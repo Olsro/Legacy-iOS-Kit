@@ -14,7 +14,15 @@ class ActivationPending(RuntimeError):
     """The selected target is valid, but Apple's activation is not ready yet."""
 
 
-def activate(udid, identity, log):
+class ActivationRequiresInput(RuntimeError):
+    """A server challenge requires the owner's intervention, not polling."""
+
+
+class SavedActivationRestored(ActivationPending):
+    """The signed file was restored; the reloaded daemon must still accept it."""
+
+
+def activate(udid, identity, log, *, try_saved=True, target_prefix=None):
     """Ask the Kit to perform official activation on the installed target."""
     if not re.fullmatch(r'[0-9a-fA-F]{40}',udid):raise ValueError('Invalid USB identity')
     def query():
@@ -24,16 +32,39 @@ def activate(udid, identity, log):
         if values.get('UniqueChipID') != identity['ecid'] or values.get('ProductType') != identity['product']:
             raise ValueError('Activation device identity differs')
         return values
-    if query().get('ActivationState') == 'Activated':return
+    values=query()
+    if values.get('ActivationState') == 'Activated':return
+    path=Path(log)
+    if try_saved:
+        from saved_activation import backup_path, load, install
+        archive=backup_path(identity)
+        if archive.exists() or archive.is_symlink():
+            # The RAM rescue can advertise a synthetic USB serial. Bind the
+            # certificate to the real target UDID, not that transport serial.
+            record, _=load(archive,identity,values.get('UniqueDeviceID'))
+            if target_prefix is None:
+                raise ActivationPending('Waiting for authenticated target SSH to restore the saved activation record')
+            with path.open('ab') as stream:
+                stream.write(b'\nRestoring the saved official activation record; awaiting lockdownd readback.\n')
+            from common import profile
+            install(target_prefix,record,has_baseband=profile(identity['product'])['has_baseband'])
+            # A cached certificate is bound to an earlier ActivationRandomness.
+            # Restore its signed file rather than submit it as a new Activate
+            # response. Never carry over old data_ark activation-state flags.
+            raise SavedActivationRestored('Saved record restored; waiting for lockdownd to validate it')
     result=subprocess.run([str(tools()/'ideviceactivation'),'activate','-u',udid,'-b'],
                           capture_output=True,timeout=120)
     # Keep every response: early iOS first boots can expose lockdownd shortly
     # before it is able to create an activation request, and a later retry can
     # then succeed without any change to the installed system.
-    path=Path(log)
     with path.open('ab') as stream:
         if stream.tell():stream.write(b'\n')
         stream.write(result.stdout+result.stderr)
+    response=(result.stdout+result.stderr).lower()
+    if (b'activation lock' in response or b'server requires input' in response):
+        raise ActivationRequiresInput(
+            'Apple activation requires owner input; automatic retries stopped. '
+            'Use the associated Apple account to complete activation. See activation.log')
     if result.returncode or query().get('ActivationState') != 'Activated':
         raise ActivationPending('Official target activation is not ready yet')
 

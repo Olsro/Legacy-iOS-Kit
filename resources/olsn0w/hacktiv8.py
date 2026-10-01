@@ -34,6 +34,18 @@ HELPER_SHA256 = 'c4a693b6610c176319a1e1e126cad1df0806893cb628fc52adfd556c9150bef
 LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
 LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
+# Byte-for-byte reproduction of Down_iPhone2,1_4.3.5_8L1.bundle/lockdownd.patch.
+# Match the entire executable, not a model name or an assumed instruction offset.
+# The historical recipe also changes LC_UUID and CoreLocation's linked version.
+LOCKDOWN_435_ORIGINAL = 'c4988d95fa560f2711fc553659d40254a2eb17b8694e9bc6f9f0a04706ec1635'
+LOCKDOWN_435_PATCHED = '2ab13d63d380d5fdcc44f859318ce9a4bde163e03365c93f3ce1ab8fe3fa83ce'
+LOCKDOWN_435_EDITS = (
+    (0x570, bytes.fromhex('1c7f2b41744c35dc92f679e90a73e240'),
+     bytes.fromhex('198056d75a8038c8ba5013c52760e06b')),
+    (0x951, b'\x1d', b'\x1b'),
+    (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+)
+
 LOCKDOWN_PATCHES = (
     (
         [
@@ -71,6 +83,20 @@ def _patched_signature(signature, replacements):
 
 
 def patch_lockdownd(data, product=None, build=None, *, sign=False):
+    checksum = hashlib.sha256(data).hexdigest()
+    if checksum == LOCKDOWN_435_PATCHED:
+        verify(data)
+        return bytes(data), 0xbb0e, False
+    if checksum == LOCKDOWN_435_ORIGINAL:
+        changed = bytearray(data)
+        for offset, original, replacement in LOCKDOWN_435_EDITS:
+            if changed[offset:offset+len(original)] != original:
+                raise ValueError('Unexpected 4.3.5 lockdownd bytes')
+            changed[offset:offset+len(original)] = replacement
+        result = rehash_adhoc(data, changed)
+        if hashlib.sha256(result).hexdigest() != LOCKDOWN_435_PATCHED:
+            raise ValueError('Legacy 4.3.5 patch does not match the qualified result')
+        return result, 0xbb0e, True
     if product in ('iPhone2,1', 'iPhone4,1') and build == '9B206':
         checksum = hashlib.sha256(data).hexdigest()
         if checksum == LOCKDOWN_511_PATCHED:
@@ -237,9 +263,13 @@ def _identity(image, release, build):
         raise ValueError('Hacktiv8 target filesystem differs from the selected release')
 
 
-def _require_setup(image):
+def _require_setup(image, release):
     matches = [item for item in image.ls('/Applications')
                if item['name'] == 'Setup.app']
+    # Stock iOS 4 has no on-device Setup Assistant. Do not require a directory
+    # that never existed; still reject malformed entries and missing iOS 5+ Setup.
+    if not matches and version(release) < (5,):
+        return
     if len(matches) != 1 or not stat.S_ISDIR(matches[0]['mode']):
         raise ValueError('Hacktiv8 requires Setup.app to be preserved')
 
@@ -250,7 +280,7 @@ def install(image, release, product, build=None):
     if method is None:
         remove_setup_application(image, required=False)
         return None
-    _require_setup(image)
+    _require_setup(image, release)
     if method == 'lockdownd-patch':
         entries = {item['name']: item for item in image.ls('/usr/libexec')}
         if 'lockdownd' not in entries or not stat.S_ISREG(entries['lockdownd']['mode']):
@@ -319,8 +349,7 @@ def verify_installed(image, report, release, product):
     if method not in ('lockdownd-patch', 'mobilegestalt-profile',
                       'mobilegestalt-flag'):
         raise ValueError('Invalid Hacktiv8 report')
-    if not setup_present:
-        raise ValueError('Hacktiv8 requires Setup.app to be preserved')
+    _require_setup(image, release)
     if method == 'lockdownd-patch':
         current = image.read(LOCKDOWN)
         original = image.read(LOCKDOWN_BACKUP)
@@ -428,7 +457,7 @@ def main():
             print(selected)
         elif args.ipsw and args.build:
             report = patch_ipsw(args.ipsw, args.version, args.product, args.build)
-            print(('Hacktiv8 applied; Setup.app preserved.' if report else
+            print(('Hacktiv8 applied; Setup.app left unchanged.' if report else
                    'Setup.app removed; Hacktiv8 unavailable for this device/build.'))
         else:
             parser.error('Expected --check or --ipsw with --build')

@@ -117,7 +117,11 @@ def apply(connection, directory, product, release, build):
         raise ValueError('SSH target system differs from the selected release')
     if connection.run('/usr/sbin/sysctl -n hw.machine').strip().decode() != product:
         raise ValueError('SSH target model differs from selection')
-    connection.run('test -d /Applications/Setup.app')
+    if hacktiv8.version(release) >= (5,):
+        connection.run('test -d /Applications/Setup.app')
+    else:
+        connection.run('test -d /Applications/Setup.app || '
+                       '{ test ! -e /Applications/Setup.app && test ! -L /Applications/Setup.app; }')
     target = hacktiv8.LOCKDOWN if method == 'lockdownd-patch' else hacktiv8._gestalt_target(release)
     original = connection.read(target)
     (directory/'original').write_bytes(original)
@@ -188,7 +192,7 @@ def main():
             return
         require_identity(device_info(args.udid), args.product, args.version, args.build, args.udid)
         result = apply(connection, directory, args.product, args.version, args.build)
-        print('Hacktiv8 file patch verified; Setup.app preserved.', flush=True)
+        print('Hacktiv8 file patch verified; Setup.app left unchanged.', flush=True)
         if not result['changed']:
             print('Already applied; no restart requested.')
             return

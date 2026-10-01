@@ -552,6 +552,22 @@ for deferred iOS 7 services to be registered, and for the modem on cellular
 models. It verifies Apple activation and acknowledges it over the selected USB
 connection before reporting success. SpringBoard alone is not sufficient.
 
+For official activation, olsn0w first looks for the Kit backup at
+`saved/<ProductType>/activation-<ECID>.tar`. After the target boots, it checks
+the saved AccountToken against the real device UDID and product, and checks
+the connected device's ECID. This also works when the DFU rescue used a
+synthetic USB serial. The original signed record is restored over authenticated
+target SSH and lockdownd is restarted (the device is not rebooted);
+old `data_ark`, pairing and radio preferences are not copied over the new Data
+volume. Only an `Activated` readback counts as success. Missing or rejected
+records fall back to official online activation; malformed or mismatched
+backups stop with an error. Setup-removal/Hacktiv8 modes still skip activation.
+An Apple account challenge stops automatic retries and requires owner input;
+a saved certificate does not guarantee acceptance or remove Activation Lock.
+This saved-record path was verified on iPod touch 5G with target 6.1.3: the
+unchanged certificate was accepted after daemon reload, without online
+activation or a device reboot. Other models/releases still require validation.
+
 ## Firmware selection and qualification
 
 The catalog follows releases available for the complete 32-bit iOS 8.4.1 OTA

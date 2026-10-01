@@ -6788,9 +6788,14 @@ ipsw_hacktiv8_option() {
         --product "$device_type" --version "$device_target_vers" \
         --build "$device_target_build" 2>/dev/null)
     if [[ -n $hacktiv8_method ]]; then
-        print "* Apply Hacktiv8 to the target filesystem and keep Setup.app."
+        if [[ $device_target_vers == 4.* ]]; then
+            print "* Apply Hacktiv8 to the target filesystem. Stock iOS 4 has no Setup.app."
+            setup_question="Apply Hacktiv8?"
+        else
+            print "* Apply Hacktiv8 to the target filesystem and keep Setup.app."
+            setup_question="Apply Hacktiv8 and keep Setup.app?"
+        fi
         print "* Hacktiv8 requires the jailbreak for this restore, which will be enabled."
-        setup_question="Apply Hacktiv8 and keep Setup.app?"
     else
         print "* Hacktiv8 does not support this iOS/device/build."
         print "* Setup.app can still be removed without applying Hacktiv8."

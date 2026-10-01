@@ -2,7 +2,7 @@
 
 Open **Misc Utilities → hactiv8**, next to **Attempt Activation**, with the
 device connected in normal mode. This utility is independent of olsn0w restores.
-It keeps Setup.app and applies the existing Hacktiv8 recipe to the installed OS;
+It leaves Setup.app unchanged and applies the existing Hacktiv8 recipe to the installed OS;
 it does not restore or erase the device. Hacktiv8 is not official activation,
 a carrier unlock or an Apple account unlock.
 
@@ -31,7 +31,19 @@ keep them private and retain them for recovery.
 
 iOS 4–6 uses the existing lockdownd signature recipe, with code-page hashes
 updated while preserving the original Apple ad-hoc signature metadata and
-entitlements. The iPhone 3GS and 4S 5.1.1/9B206 share an exact SHA-256-pinned
+entitlements. Stock iOS 4 has no Setup.app; image preparation and the live
+utility allow its absence there, but still require its preservation on iOS 5+.
+The 3GS 4.3.5/8L1 executable uses a SHA-256-pinned reproduction of
+`Down_iPhone2,1_4.3.5_8L1.bundle/lockdownd.patch`, including its UUID and
+CoreLocation linked-version changes. The full original and patched executable
+hashes and signed pages are checked; no unknown binary can borrow its offsets.
+On 2026-09-29, both the stock and custom 3GS 8L1 filesystems were checked:
+neither contains Setup.app and both contain the same original lockdownd.
+A disposable custom IPSW passed full patching, DMG/ZIP reconstruction and
+readback, with the exact historical result, original backup, correct metadata,
+idempotent reapplication and all 27 non-root archive entries unchanged. This
+validates preparation only, not restoration or activation on hardware.
+The iPhone 3GS and 4S 5.1.1/9B206 share an exact SHA-256-pinned
 case, reproduced byte-for-byte from the Kit's historic
 `Down_iPhone2,1_5.1.1_9B206.bundle/lockdownd.patch`; it is never applied by offset
 to an unknown binary. iOS 7/8 uses the MobileGestalt flag or a bundled exact

@@ -161,6 +161,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
     cydia_start_attempted=False
     startup_error=None
     activation_attempts=0;next_activation_attempt=started
+    saved_activation_restored=False
     pangu_readonly_polls=0;untether_retry_rebooted=False
     progress('Waiting for iOS '+report['version']+' to start. The Apple logo can change and the display can go black during the boot handoff; keep the cable connected.')
     command=('/usr/sbin/sysctl -n hw.model; /usr/sbin/sysctl -n kern.osversion; '
@@ -270,13 +271,18 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
             if (not activation_skipped and baseband_ready and
                     values.get('ActivationState')!='Activated' and
                     report.get('activation_mode')=='official-on-target'):
-                from activation import ActivationPending, activate
+                from activation import ActivationPending, SavedActivationRestored, activate
                 if time.monotonic()>=next_activation_attempt:
                     if activation_attempts==0:
                         progress('Completing official activation through the connected computer.')
                     try:
-                        activate(udid,report['identity'],bundle/'activation.log')
-                    except ActivationPending:
+                        activate(udid,report['identity'],bundle/'activation.log',
+                                 try_saved=not saved_activation_restored,
+                                 target_prefix=prefix if ssh_reachable else None)
+                    except ActivationPending as pending:
+                        if isinstance(pending,SavedActivationRestored):
+                            saved_activation_restored=True
+                            progress('Saved official activation record restored. Waiting for iOS to validate it.')
                         activation_attempts+=1
                         next_activation_attempt=time.monotonic()+10
                     else:
