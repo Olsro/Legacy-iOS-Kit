@@ -14,7 +14,7 @@ from compact_cache import write_sparse
 from common import KIT, MODELS, digest, profile, run, tools
 from hfs import HFS
 from img3 import img3
-from signing import rehash_adhoc, resign, verify
+from signing import resign, verify
 from system import entry, add_parents
 
 STOCK_FILES = '''bin/launchctl sbin/fsck sbin/launchd sbin/mount
@@ -115,11 +115,9 @@ def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
         if not stat.S_ISREG(record['mode']):
             raise ValueError('Expected a stock regular file: '+name)
         data = stock.read('/'+name)
-        # ARMv7 now retains the complete ObjC/LINKEDIT metadata: stock signed
-        # launchd is essential for normal entry. Keep the qualified A6 path.
-        if name == 'sbin/launchd' and architecture == 'armv7s':
-            data = rehash_adhoc(data, binary_launchd_bootstrap(data))
-            (destination/'launchd').write_bytes(data)
+        # launchd must retain its Apple signature before the bootstrap untether
+        # can run. Rehashing its embedded plist strands a normal ARMv7s boot;
+        # USB boots with AMFI disabled can hide that failure.
         if name == 'System/Library/CoreServices/SystemVersion.plist':
             data = plistlib.dumps(plistlib.loads(data),fmt=plistlib.FMT_BINARY,sort_keys=False)
         payload[name] = entry(name, data, stat.S_IMODE(record['mode']))
@@ -268,7 +266,7 @@ UsePrivilegeSeparation no
         relay_policy=('a5-two-image-relative-wake' if a5_boot else 'a6-contiguous'),
         kernel_policy=('stock-encrypted-a5' if a5_boot else 'relay-admitted-plaintext'),
         kernel_sha256=hashlib.sha256(kernel).hexdigest(),
-        autoboot_policy='persistent-enable',
+        autoboot_policy='persistent-enable',launchd_policy='stock-signed',
         target_rearm_required=False,source_packages=provenance,root=image.info(),var=var_image.info(),
         files={p.name:digest(p) for p in (root,var,archive)},physical_boot_verified=False)
     (destination/'manifest.json').write_text(json.dumps(report,indent=2)+'\n')

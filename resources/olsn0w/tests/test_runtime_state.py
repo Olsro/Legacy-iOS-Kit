@@ -17,6 +17,44 @@ import restore_run
 from activation import ActivationPending, SavedActivationRestored, ActivationRequiresInput
 
 class DistributedState(unittest.TestCase):
+    def test_stale_usb_pairing_is_renewed_without_bypassing_qualification(self):
+        report=dict(product='iPad3,4',version='6.1.3',build='10B329',generation='selected',
+                    identity={'board':'p101ap'},activation_mode='skipped-setup-removed',
+                    setup_app_removed=True)
+        jobs=(b'P101AP\n10B329\nselected\nCYDIA_READY:selected\nBOOT_SUCCESS:selected\n'
+              b'10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n')
+        stale=subprocess.CompletedProcess([],1,b'',b'Invalid HostID (-21)')
+        ready=subprocess.CompletedProcess([],0,jobs,b'')
+        paired=subprocess.CompletedProcess([],0,b'SUCCESS: Paired with device fixture\n',b'')
+        for product in ('iPad3,4','iPad2,5',None):
+            with self.subTest(product=product),tempfile.TemporaryDirectory() as work:
+                values=plistlib.dumps(dict(ProductType=product or 'iPad3,4',
+                    ProductVersion='6.1.3',BuildVersion='10B329',ActivationState='Unactivated'))
+                replies=[ready,stale,paired]
+                if product is not None:
+                    replies.extend([ready,subprocess.CompletedProcess([],0,values,b'')])
+                notices=[]
+                with patch.object(restore_run,'checked_manifest',return_value=report), \
+                     patch.object(restore_run.subprocess,'run',side_effect=replies) as command, \
+                     patch.object(restore_run.time,'sleep'):
+                    if product is None:
+                        # Even a successful pair command is not target proof.
+                        with self.assertRaisesRegex(RuntimeError,'Trust This Computer'):
+                            restore_run.qualify(Path(work),['ssh'],'fixture',timeout=0,
+                                                progress=notices.append)
+                    elif product!='iPad3,4':
+                        with self.assertRaisesRegex(ValueError,'different target'):
+                            restore_run.qualify(Path(work),['ssh'],'fixture',progress=notices.append)
+                    else:
+                        result=restore_run.qualify(Path(work),['ssh'],'fixture',progress=notices.append)
+                        self.assertTrue(result['normal_boot_verified'])
+                pair_commands=[c.args[0] for c in command.call_args_list
+                               if Path(c.args[0][0]).name=='idevicepair']
+                self.assertEqual(pair_commands,[[str(common.tools()/'idevicepair'),'-u','fixture','pair']])
+                self.assertTrue(any('Trust This Computer' in notice for notice in notices))
+                self.assertIn('Invalid HostID',(Path(work)/'pairing.log').read_text())
+                self.assertEqual((Path(work)/'qualification.json').exists(),product=='iPad3,4')
+
     def test_restored_certificate_is_not_reinstalled_or_assumed_activated(self):
         report=dict(setup_app_removed=False,product='iPad3,4',version='7.1.2',build='11D257',generation='selected',
                     identity={'board':'p101ap','product':'iPad3,4','ecid':123},

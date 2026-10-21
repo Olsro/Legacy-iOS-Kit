@@ -62,6 +62,34 @@ restore archives and working images. A failure at any earlier stage preserves it
 complete session for diagnosis. Mutable HFS working images use filesystem
 copy-on-write clones where the host supports them, with an ordinary copy fallback.
 
+## Enable network SSH after restoration
+
+With the restored device booted normally and connected by USB, select **Misc
+Utilities → Configure olsn0w restored device for SSH external access**. This
+enables OpenSSH on all network interfaces (IPv4/IPv6), port 22, with username `root` and password
+`alpine`. The existing olsn0w USB key remains accepted. Only the root password is
+reset; the mobile account is unchanged.
+
+Use the same Kit folder that performed the restoration: the option finds the
+device-bound target keys under `saved/olsn0w/sessions/`, verifies the selected
+device and installed generation, backs up both SSH configurations and the root
+password file on the device, validates the new configuration, and restarts the
+SSH service. If Cydia's standard OpenSSH service is already loaded, the option
+uses it and disables the duplicate olsn0w listener; both configuration files
+retain the olsn0w key. Otherwise it restarts the olsn0w service. Success requires
+fresh root logins with the password and with the existing key.
+The device's Wi-Fi address is displayed when available. No reboot is required.
+
+The equivalent command is:
+
+```sh
+./restore.sh --olsn0w configure-ssh --product iPad2,5 --udid "$UDID"
+```
+
+For a target bundle saved elsewhere, append `--bundle "$BUNDLE"`. The backups
+remain in `/var/lib/olsn0w/ssh-external-*` on the device. A normal restoration
+continues to use USB-only, key-authenticated SSH until this option is selected.
+
 ## Reinstall a provisioned device
 
 After preparing the firmware/system, supply the selected device's session and
@@ -297,7 +325,13 @@ package directories and file replacements retain their package metadata.
 
 On iOS 7 and 8, the untether's post-patch service load goes through an idempotent job loader. It reads
 each XML or binary plist's actual `Label` and queries launchd before loading it;
-registered jobs are left intact even when they have no running PID. Legacy
+registered jobs are left intact even when they have no running PID. Other
+jobs disabled in their plist or launchd's persistent overrides are skipped;
+an explicit persistent enable overrides the plist default. A disabled, absent
+job must not be submitted and turn `nothing found to load` into a failed
+untether handoff. This also preserves the deliberate disabling of the bundled
+SSH service when the separately installed OpenSSH service owns port 22.
+System recipe 47 rebuilds prepared images with this loader correction. Legacy
 `launchctl load` can unlink a live Unix socket before rejecting a duplicate job,
 breaking local activation queries and DNS while USB access still works. Query
 failures are reported without attempting another load. The firmware's
@@ -366,7 +400,7 @@ see `resources/jailbreak/olsro/README.md` for the common payload and cache polic
 This is prepared offline because the Pangu
 path can still have a read-only System volume when `firmware.sh` runs. A failed
 `firmware.sh` no longer publishes a successful Cydia marker.
-For iOS 7.1.x outside the iPod touch 5G and iPhone 4S, the restore recipe uses the Pangu untether already bundled and used
+For iOS 7.1 profiles which do not select Aquila below, the restore recipe uses the Pangu untether already bundled and used
 by Legacy iOS Kit, selecting its checked ARMv7 slice and retargeting it to the
 chosen root volume. Its original launch service and the stock daemon layout are
 retained, matching the Kit's A5X/A6X fallback instead of applying Aquila's daemon
@@ -389,9 +423,23 @@ Two normal boots and Cydia package installation were verified on the iPod under
 7.1.2. The 4S was subsequently restored to 7.1.2 with user-confirmed working
 interface and Cydia. Cold/forced-reset behavior and other 7.1 releases are not
 qualified by those tests. The 4S multipatch/baseband path is unchanged.
-Other devices and iOS 6/7.0/8 retain their existing recipes.
+Apart from the N42 qualification below, other devices and iOS 6/7.0/8 retain their existing recipes.
 The guided flow rebuilds recipe-38 System caches automatically. This does not
 modify already restored devices, the activation choice or Cydia sources.
+
+System recipe 48 also selects Aquila for iPhone5,2 (N42) on iOS 7.1.2
+(`11D257`). Pangu could reach its completion endpoint yet leave the selected
+System volume read-only on a later normal reboot, blocking package installs.
+That remount failure recurred after correcting disabled-job handling. The N42
+profile uses the same native iOS 7.1 Aquila job and stock daemon/keybag layout,
+with its own board's 128 MiB jetsam allowance. On the existing N42 installation,
+three consecutive normal boots verified writable System, selected Data generation,
+SpringBoard, Cydia initialization and boot-success; installing and purging a
+temporary package through dpkg after the third boot also passed. The user then
+confirmed successful package installation from Cydia. Pangu's startup job was
+preserved outside LaunchDaemons for rollback. This profile
+change is limited to iPhone5,2 on 7.1.2; iPhone5,1 and N42 7.1/7.1.1 keep their
+existing untether selection.
 
 System recipe 40 validates the pre-relocation LaunchDaemons against the exact
 prepared overlay, including the boot-success job and optional Hacktiv8 job.
@@ -526,7 +574,13 @@ merely because its architecture and build match. The ARMv7 recipe retains the
 missing Objective-C selectors, cached libutil and complete retained-image
 LINKEDIT metadata. Its 2,946 retained executable pages are compared byte-for-byte
 with stock; dispatch releases are no longer patched. ARMv7 uses stock signed
-launchd. The ARMv7s cache and launchd transformation are unchanged.
+launchd. ARMv7s now also retains the exact stock signed launchd, including its
+embedded XML bootstrap plist. Converting that plist and rehashing the executable
+stalled a normal iPhone5,2 bootstrap before its writable logs or USB services
+started. A diagnostic USB boot with AMFI disabled masked the problem and reached
+iOS 7.1.2. Replacing only launchd with the stock executable, then restoring empty
+boot arguments, allowed an ordinary reboot into iOS 7.1.2 on the same installation.
+The ARMv7s shared-cache recipe is unchanged.
 
 Automatic A5 preparation now packages the qualified two-image `multi_kloader`,
 independently checked raw iBSS and plaintext IMG3 iBEC, and the native kernel
@@ -554,7 +608,7 @@ connection before reporting success. SpringBoard alone is not sufficient.
 
 For official activation, olsn0w first looks for the Kit backup at
 `saved/<ProductType>/activation-<ECID>.tar`. After the target boots, it checks
-the saved AccountToken against the real device UDID and product, and checks
+the saved AccountToken against the real device UDID and, when present, product, and checks
 the connected device's ECID. This also works when the DFU rescue used a
 synthetic USB serial. The original signed record is restored over authenticated
 target SSH and lockdownd is restarted (the device is not rebooted);
@@ -567,6 +621,9 @@ a saved certificate does not guarantee acceptance or remove Activation Lock.
 This saved-record path was verified on iPod touch 5G with target 6.1.3: the
 unchanged certificate was accepted after daemon reload, without online
 activation or a device reboot. Other models/releases still require validation.
+Older Apple tokens without `ProductType` are accepted only when their required
+UDID matches the observed target. An explicitly different product is rejected;
+the connected device's product and ECID checks remain mandatory.
 
 ## Firmware selection and qualification
 

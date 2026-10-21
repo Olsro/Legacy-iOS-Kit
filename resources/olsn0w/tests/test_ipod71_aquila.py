@@ -1,4 +1,4 @@
-"""Keep the iPod/4S Aquila recipe separate from the iOS 7.0 layout."""
+"""Keep qualified native iOS 7.1 Aquila profiles separate from the 7.0 layout."""
 import plistlib
 from pathlib import Path
 import subprocess
@@ -20,16 +20,19 @@ class IPodAquila(unittest.TestCase):
                             '8.0', '8.1.3', '8.3', '8.4.1'):
                 with self.subTest(product=product, release=release):
                     stock = release.startswith('7.1')
+                    native_aquila = (product in {'iPod5,1', 'iPhone4,1'} or
+                                     (product == 'iPhone5,2' and release == '7.1.2'))
                     expected = ('everuntether' if release.startswith('8.') else
-                                'panguaxe' if stock and product not in {'iPod5,1', 'iPhone4,1'} else 'aquila')
+                                'panguaxe' if stock and not native_aquila else 'aquila')
                     self.assertEqual(system.selected_untether(release, product), expected)
                     self.assertEqual(system.uses_stock_daemon_layout(release), stock)
 
     def test_payload_changes_only_the_untether_and_native_trigger(self):
-        before, _ = system.jailbreak_payload('7.1.2', 'iPhone5,2')
+        before, _ = system.jailbreak_payload('7.1.2', 'iPhone5,1')
         with patch.object(system, 'ios7_payload', return_value=(b'pinned-aquila', {'release': '2.1.1'})):
-            for product, release in ((p, r) for p in ('iPod5,1', 'iPhone4,1')
-                                     for r in ('7.1', '7.1.1', '7.1.2')):
+            profiles = [(p, r) for p in ('iPod5,1', 'iPhone4,1')
+                        for r in ('7.1', '7.1.1', '7.1.2')] + [('iPhone5,2', '7.1.2')]
+            for product, release in profiles:
                 after, provenance = system.jailbreak_payload(release, product)
                 self.assertEqual(set(before) - set(after), {
                     'panguaxe', 'System/Library/LaunchDaemons/io.pangu.axe.untether.plist'})

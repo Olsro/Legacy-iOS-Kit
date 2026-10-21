@@ -1,4 +1,4 @@
-"""Check registration handling without treating query errors as absent jobs."""
+"""Check job registration and the precedence of persistent Disabled overrides."""
 from pathlib import Path
 import platform
 import shutil
@@ -8,7 +8,7 @@ import unittest
 
 
 class JobRegistration(unittest.TestCase):
-    def test_registered_absent_and_failed_queries(self):
+    def test_registration_errors_and_persistent_disabled_overrides(self):
         compiler = shutil.which('cc')
         if not compiler:
             self.skipTest('A C compiler is required')

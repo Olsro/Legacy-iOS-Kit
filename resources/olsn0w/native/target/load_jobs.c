@@ -16,6 +16,8 @@ extern int *__error(void);
 extern void *CFDataCreate(const void *, const unsigned char *, index_t);
 extern void *CFPropertyListCreateWithData(const void *, const void *, usize, void *, void *);
 extern usize CFGetTypeID(const void *), CFDictionaryGetTypeID(void), CFStringGetTypeID(void);
+extern usize CFBooleanGetTypeID(void);
+extern unsigned char CFBooleanGetValue(const void *);
 extern const void *CFDictionaryGetValue(const void *, const void *);
 extern void *CFStringCreateWithCString(const void *, const char *, unsigned int);
 extern unsigned char CFStringGetCString(const void *, char *, index_t, unsigned int);
@@ -25,11 +27,40 @@ extern unsigned char launch_data_dict_insert(void *, const void *, const char *)
 extern void launch_data_free(void *);
 extern int launch_data_get_type(const void *), launch_data_get_errno(const void *);
 
-static int label_for(const char *path, char *label, usize capacity) {
-    void *file = fopen(path, "rb"), *data = 0, *plist = 0, *key = 0;
+/* launchctl's persistent Disabled override takes precedence over the plist. */
+static int disabled_for(const void *job, const void *overrides, const char *label) {
+    void *key = CFStringCreateWithCString(0, "Disabled", 0x08000100);
+    if (!key) return -1;
+    const void *value = CFDictionaryGetValue(job, key);
+    int disabled = 0;
+    if (value) {
+        if (CFGetTypeID(value) != CFBooleanGetTypeID()) { CFRelease(key); return -1; }
+        disabled = CFBooleanGetValue(value) != 0;
+    }
+    if (overrides) {
+        void *name = CFStringCreateWithCString(0, label, 0x08000100);
+        if (!name) { CFRelease(key); return -1; }
+        const void *entry = CFDictionaryGetValue(overrides, name);
+        CFRelease(name);
+        if (entry) {
+            if (CFGetTypeID(entry) != CFDictionaryGetTypeID()) { CFRelease(key); return -1; }
+            value = CFDictionaryGetValue(entry, key);
+            if (value) {
+                if (CFGetTypeID(value) != CFBooleanGetTypeID()) { CFRelease(key); return -1; }
+                disabled = CFBooleanGetValue(value) != 0;
+            }
+        }
+    }
+    CFRelease(key);
+    return disabled;
+}
+
+static int read_dictionary(const char *path, void **result, int optional) {
+    void *file = fopen(path, "rb"), *data = 0, *plist = 0;
     unsigned char *bytes = 0;
-    int result = -1;
-    if (!file) return -1;
+    int status = -1;
+    *result = 0;
+    if (!file) return optional && *__error() == 2 ? 0 : -1;
     if (fseek(file, 0, 2)) goto done;
     long size = ftell(file);
     if (size <= 0 || size > 4 * 1024 * 1024 || fseek(file, 0, 0)) goto done;
@@ -39,17 +70,22 @@ static int label_for(const char *path, char *label, usize capacity) {
     if (!data) goto done;
     plist = CFPropertyListCreateWithData(0, data, 0, 0, 0);
     if (!plist || CFGetTypeID(plist) != CFDictionaryGetTypeID()) goto done;
-    key = CFStringCreateWithCString(0, "Label", 0x08000100);
-    if (!key) goto done;
-    const void *value = CFDictionaryGetValue(plist, key);
-    if (value && CFGetTypeID(value) == CFStringGetTypeID() &&
-        CFStringGetCString(value, label, (index_t)capacity, 0x08000100) && label[0]) result = 0;
+    *result = plist; plist = 0; status = 0;
 done:
-    if (key) CFRelease(key);
     if (plist) CFRelease(plist);
     if (data) CFRelease(data);
     free(bytes);
     fclose(file);
+    return status;
+}
+
+static int label_for(const void *plist, char *label, usize capacity) {
+    void *key = CFStringCreateWithCString(0, "Label", 0x08000100);
+    if (!key) return -1;
+    const void *value = CFDictionaryGetValue(plist, key);
+    int result = (value && CFGetTypeID(value) == CFStringGetTypeID() &&
+                  CFStringGetCString(value, label, (index_t)capacity, 0x08000100) && label[0]) ? 0 : -1;
+    CFRelease(key);
     return result;
 }
 
@@ -76,6 +112,11 @@ static int registered(const char *label) {
 
 int main(int argc, char **argv) {
     if (argc < 2) return 0;
+    void *overrides = 0;
+    if (read_dictionary("/var/db/launchd.db/com.apple.launchd/overrides.plist", &overrides, 1)) {
+        fprintf(__stderrp, "olsn0w: cannot read launchd disabled overrides\n");
+        return 1;
+    }
     char **args = malloc(((usize)argc + 2) * sizeof(*args));
     if (!args) return 1;
     int count = 2;
@@ -83,9 +124,21 @@ int main(int argc, char **argv) {
     args[1] = "load";
     for (int i = 1; i < argc; ++i) {
         char label[1024];
-        if (label_for(argv[i], label, sizeof(label))) {
+        void *job = 0;
+        if (read_dictionary(argv[i], &job, 0) || label_for(job, label, sizeof(label))) {
             fprintf(__stderrp, "olsn0w: invalid job plist: %s\n", argv[i]);
+            if (job) CFRelease(job);
             free(args); return 1;
+        }
+        int disabled = disabled_for(job, overrides, label);
+        CFRelease(job);
+        if (disabled < 0) {
+            fprintf(__stderrp, "olsn0w: invalid disabled state: %s\n", label);
+            free(args); return 1;
+        }
+        if (disabled) {
+            fprintf(__stderrp, "OLSN-BATCH skipping disabled job %s\n", label);
+            continue;
         }
         int state = registered(label);
         if (state < 0) {
@@ -94,6 +147,7 @@ int main(int argc, char **argv) {
         }
         if (!state) args[count++] = argv[i];
     }
+    if (overrides) CFRelease(overrides);
     args[count] = 0;
     if (count == 2) { free(args); return 0; }
     fprintf(__stderrp, "OLSN-BATCH submitting %d missing jobs\n", count - 2);

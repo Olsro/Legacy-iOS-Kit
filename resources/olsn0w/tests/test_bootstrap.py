@@ -2,10 +2,13 @@ import plistlib
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bootstrap import binary_launchd_bootstrap
+import bootstrap
 
 
 class LaunchdBootstrapPlist(unittest.TestCase):
@@ -49,6 +52,40 @@ class LaunchdBootstrapPlist(unittest.TestCase):
         struct.pack_into('<I', data, section+36, len(xml))
         with self.assertRaisesRegex(ValueError, 'Unexpected'):
             binary_launchd_bootstrap(bytes(data))
+
+
+class StockLaunchdPayload(unittest.TestCase):
+    def test_normal_boot_payload_preserves_firmware_launchd_on_both_architectures(self):
+        # Stop after stock-file collection, before collecting the Kit packages.
+        # A modified CodeDirectory here would require AMFI bypass at boot,
+        # before the very untether that is supposed to provide it can run.
+        class PayloadCollected(Exception):
+            pass
+
+        original = LaunchdBootstrapPlist().fixture()[0]
+        stock = mock.Mock()
+        stock.ls.return_value = [dict(name=Path(path).name, mode=0o100755)
+                                for path in bootstrap.STOCK_FILES] + [
+            dict(name='com.apple.jetsamproperties.N42.plist', mode=0o100644),
+            dict(name='com.apple.jetsamproperties.N94.plist', mode=0o100644)]
+        stock.read.side_effect = lambda path: (
+            plistlib.dumps(dict(ProductBuildVersion='12H321', ProductVersion='8.4.1'))
+            if path.endswith('/SystemVersion.plist') else
+            original if path == '/sbin/launchd' else b'stock-file')
+        with tempfile.TemporaryDirectory() as temporary:
+            for product in ('iPhone5,2', 'iPhone4,1'):
+                with self.subTest(product=product), \
+                        mock.patch.object(bootstrap, 'HFS', return_value=stock), \
+                        mock.patch.object(bootstrap, 'members', side_effect=PayloadCollected), \
+                        mock.patch.object(bootstrap, 'entry', wraps=bootstrap.entry) as entry:
+                    with self.assertRaises(PayloadCollected):
+                        bootstrap.prepare(product, temporary, temporary, temporary,
+                                          'relay', 'kernel', 'cache', 'root', 'var',
+                                          Path(temporary)/product)
+                    launchd = [call for call in entry.call_args_list
+                               if call.args[0] == 'sbin/launchd']
+                    self.assertEqual(len(launchd), 1)
+                    self.assertEqual(launchd[0].args[1], original)
 
 
 if __name__ == '__main__':

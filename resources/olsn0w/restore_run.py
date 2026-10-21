@@ -140,6 +140,13 @@ def pangu_writable_root_ready(lines, report):
             'read-only' not in mount)
 
 
+def lockdown_pairing_required(result):
+    """Recognize stale pairing and the trust prompt after an erase."""
+    message=result.stdout+result.stderr
+    return result.returncode != 0 and any(error in message for error in (
+        b'Invalid HostID', b'PairingDialogResponsePending', b'trust dialog'))
+
+
 def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
                              progress=print):
     """Qualify the first boot, including the iOS 7.1 root remount."""
@@ -163,6 +170,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
     activation_attempts=0;next_activation_attempt=started
     saved_activation_restored=False
     pangu_readonly_polls=0;untether_retry_rebooted=False
+    next_pairing_attempt=started;pairing_notice=False
     progress('Waiting for iOS '+report['version']+' to start. The Apple logo can change and the display can go black during the boot handoff; keep the cable connected.')
     command=('/usr/sbin/sysctl -n hw.model; /usr/sbin/sysctl -n kern.osversion; '
              '/bin/cat /var/lib/olsn0w/generation; '
@@ -250,6 +258,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
         # stranded by a later SSH qualification failure.
         output=subprocess.run([str(tools()/'ideviceinfo'),'-u',udid,'-x'],capture_output=True,timeout=20)
         if output.returncode==0:
+            pairing_notice=False
             values=plistlib.loads(output.stdout)
             if (values.get('ProductType'),values.get('ProductVersion'),values.get('BuildVersion'))!=(report['product'],report['version'],report['build']):
                 raise ValueError('Lockdown reports a different target')
@@ -297,6 +306,25 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
             if (services and baseband_ready and
                     (activation_skipped or values.get('ActivationState')=='Activated')):
                 break
+        elif lockdown_pairing_required(output):
+            status=('Waiting for USB pairing. Unlock the device and accept '
+                    '"Trust This Computer" on its screen.')
+            if not pairing_notice:
+                progress(status)
+                pairing_notice=True
+            if time.monotonic()>=next_pairing_attempt:
+                # An erase invalidates the old host record. Pair only the
+                # selected USB device, leaving trust approval to the user.
+                with (bundle/'pairing.log').open('ab') as pairing_log:
+                    pairing_log.write(output.stdout+output.stderr)
+                    try:
+                        paired=subprocess.run(
+                            [str(tools()/'idevicepair'),'-u',udid,'pair'],
+                            capture_output=True,timeout=15)
+                        pairing_log.write(paired.stdout+paired.stderr)
+                    except subprocess.TimeoutExpired:
+                        pairing_log.write(b'USB pairing attempt timed out.\n')
+                next_pairing_attempt=time.monotonic()+10
         elif not ssh_reachable:
             mode=target_recovery_mode(report)
             if mode=='Recovery':
@@ -307,8 +335,10 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                     'The selected target returned to Recovery mode before startup. '
                     'The boot handoff failed; inspect the preserved panic and boot logs '
                     'instead of waiting for target USB services.')
+        else:
+            status='Target SSH is reachable; waiting for USB lockdown information.'
         if time.monotonic()>=deadline:
-            detail=startup_error or status
+            detail=status if pairing_notice else startup_error or status
             raise RuntimeError('Installation was written and verified, but startup is not yet confirmed. '+detail+' Keep the device connected and inspect its startup logs before retrying the installation.')
         now=time.monotonic()
         if now-last_notice>=30:

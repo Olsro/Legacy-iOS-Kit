@@ -28,7 +28,7 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 46
+RECIPE_VERSION = 48
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -253,7 +253,9 @@ def selected_untether(release, product=None):
     """Keep device-specific qualification separate from the daemon layout."""
     if version(release)[0] == 8:
         return 'everuntether'
-    if uses_stock_daemon_layout(release) and product not in {'iPod5,1', 'iPhone4,1'}:
+    aquila71 = (product in {'iPod5,1', 'iPhone4,1'} or
+                (product == 'iPhone5,2' and version(release) == version('7.1.2')))
+    if uses_stock_daemon_layout(release) and not aquila71:
         return 'panguaxe'
     return 'aquila'
 

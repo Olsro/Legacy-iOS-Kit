@@ -10707,6 +10707,9 @@ menu_miscutilities() {
                     menu_items+=("Pair Device")
                 fi
                 menu_items+=("hactiv8" "Activation Records")
+                if python3 ../resources/olsn0w/olsn0w.py supports --product "$device_type" >/dev/null 2>&1; then
+                    menu_items+=("Configure olsn0w restored device for SSH external access")
+                fi
             fi
             if [[ $device_proc != 1 ]] && (( device_proc < 7 )); then
                 if [[ $device_mode != "Normal" ]]; then
@@ -10760,6 +10763,7 @@ menu_miscutilities() {
             "Attempt Activation" ) device_activate;;
             "Dump Baseband" ) mode="baseband";;
             "hactiv8" ) device_hacktiv8;;
+            "Configure olsn0w restored device for SSH external access" ) device_olsn0w_external_ssh;;
             "Activation Records" ) mode="actrec";;
             "Enable Flags" ) menu_flags;;
             "(Re-)Install Dependencies" ) install_depends;;
@@ -10936,6 +10940,17 @@ device_pair() {
     else
         warn "Unable to pair with device."
     fi
+}
+
+device_olsn0w_external_ssh() {
+    print "* Enables Wi-Fi/network OpenSSH on an olsn0w restored device."
+    print "* Resets the root password to alpine and listens on TCP port 22."
+    print "* Requires this device's saved olsn0w restoration keys in this Kit folder."
+    print "* Original files are backed up; the existing USB SSH key is kept."
+    select_yesno
+    [[ $? != 1 ]] && return
+    python3 ../resources/olsn0w/olsn0w.py configure-ssh --product "$device_type" \
+        --udid "$device_udid" --ecid "$device_ecid" || warn "OpenSSH configuration failed; see the reported reason."
 }
 
 device_ssh() {

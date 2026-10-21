@@ -15,7 +15,7 @@ def main():
     if not __debug__:
         raise RuntimeError('Run without Python optimization; binary validation is required')
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['supports','list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','rescue','prepare-provision','provision-restore','menu'])
+    parser.add_argument('action',choices=['supports','list','prepare','prepare-system','prepare-restore','restore','select','prepare-rescue','rescue','prepare-provision','provision-restore','menu','configure-ssh'])
     parser.add_argument('--product',required=True,choices=sorted(MODELS))
     parser.add_argument('--version')
     parser.add_argument('--udid',help='Connected normal-mode device from the Kit menu')
@@ -42,6 +42,12 @@ def main():
             args.action not in ('prepare-system','prepare-restore','provision-restore')):
         parser.error('--hacktiv8 applies to system and restoration preparation')
     if args.action=='supports':
+        return
+    if args.action == 'configure-ssh':
+        if not args.udid:
+            parser.error('configure-ssh requires --udid')
+        from external_ssh import configure
+        configure(args.product, args.udid, args.ecid, args.bundle)
         return
     if args.action == 'provision-restore' and not all((args.session,args.bundle,args.bootstrap,args.ticket,args.base_keys,args.version,args.erase)):
         parser.error('provision-restore requires --session, --bundle, --bootstrap, --ticket, --base-keys, --version and --erase')

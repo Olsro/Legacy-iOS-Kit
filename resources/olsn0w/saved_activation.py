@@ -97,9 +97,16 @@ def load(path, identity, udid):
         if not isinstance(record.get(key), bytes) or not record[key]:
             raise ValueError('Incomplete saved Apple activation record')
     token = token_identity(record['AccountToken'])
-    if (token.get('ProductType') != identity['product'] or
-            str(token.get('UniqueDeviceID', '')).lower() != udid.lower()):
-        raise ValueError('Saved activation record belongs to another device')
+    # Older Apple tokens omit ProductType (observed in a stock pod_record).
+    # The real target UDID remains mandatory; ECID/product are independently
+    # checked by activation.activate before this archive is selected.
+    token_udid = token.get('UniqueDeviceID')
+    if not isinstance(token_udid, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', token_udid):
+        raise ValueError('Saved activation record lacks a valid device UDID')
+    if token_udid.lower() != udid.lower():
+        raise ValueError('Saved activation record belongs to another device (UDID differs)')
+    if 'ProductType' in token and token['ProductType'] != identity['product']:
+        raise ValueError('Saved activation record belongs to another model (ProductType differs)')
     return files[records[0]], dict(source='saved-selected-device-records',
                           archive_sha256=hashlib.sha256(raw).hexdigest(),
                           record_sha256=hashlib.sha256(files[records[0]]).hexdigest(),

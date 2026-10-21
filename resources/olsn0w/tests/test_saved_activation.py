@@ -1,5 +1,6 @@
 """Saved certificates are untrusted until scoped and accepted by lockdownd."""
 import io
+import json
 import plistlib
 import subprocess
 from pathlib import Path
@@ -67,6 +68,30 @@ class SavedActivation(unittest.TestCase):
             with self.subTest(observed=observed), tempfile.TemporaryDirectory() as d:
                 archive = self.archive(d, [(self.name, record)])
                 with self.assertRaises(ValueError):load(archive, self.identity, observed)
+
+    def test_legacy_token_without_product_still_requires_matching_udid(self):
+        for udid in (self.udid, 'b'*40, None, 123, ''):
+            with self.subTest(udid=udid), tempfile.TemporaryDirectory() as d:
+                record=plistlib.loads(self.record())
+                token={} if udid is None else {'UniqueDeviceID':udid}
+                record['AccountToken']=plistlib.dumps(token)
+                original=plistlib.dumps(record)
+                archive=self.archive(d,[(self.name,original)])
+                if udid==self.udid:
+                    restored,_=load(archive,self.identity,self.udid)
+                    self.assertEqual(restored,original)
+                else:
+                    with self.assertRaises(ValueError):load(archive,self.identity,self.udid)
+
+    def test_explicit_empty_or_foreign_product_is_not_treated_as_missing(self):
+        for product in ('',None,'iPhone4,1'):
+            with self.subTest(product=product), tempfile.TemporaryDirectory() as d:
+                record=plistlib.loads(self.record())
+                token={'UniqueDeviceID':self.udid,'ProductType':product}
+                record['AccountToken']=json.dumps(token).encode()
+                archive=self.archive(d,[(self.name,plistlib.dumps(record))])
+                with self.assertRaisesRegex(ValueError,'ProductType differs'):
+                    load(archive,self.identity,self.udid)
 
     def test_unsafe_ambiguous_incomplete_archives_rejected(self):
         original = self.record()
