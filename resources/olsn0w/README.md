@@ -302,8 +302,16 @@ The firmware relay uses direct Thumb encoding and emulator checks. System and
 compact-bootstrap image preparation compile an HFS helper with a C compiler,
 CMake and zlib development files. Before building the helper, olsn0w checks a
 small CMake project that compiles and links against zlib. Missing prerequisites
-are installed automatically through the host package manager, then checked
-again. On Ubuntu/Debian these are `build-essential`, `cmake` and `zlib1g-dev`.
+on Linux are installed automatically through the host package manager, then
+checked again. On Ubuntu/Debian these are `build-essential`, `cmake` and `zlib1g-dev`.
+On macOS, an installed `CMake.app` in `/Applications` or `~/Applications` is
+detected automatically. If no working CMake is found, olsn0w downloads the
+official CMake 3.31.12 macOS 10.10+ universal archive, verifies its pinned SHA-256,
+and installs it under `saved/olsn0w/tools/` without Homebrew or sudo. This build
+supports Intel Macs running High Sierra. The C compiler, Make and SDK/zlib still
+require Apple's Xcode Command Line Tools: run `xcode-select --install`, complete
+the installation, then relaunch olsn0w. If those tools are already installed,
+inspect `xcode-select -p` and the displayed compile/link diagnostics.
 This repair preserves the Python runtime and prepared firmware. Its tar importer
 preserves symlink metadata without changing the target's permissions or ownership.
 Bootstrap programs use Clang and an ARM-capable Mach-O
