@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -19,8 +20,8 @@ from common import KIT, run, tools
 from hfs import HFS
 
 
-def stock_lockdownd():
-    signature = hacktiv8.LOCKDOWN_PATCHES[0][0]
+def stock_lockdownd(variant=0):
+    signature = hacktiv8.LOCKDOWN_PATCHES[variant][0]
     return b'prefix' + bytes(value if value is not None else 0xa5
                              for value in signature) + b'suffix'
 
@@ -103,6 +104,207 @@ class Legacy511Regression(unittest.TestCase):
         self.assertEqual(hacktiv8.install(image, '5.1.1', product, '9B206'), report)
         self.assertEqual(hacktiv8_live.patched_bytes(
             'lockdownd-patch', self.original, product, '9B206'), self.patched)
+
+
+class Legacy614Regression(unittest.TestCase):
+    def setUp(self):
+        source = bytearray(0x1aeb0)
+        source[0x1aeae:0x1aeb0] = bytes.fromhex('0246')
+        self.original = bytes(source)
+        source[0x1aeae:0x1aeb0] = bytes.fromhex('0122')
+        self.patched = bytes(source)
+        for name, value in (
+                ('LOCKDOWN_614_ORIGINAL', hashlib.sha256(self.original).hexdigest()),
+                ('LOCKDOWN_614_PATCHED', hashlib.sha256(self.patched).hexdigest())):
+            replacement = patch.object(hacktiv8, name, value)
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        signer = patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new))
+        signer.start()
+        self.addCleanup(signer.stop)
+        verifier = patch.object(hacktiv8, 'verify')
+        verifier.start()
+        self.addCleanup(verifier.stop)
+
+    def test_exact_recipe_and_idempotency(self):
+        for product in ('iPhone5,1', 'iPhone5,2'):
+            for sign in (False, True):
+                with self.subTest(product=product, sign=sign):
+                    self.assertEqual(hacktiv8.patch_lockdownd(self.original, product, '10B350', sign=sign),
+                                     (self.patched, 0x1aeae, True))
+                    self.assertEqual(hacktiv8.patch_lockdownd(self.patched, product, '10B350', sign=sign),
+                                     (self.patched, 0x1aeae, False))
+
+    def test_unknown_bytes_model_or_build_never_borrow_fixed_offset(self):
+        for data, product, build in (
+                (self.original+b'x', 'iPhone5,2', '10B350'),
+                (self.patched+b'x', 'iPhone5,2', '10B350'),
+                (self.original, 'iPhone4,1', '10B350'),
+                (self.original, 'iPhone5,2', '10B329'),
+                (self.original, 'iPhone5,2', None)):
+            with self.assertRaisesRegex(ValueError, 'does not recognize'):
+                hacktiv8.patch_lockdownd(data, product, build)
+
+    def test_rehashed_result_must_match_the_qualified_output(self):
+        with patch.object(hacktiv8, 'rehash_adhoc', return_value=b'wrong'):
+            with self.assertRaisesRegex(ValueError, 'qualified result'):
+                hacktiv8.patch_lockdownd(self.original, 'iPhone5,2', '10B350')
+
+    def test_image_install_readback_and_live_share_recipe(self):
+        import hacktiv8_live
+        files = {
+            hacktiv8.LOCKDOWN: self.original,
+            '/System/Library/CoreServices/SystemVersion.plist': plistlib.dumps(
+                dict(ProductVersion='6.1.4', ProductBuildVersion='10B350')),
+        }
+        image = Mock()
+        image.read.side_effect = files.__getitem__
+        image.add.side_effect = lambda path, data, **kwargs: files.__setitem__(path, data)
+        image.ls.side_effect = lambda path: (
+            [dict(name='Setup.app', mode=stat.S_IFDIR | 0o755)]
+            if path == '/Applications' else
+            [dict(name=Path(name).name, mode=stat.S_IFREG | 0o755, uid=0, gid=0)
+             for name in files if str(Path(name).parent) == path])
+        report = hacktiv8.install(image, '6.1.4', 'iPhone5,2', '10B350')
+        hacktiv8.verify_installed(image, report, '6.1.4', 'iPhone5,2')
+        self.assertEqual(files[hacktiv8.LOCKDOWN], self.patched)
+        self.assertEqual(files[hacktiv8.LOCKDOWN_BACKUP], self.original)
+        self.assertEqual(hacktiv8.install(image, '6.1.4', 'iPhone5,2', '10B350'), report)
+        self.assertEqual(hacktiv8_live.patched_bytes(
+            'lockdownd-patch', self.original, 'iPhone5,2', '10B350'), self.patched)
+
+
+@unittest.skipUnless(os.environ.get('OLSN0W_TEST_LOCKDOWN_614'),
+                     'Requires a private stock iPhone 5 10B350 lockdownd')
+class Stock614Regression(unittest.TestCase):
+    def test_generic_armv7s_recipe_matches_the_pinned_result(self):
+        from signing import verify
+        original = Path(os.environ['OLSN0W_TEST_LOCKDOWN_614']).read_bytes()
+        for sign in (False, True):
+            patched, offset, changed = hacktiv8.patch_lockdownd(original, sign=sign)
+            self.assertTrue(changed)
+            self.assertEqual(offset, 0x1aeae)
+            self.assertEqual(hashlib.sha256(patched).hexdigest(), hacktiv8.LOCKDOWN_614_PATCHED)
+            self.assertEqual(verify(patched), verify(original))
+            self.assertEqual(hacktiv8.patch_lockdownd(patched, sign=sign),
+                             (patched, offset, False))
+
+    @unittest.skipUnless(os.environ.get('OLSN0W_TEST_HFS_TEMPLATE'),
+                         'Requires a disposable HFS template')
+    def test_real_hfs_install_preserves_setup_backup_and_signature(self):
+        from signing import verify
+        original = Path(os.environ['OLSN0W_TEST_LOCKDOWN_614']).read_bytes()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'root.hfs'
+            shutil.copyfile(os.environ['OLSN0W_TEST_HFS_TEMPLATE'], path)
+            image = HFS(path)
+            image.add('/Applications/Setup.app/test', b'setup')
+            image.add('/System/Library/CoreServices/SystemVersion.plist', plistlib.dumps(
+                dict(ProductVersion='6.1.4', ProductBuildVersion='10B350')))
+            image.add(hacktiv8.LOCKDOWN, original, mode=0o755)
+            report = hacktiv8.install(image, '6.1.4', 'iPhone5,2', '10B350')
+            hacktiv8.verify_installed(image, report, '6.1.4', 'iPhone5,2')
+            self.assertEqual(image.read(hacktiv8.LOCKDOWN_BACKUP), original)
+            self.assertEqual(image.read('/Applications/Setup.app/test'), b'setup')
+            patched = image.read(hacktiv8.LOCKDOWN)
+            self.assertEqual(hashlib.sha256(patched).hexdigest(), hacktiv8.LOCKDOWN_614_PATCHED)
+            self.assertEqual(verify(patched), verify(original))
+            self.assertEqual(hacktiv8.install(image, '6.1.4', 'iPhone5,2', '10B350'), report)
+
+    def test_signed_output_and_emulated_should_hactivate_store(self):
+        from signing import verify
+        from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB
+        from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R5
+        original = Path(os.environ['OLSN0W_TEST_LOCKDOWN_614']).read_bytes()
+        self.assertEqual(hashlib.sha256(original).hexdigest(), hacktiv8.LOCKDOWN_614_ORIGINAL)
+        patched, offset, changed = hacktiv8.patch_lockdownd(original, 'iPhone5,2', '10B350')
+        self.assertTrue(changed)
+        self.assertEqual(offset, 0x1aeae)
+        self.assertEqual(hashlib.sha256(patched).hexdigest(), hacktiv8.LOCKDOWN_614_PATCHED)
+        self.assertEqual(verify(patched), verify(original))
+        self.assertEqual(hacktiv8.patch_lockdownd(patched, 'iPhone5,2', '10B350'),
+                         (patched, offset, False))
+        for data, expected in ((original, None), (patched, 1)):
+            for flag in (0, 1):
+                with self.subTest(patched=expected is not None, flag=flag):
+                    machine = Uc(UC_ARCH_ARM, UC_MODE_THUMB)
+                    machine.mem_map(0x1000, (len(data)+4095)//4096*4096)
+                    machine.mem_write(0x1000, data)
+                    machine.mem_map(0x200000, 4096)
+                    machine.reg_write(UC_ARM_REG_R0, flag)
+                    machine.reg_write(UC_ARM_REG_R5, 0x200000)
+                    machine.emu_start((0x1000+offset)|1, 0x1000+0x1aec6, count=32)
+                    self.assertEqual(machine.mem_read(0x20000f, 1)[0],
+                                     flag if expected is None else expected)
+
+
+class GenericLockdowndRegression(unittest.TestCase):
+    def test_all_instruction_orders_are_repeatable_at_the_same_patch_offset(self):
+        for variant in range(len(hacktiv8.LOCKDOWN_PATCHES)):
+            with self.subTest(variant=variant):
+                original = stock_lockdownd(variant)
+                patched, offset, changed = hacktiv8.patch_lockdownd(original)
+                self.assertTrue(changed)
+                self.assertEqual(original[:offset]+b'\x01\x22'+original[offset+2:], patched)
+                self.assertEqual(hacktiv8.patch_lockdownd(patched), (patched, offset, False))
+
+    def test_ambiguous_original_patched_and_mixed_candidates_are_all_rejected(self):
+        first, second = (stock_lockdownd(index) for index in (0, 1))
+        patched = hacktiv8.patch_lockdownd(first)[0]
+        for data in (first+first, first+second, patched+patched, patched+first, patched+second):
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(ValueError, 'Ambiguous'):
+                    hacktiv8.patch_lockdownd(data)
+
+    def test_image_entry_point_rehashes_real_macho_even_without_sign_flag(self):
+        for variant in range(len(hacktiv8.LOCKDOWN_PATCHES)):
+            original = b'\xce\xfa\xed\xfe'+stock_lockdownd(variant)
+            with self.subTest(variant=variant), \
+                 patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new)) as signer:
+                patched, offset, _ = hacktiv8.patch_lockdownd(original)
+                signer.assert_called_once()
+            with patch.object(hacktiv8, 'verify') as verify:
+                self.assertEqual(hacktiv8.patch_lockdownd(patched), (patched, offset, False))
+                verify.assert_called_once_with(patched)
+
+
+class RecipePreflight(unittest.TestCase):
+    def test_lockdownd_families_check_both_instruction_orders_without_writing(self):
+        for release in ('4.0', '4.3.5', '5.0', '5.1.1', '6.0', '6.1.3', '6.1.4', '6.1.6'):
+            for variant in range(len(hacktiv8.LOCKDOWN_PATCHES)):
+                image = Mock()
+                image.read.side_effect = {
+                    '/System/Library/CoreServices/SystemVersion.plist': plistlib.dumps(
+                        dict(ProductVersion=release, ProductBuildVersion='fixture')),
+                    hacktiv8.LOCKDOWN: stock_lockdownd(variant),
+                }.__getitem__
+                image.ls.return_value = [dict(name='Setup.app', mode=stat.S_IFDIR | 0o755)]
+                hacktiv8.preflight(image, release, 'iPhone5,2', 'fixture')
+                image.add.assert_not_called()
+                image.command.assert_not_called()
+
+    def test_unknown_binary_stops_system_preparation_before_payload_or_output(self):
+        import system
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            firmware, relay = root/'firmware', root/'relay'
+            for directory in (firmware, relay):
+                directory.mkdir()
+                (directory/'manifest.json').write_text(json.dumps(dict(
+                    product='iPhone5,2', version='6.1.4', build='10B350', files={})))
+            stock = Mock()
+            stock.read.side_effect = {
+                '/System/Library/CoreServices/SystemVersion.plist': plistlib.dumps(
+                    dict(ProductVersion='6.1.4', ProductBuildVersion='10B350')),
+                hacktiv8.LOCKDOWN: b'unknown executable',
+            }.__getitem__
+            stock.ls.return_value = [dict(name='Setup.app', mode=stat.S_IFDIR | 0o755)]
+            with patch.object(system, 'HFS', return_value=stock), \
+                 patch.object(system, 'jailbreak_payload') as payload:
+                with self.assertRaisesRegex(ValueError, 'does not recognize'):
+                    system.prepare(firmware, relay, remove_setup_app=True)
+            payload.assert_not_called()
+            self.assertEqual({p.name for p in root.iterdir()}, {'firmware', 'relay'})
 
 
 class Legacy4Regression(unittest.TestCase):
@@ -192,6 +394,28 @@ class Selection(unittest.TestCase):
         for path in profiles:
             value = plistlib.loads(path.read_bytes())
             self.assertIs(value['CacheExtra'][hacktiv8.GESTALT_KEY], True)
+            product, build = path.parts[-3:-1]
+            release = {'12': '8.4.1', '13': '9.3.5', '14': '10.3.4'}[build[:2]]
+            self.assertEqual(hacktiv8.technique(release, product, build), 'mobilegestalt-profile')
+            self.assertEqual(hacktiv8._profile(product, build), path.read_bytes())
+
+    def test_ios7_and_ios8_point_releases_preserve_other_gestalt_values(self):
+        releases = ('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.5', '7.0.6', '7.1',
+                    '7.1.1', '7.1.2', '8.0', '8.0.1', '8.0.2', '8.1', '8.1.1',
+                    '8.1.2', '8.1.3', '8.2', '8.3', '8.4', '8.4.1')
+        cache = plistlib.dumps({'CacheExtra': {hacktiv8.GESTALT_KEY: False, 'unrelated': 'keep'}})
+        for release in releases:
+            with self.subTest(release=release):
+                entries = {
+                    'mobile': tar_entry('mobile', directory=True),
+                    'mobile/Library/Caches/com.apple.MobileGestalt.plist':
+                        tar_entry('mobile/Library/Caches/com.apple.MobileGestalt.plist', cache),
+                }
+                report = hacktiv8.prepare_data(entries, release, 'iPhone4,1', 'fixture')
+                self.assertEqual(report['method'], 'mobilegestalt-flag')
+                value = plistlib.loads(entries['mobile/Library/Caches/com.apple.MobileGestalt.plist'][1])
+                self.assertIs(value['CacheExtra'][hacktiv8.GESTALT_KEY], True)
+                self.assertEqual(value['CacheExtra']['unrelated'], 'keep')
 
     def test_lockdownd_signature_patch_is_exact_and_repeatable(self):
         original = stock_lockdownd()
@@ -200,7 +424,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(patched[offset:offset+2], b'\x01\x22')
         repeated, repeated_offset, repeated_changed = hacktiv8.patch_lockdownd(patched)
         self.assertEqual(repeated, patched)
-        self.assertEqual(repeated_offset+18, offset)
+        self.assertEqual(repeated_offset, offset)
         self.assertFalse(repeated_changed)
 
     def test_data_cache_uses_profile_or_stock_flag(self):

@@ -31,7 +31,16 @@ keep them private and retain them for recovery.
 
 iOS 4–6 uses the existing lockdownd signature recipe, with code-page hashes
 updated while preserving the original Apple ad-hoc signature metadata and
-entitlements. Stock iOS 4 has no Setup.app; image preparation and the live
+entitlements. Both ARMv7 and ARMv7s instruction orders are recognized, without
+requiring a new firmware-specific offset for each matching build. Multiple
+matches, including mixtures of original and already-patched sites, are rejected.
+Reapplication reports the same patch offset and leaves the binary unchanged.
+olsn0w validates the selected stock binary or MobileGestalt assets before
+building the target filesystem. This detects an unsupported binary or missing
+asset before the expensive preparation steps.
+System recipe 49 rebuilds older prepared images so the shared image and live
+patch paths both preserve valid code-page hashes.
+Stock iOS 4 has no Setup.app; image preparation and the live
 utility allow its absence there, but still require its preservation on iOS 5+.
 The 3GS 4.3.5/8L1 executable uses a SHA-256-pinned reproduction of
 `Down_iPhone2,1_4.3.5_8L1.bundle/lockdownd.patch`, including its UUID and
@@ -53,6 +62,13 @@ cache is an error, not grounds for removing Setup.app or guessing its contents.
 The pinned 3GS/4S 5.1.1 recipe is shared with custom IPSW preparation (including
 DRA) and olsn0w. Installation and filesystem readback use the same recipe;
 it is not limited to the live-device menu.
+The iPhone 5 6.1.4/10B350 ARMv7s executable has a different instruction order
+from the generic signature. Its recipe pins the entire original and patched
+SHA-256, forces the same `ShouldHactivate` result, and rehashes the original
+ad-hoc signature while retaining its metadata and entitlements. This recipe is
+shared by image preparation and the live utility on Linux and macOS. Unknown
+binaries cannot borrow its fixed offset. Preparation checks do not establish
+successful activation or restoration on hardware.
 The 5.1.1 DRA custom IPSW was checked through extraction, patching, DMG/ZIP
 reconstruction and filesystem readback on a disposable copy. Its other 37
 archive entries were unchanged. This validates preparation, not a new hardware

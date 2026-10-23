@@ -20,6 +20,7 @@ from aquila import (ios7_payload, job_loader, prepare_payload,
 from common import KIT, MODELS, clone_or_copy, digest, profile, run, save, version
 from hfs import HFS
 from hacktiv8 import (install as install_hacktiv8,
+                     preflight as preflight_hacktiv8,
                      firstboot_files as hacktiv8_firstboot_files,
                      prepare_data as prepare_hacktiv8_data,
                      remove_setup_application)
@@ -28,7 +29,8 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-RECIPE_VERSION = 48
+# Rebuild older images so every lockdownd recipe retains valid signed pages.
+RECIPE_VERSION = 49
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -611,7 +613,6 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     # The checked iBEC recipe selects the third GPT entry as the target volume.
     if root_device != '/dev/disk0s1s3' or data_device != '/dev/disk0s1s2':
         raise ValueError('Selected devices do not match this relay partition recipe')
-    payload, provenance = jailbreak_payload(source['version'], source['product'])
     major = version(source['version'])[0]
     untether_name = selected_untether(source['version'], source['product'])
     stock_daemons = uses_stock_daemon_layout(source['version'])
@@ -620,6 +621,9 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     system_version = plistlib.loads(stock.read('/System/Library/CoreServices/SystemVersion.plist'))
     if system_version['ProductBuildVersion'] != source['build'] or version(system_version['ProductVersion']) != version(source['version']):
         raise ValueError('Root filesystem version differs from IPSW manifest')
+    if remove_setup_app:
+        preflight_hacktiv8(stock, source['version'], source['product'], source['build'])
+    payload, provenance = jailbreak_payload(source['version'], source['product'])
     # The physically qualified iOS 8 path keeps Apple's early keybagd in place.
     # iOS 7 still needs the wrapper because launchd starts keybagd before Aquila.
     early_keybag = wraps_early_keybag(source['version'], stock.read('/sbin/launchd'))

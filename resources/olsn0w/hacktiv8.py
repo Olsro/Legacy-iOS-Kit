@@ -34,6 +34,12 @@ HELPER_SHA256 = 'c4a693b6610c176319a1e1e126cad1df0806893cb628fc52adfd556c9150bef
 LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
 LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
+# ARMv7s schedules the STRB before ADD R1, PC, unlike the generic pattern.
+# The exact 10B350 image still reads ShouldHactivate immediately before
+# MOV R2, R0 at 0x1aeae. Pin the complete input and ad-hoc rehashed output.
+LOCKDOWN_614_ORIGINAL = '74a854a2195794093af4e95f1a89eea37b6ad8a9a6047db4cf75c9e9504610eb'
+LOCKDOWN_614_PATCHED = '8f5e9bb90d6c670bf95b04665fe3dec89aaf695be607674c84eface4529b8434'
+
 # Byte-for-byte reproduction of Down_iPhone2,1_4.3.5_8L1.bundle/lockdownd.patch.
 # Match the entire executable, not a model name or an assumed instruction offset.
 # The historical recipe also changes LC_UUID and CoreLocation's linked version.
@@ -54,6 +60,18 @@ LOCKDOWN_PATCHES = (
             None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None, None, 0x78, 0x44, 0x79, 0x44,
             None, 0x73,
+        ],
+        [(18, b'\x01\x22')],
+    ),
+    (
+        # ARMv7s uses the same boolean result/store but schedules STRB before
+        # ADD R1, PC. Keep both complete patterns instead of firmware offsets.
+        [
+            0x01, 0x46, None, None, None, None, None, None, None, None,
+            None, 0x73, 0x78, 0x44, None, None, None, None, 0x02, 0x46,
+            None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, 0x78, 0x44, None, 0x73,
+            0x79, 0x44,
         ],
         [(18, b'\x01\x22')],
     ),
@@ -111,24 +129,42 @@ def patch_lockdownd(data, product=None, build=None, *, sign=False):
             if hashlib.sha256(result).hexdigest() != LOCKDOWN_511_PATCHED:
                 raise ValueError('Legacy 5.1.1 patch does not match the qualified result')
             return result, 0xb932, True
+    if product in ('iPhone5,1', 'iPhone5,2') and build == '10B350':
+        if checksum == LOCKDOWN_614_PATCHED:
+            verify(data)
+            return bytes(data), 0x1aeae, False
+        if checksum == LOCKDOWN_614_ORIGINAL:
+            changed = bytearray(data)
+            if changed[0x1aeae:0x1aeb0] != bytes.fromhex('0246'):
+                raise ValueError('Unexpected 6.1.4 lockdownd instruction')
+            changed[0x1aeae:0x1aeb0] = bytes.fromhex('0122')
+            result = rehash_adhoc(data, changed)
+            if hashlib.sha256(result).hexdigest() != LOCKDOWN_614_PATCHED:
+                raise ValueError('Legacy 6.1.4 patch does not match the qualified result')
+            return result, 0x1aeae, True
     original = bytes(data)
     data = bytearray(data)
+    candidates = []
     for signature, replacements in LOCKDOWN_PATCHES:
-        matches = _find(data, _patched_signature(signature, replacements))
-        if matches:
-            if sign:
-                verify(data)
-            return bytes(data), matches[0], False
-    for signature, replacements in LOCKDOWN_PATCHES:
-        matches = _find(data, signature)
-        if len(matches) > 1:
-            raise ValueError('Ambiguous Hacktiv8 lockdownd signature')
-        if matches:
-            for offset, replacement in replacements:
-                start = matches[0]+offset
-                data[start:start+len(replacement)] = replacement
-            result = rehash_adhoc(original, data) if sign else bytes(data)
-            return result, matches[0]+replacements[0][0], True
+        for already, pattern in ((False, signature),
+                                 (True, _patched_signature(signature, replacements))):
+            candidates.extend((start, replacements, already) for start in _find(data, pattern))
+    if len(candidates) > 1:
+        raise ValueError('Ambiguous Hacktiv8 lockdownd signature')
+    if candidates:
+        start, replacements, already = candidates[0]
+        offset = start+replacements[0][0]
+        signed = sign or original[:4] == b'\xce\xfa\xed\xfe'
+        if already:
+            if signed:
+                verify(original)
+            return original, offset, False
+        for relative, replacement in replacements:
+            data[start+relative:start+relative+len(replacement)] = replacement
+        # Image preparation and live patching must both retain valid signed
+        # pages; this cannot depend on which entry point invokes the recipe.
+        result = rehash_adhoc(original, data) if signed else bytes(data)
+        return result, offset, True
     raise ValueError('Hacktiv8 does not recognize this lockdownd')
 
 
@@ -272,6 +308,20 @@ def _require_setup(image, release):
         return
     if len(matches) != 1 or not stat.S_ISDIR(matches[0]['mode']):
         raise ValueError('Hacktiv8 requires Setup.app to be preserved')
+
+
+def preflight(image, release, product, build):
+    """Check the selected recipe and assets without changing the stock image."""
+    _identity(image, release, build)
+    method = technique(release, product, build)
+    if method is None:
+        return
+    _require_setup(image, release)
+    if method == 'lockdownd-patch':
+        patch_lockdownd(image.read(LOCKDOWN), product, build)
+    else:
+        firstboot_files(_report(method, _gestalt_target(release), b'', b'',
+                                deferred=True, product=product, build=build))
 
 
 def install(image, release, product, build=None):
