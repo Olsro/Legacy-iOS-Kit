@@ -1,7 +1,59 @@
 #!/bin/sh
 set -eu
 kit=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-python3 -c 'import sys; sys.exit("olsn0w requires Python 3.8 or newer") if sys.version_info < (3, 8) else None'
+
+as_root() {
+    if [ "$(id -u)" = 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo 'olsn0w: installing Python prerequisites requires root or sudo.' >&2
+        exit 1
+    fi
+}
+
+install_host_python() {
+    echo 'olsn0w: installing Python 3 and virtual environment support.' >&2
+    echo 'Your system may request your password to install these packages.' >&2
+    if [ "$(uname -s)" = Darwin ]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            echo 'olsn0w: Python 3.8+ with venv is required. Install Python from https://www.python.org/downloads/macos/ or install Homebrew, then retry.' >&2
+            exit 1
+        fi
+        brew install python
+    elif command -v apt-get >/dev/null 2>&1; then
+        as_root apt-get update
+        as_root apt-get install -y python3 python3-venv
+    elif command -v dnf >/dev/null 2>&1; then
+        as_root dnf install -y python3 python3-pip
+    elif command -v pacman >/dev/null 2>&1; then
+        as_root pacman -S --needed --noconfirm python python-pip
+    elif command -v zypper >/dev/null 2>&1; then
+        as_root zypper -n install python3 python3-pip
+    elif command -v xbps-install >/dev/null 2>&1; then
+        as_root xbps-install -Sy python3 python3-pip
+    else
+        echo 'olsn0w: no supported package manager found. Install Python 3.8+ with venv and ensurepip, then retry.' >&2
+        exit 1
+    fi
+}
+
+host_ready() {
+    python3 -c 'import sys, venv, ensurepip; sys.exit(sys.version_info < (3, 8))' 2>/dev/null
+}
+
+if ! host_ready; then
+    install_host_python >&2
+fi
+if ! host_ready; then
+    echo 'olsn0w: python3 still lacks Python 3.8+, venv or ensurepip. Check which python3 is selected in PATH.' >&2
+    exit 1
+fi
+[ "${1:-}" != --host-only ] || exit 0
+
 runtime="$kit/saved/olsn0w/runtime"
-python3 -m venv "$runtime"
-"$runtime/bin/python" -m pip install -r "$kit/resources/olsn0w/requirements.txt"
+# Rebuild only the disposable environment, preserving firmware and device data.
+python3 -m venv --clear "$runtime"
+"$runtime/bin/python" -m pip install -r "$kit/resources/olsn0w/requirements.txt" >&2
+"$runtime/bin/python" "$kit/resources/olsn0w/runtime.py"

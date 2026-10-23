@@ -43,6 +43,9 @@ def main():
         parser.error('--hacktiv8 applies to system and restoration preparation')
     if args.action=='supports':
         return
+    if args.action != 'list':
+        from runtime import ensure_runtime
+        ensure_runtime(STATE)
     if args.action == 'configure-ssh':
         if not args.udid:
             parser.error('configure-ssh requires --udid')
@@ -103,11 +106,6 @@ def main():
         menu(args.product,args.ecid,args.udid,args.refresh)
         return
     if not args.version:parser.error('--version is required for preparation')
-    try:
-        import capstone
-        import unicorn
-    except ImportError:
-        raise RuntimeError('Preparation requires capstone and unicorn. Run resources/olsn0w/setup.sh once.')
     from bootchain import prepare, RECIPE_VERSION
     folder,metadata=extract(args.product,args.version,args.ipsw,args.keys,args.build)
     relay=folder.parent/'relay'
@@ -158,15 +156,6 @@ def main():
 
 
 if __name__=='__main__':
-    # Keep the optional disassembler isolated from the kit's normal runtime.
-    runtime=STATE/'runtime/bin/python'
-    if 'menu' in sys.argv[1:] and not runtime.exists():
-        import subprocess
-        print('Preparing the olsn0w runtime…',flush=True)
-        subprocess.run(['sh',str(Path(__file__).parent/'setup.sh')],check=True)
-    if runtime.exists() and Path(sys.prefix).resolve()!=(STATE/'runtime').resolve():
-        import os
-        os.execv(str(runtime),[str(runtime),str(Path(__file__).resolve()),*sys.argv[1:]])
     try:
         main()
     except (KeyboardInterrupt,EOFError):

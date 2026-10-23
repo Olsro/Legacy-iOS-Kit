@@ -264,10 +264,18 @@ decrypts the firmware envelope identically on either host. PyUSB uses the
 Kit's libusb dependency for portable USB identity checks. Post-boot activation
 acknowledgement uses libimobiledevice and libplist on either host.
 
-Run from the kit directory after its normal dependency installation:
+The menu and standalone entry point automatically create or repair the private
+Python environment before device operations. They check the pinned package
+versions and load the native libraries, so an interrupted installation is retried
+on the next launch. Missing Python/venv prerequisites are installed using the host
+package manager (APT, DNF, Pacman, Zypper or XBPS; Homebrew on macOS when available).
+System package installation may request your sudo password. On macOS without
+Homebrew, install Python 3.8+ from python.org if it is missing. Help, catalog
+listing and model support checks do not require the private environment.
+
+Run from the kit directory:
 
 ```sh
-sh resources/olsn0w/setup.sh
 ./restore.sh --olsn0w list --product iPhone5,2
 ./restore.sh --olsn0w prepare --product iPhone5,2 --version 7.1.2
 ./restore.sh --olsn0w prepare-system --product iPhone5,2 --version 7.1.2

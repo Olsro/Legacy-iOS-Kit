@@ -19,7 +19,7 @@ bash_ver=$(/usr/bin/env bash -c 'echo ${BASH_VERSINFO[0]}')
 if [[ ${1:-} == "--olsn0w" ]]; then
     shift
     olsn0w_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-    exec python3 "$olsn0w_root/resources/olsn0w/olsn0w.py" "$@"
+    exec sh "$olsn0w_root/resources/olsn0w/run.sh" "$@"
 fi
 
 print() {
@@ -699,7 +699,7 @@ install_depends() {
             $sudo add-apt-repository -y universe
         fi
         $sudo apt update
-        $sudo apt install -m -y aria2 ca-certificates curl git libssl3 libzstd1 openssh-client patch python3 sshfs unzip usbmuxd usbutils xxd zenity zip zlib1g
+        $sudo apt install -m -y aria2 ca-certificates curl git libssl3 libzstd1 openssh-client patch python3 python3-venv sshfs unzip usbmuxd usbutils xxd zenity zip zlib1g
         if [[ $(command -v systemctl 2>/dev/null) ]]; then
             $sudo systemctl enable --now udev systemd-udevd usbmuxd 2>/dev/null
         fi
@@ -8588,7 +8588,7 @@ menu_main() {
 }
 
 menu_olsn0w() {
-    python3 ../resources/olsn0w/olsn0w.py menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" || warn "olsn0w stopped; see the reported reason."
+    sh ../resources/olsn0w/run.sh menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" || warn "olsn0w stopped; see the reported reason."
     pause
 }
 

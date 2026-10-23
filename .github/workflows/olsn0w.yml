@@ -23,5 +23,5 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r resources/olsn0w/requirements.txt
       - run: python -m unittest discover -s resources/olsn0w/tests -v
-      - run: bash -n restore.sh && sh -n resources/olsn0w/setup.sh
+      - run: bash -n restore.sh && sh -n resources/olsn0w/setup.sh && sh -n resources/olsn0w/run.sh
       - run: bash restore.sh --olsn0w --help
