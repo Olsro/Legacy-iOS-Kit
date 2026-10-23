@@ -8,7 +8,7 @@ as_root() {
     elif command -v sudo >/dev/null 2>&1; then
         sudo "$@"
     else
-        echo 'olsn0w: installing Python prerequisites requires root or sudo.' >&2
+        echo 'olsn0w: installing system prerequisites requires root or sudo.' >&2
         exit 1
     fi
 }
@@ -38,6 +38,38 @@ install_host_python() {
         exit 1
     fi
 }
+
+install_native_dependencies() {
+    echo 'olsn0w: installing CMake, a C compiler, Make and zlib development files.' >&2
+    echo 'Your system may request your password to install these packages.' >&2
+    if [ "$(uname -s)" = Darwin ]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            echo 'olsn0w: install CMake and the Xcode Command Line Tools, or install Homebrew, then retry.' >&2
+            exit 1
+        fi
+        brew install cmake
+    elif command -v apt-get >/dev/null 2>&1; then
+        as_root apt-get update
+        as_root apt-get install -y build-essential cmake zlib1g-dev
+    elif command -v dnf >/dev/null 2>&1; then
+        as_root dnf install -y cmake gcc make zlib-devel
+    elif command -v pacman >/dev/null 2>&1; then
+        as_root pacman -S --needed --noconfirm base-devel cmake zlib
+    elif command -v zypper >/dev/null 2>&1; then
+        as_root zypper -n install cmake gcc make zlib-devel
+    elif command -v xbps-install >/dev/null 2>&1; then
+        as_root xbps-install -Sy base-devel cmake zlib-devel
+    else
+        echo 'olsn0w: install CMake, a C compiler, Make and zlib development files, then retry.' >&2
+        exit 1
+    fi
+}
+
+# Native prerequisites can be repaired without rebuilding the Python runtime.
+if [ "${1:-}" = --native-only ]; then
+    install_native_dependencies >&2
+    exit 0
+fi
 
 host_ready() {
     python3 -c 'import sys, venv, ensurepip; sys.exit(sys.version_info < (3, 8))' 2>/dev/null

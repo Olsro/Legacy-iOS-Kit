@@ -699,7 +699,7 @@ install_depends() {
             $sudo add-apt-repository -y universe
         fi
         $sudo apt update
-        $sudo apt install -m -y aria2 ca-certificates curl git libssl3 libzstd1 openssh-client patch python3 python3-venv sshfs unzip usbmuxd usbutils xxd zenity zip zlib1g
+        $sudo apt install -m -y aria2 build-essential ca-certificates cmake curl git libssl3 libzstd1 openssh-client patch python3 python3-venv sshfs unzip usbmuxd usbutils xxd zenity zip zlib1g zlib1g-dev
         if [[ $(command -v systemctl 2>/dev/null) ]]; then
             $sudo systemctl enable --now udev systemd-udevd usbmuxd 2>/dev/null
         fi

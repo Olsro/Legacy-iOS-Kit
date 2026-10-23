@@ -1,0 +1,7 @@
+{
+  "sha256": "bfd4cf716271522e6a1e62393b3c44a0de50adb288b6692b372498c0f5658df1",
+  "source_sha256": "ca430b75188b026c7d66785d8a1f30cdd8ae96e5fd68272e4a23027292d8ca7b",
+  "qualification": "N78AP, 12H321 bootstrap -> 10B329 target, wired autonomous boot",
+  "origin": "multi_kloader, winocm, GPL-2.0-or-later; immediate IOPMSleepSystem transition",
+  "bytes": 53920
+}

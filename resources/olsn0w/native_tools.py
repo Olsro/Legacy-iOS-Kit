@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import platform
 import shutil
+import subprocess
+import sys
 import tempfile
 
 from archives import members
@@ -12,6 +14,46 @@ from firmware import fetch
 
 XPWN_COMMIT = '300c54a161925afdb77723616025bd60047db7fd'
 XPWN_ARCHIVE_SHA256 = '5cfed5242db6fccfae76a7677cb28c41c301669a3aa54aeed5fd4fab0901b43c'
+
+
+def build_dependencies_problem():
+    if not shutil.which('cmake'):
+        return 'CMake is not installed.'
+    # Check the same CMake generator, compiler and zlib headers/library that
+    # the real build will use. Finding an executable alone is insufficient.
+    with tempfile.TemporaryDirectory(prefix='olsn0w-build-check-') as temporary:
+        source = Path(temporary)
+        (source / 'CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.10)\n'
+            'project(olsn0w_build_check C)\n'
+            'find_package(ZLIB REQUIRED)\n'
+            'add_executable(check_zlib main.c)\n'
+            'target_link_libraries(check_zlib PRIVATE ZLIB::ZLIB)\n')
+        (source / 'main.c').write_text('#include <zlib.h>\nint main(void) { return zlibVersion() == 0; }\n')
+        try:
+            for argv in (['cmake', '-S', str(source), '-B', str(source / 'build')],
+                         ['cmake', '--build', str(source / 'build')]):
+                result = subprocess.run(argv, capture_output=True, timeout=120)
+                if result.returncode:
+                    return (result.stdout + result.stderr).decode(errors='replace')[-2000:]
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return str(error)
+    return None
+
+
+def ensure_build_dependencies():
+    problem = build_dependencies_problem()
+    if problem is None:
+        return
+    print('olsn0w: native build prerequisites are missing or unusable:\n' + problem,
+          file=sys.stderr, flush=True)
+    result = subprocess.run(['sh', str(KIT / 'resources/olsn0w/setup.sh'), '--native-only'])
+    if result.returncode:
+        raise RuntimeError('Could not install the native build prerequisites; see the package manager error above. '
+                           'Run olsn0w again to retry.')
+    problem = build_dependencies_problem()
+    if problem is not None:
+        raise RuntimeError('Native build prerequisites are still unusable after installation:\n' + problem)
 
 
 def hfscompress():
@@ -28,6 +70,7 @@ def hfscompress():
         if digest(executable) != report['sha256']:
             raise ValueError('HFS helper checksum differs from its completed build')
         return executable
+    ensure_build_dependencies()
     archive = STATE / 'sources' / ('powdersn0w-' + XPWN_COMMIT + '.tar.gz')
     if not archive.exists():
         fetch('https://codeload.github.com/LukeZGD/powdersn0w_pub/tar.gz/' + XPWN_COMMIT, archive)

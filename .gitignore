@@ -42,3 +42,5 @@ __pycache__/
 !resources/olsn0w/target/rescue-unmount.json
 
 !resources/olsn0w/target/bootstrap/manifest.json
+!resources/olsn0w/target/a5-loader/manifest.json
+!resources/olsn0w/target/ios5/manifest.json

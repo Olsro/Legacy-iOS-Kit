@@ -1,0 +1,20 @@
+{
+  "minimum_ios": "5.0",
+  "architecture": "armv7",
+  "build_sdk": "iPhoneOS5.0.sdk",
+  "physical_boot_verified": true,
+  "physical_validation": {
+    "product": "iPad3,1",
+    "version": "5.1.1",
+    "build": "9B206",
+    "date": "2026-09-28",
+    "checks": ["fresh-system-keybag", "regular-file-class-D", "class-D-after-forced-reset"]
+  },
+  "files": {
+    "native/target/build-ios5-helpers.sh": "84cb58eedf0105d5de3e7a34f7241f6329ea2aa1b015c330a9ef4a40369e2e35",
+    "native/target/keybag_init.c": "a9593bd96fdfa9efa188382bf13b8b20fda4f1b26769cce0f4c615b98db0e6f1",
+    "native/target/protection_probe.c": "5c204fdc5f37fb5908b057bc97f61c73c9d8194399c583a5bf32e246850ddec4",
+    "target/ios5/keybag-init": "98b63a763843783915920773d922e4c5ea2ea5f75f1ca780496a1a96756fdccb",
+    "target/ios5/protection-probe": "c71474e49583a79e8733ee68c233d3f713ed3447e7428111c90c14fb2d879a39"
+  }
+}

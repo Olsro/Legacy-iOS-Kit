@@ -2,11 +2,13 @@ name: Check olsn0w
 on:
   push:
     paths:
+      - '.gitignore'
       - 'resources/olsn0w/**'
       - 'restore.sh'
       - '.github/workflows/olsn0w.yml'
   pull_request:
     paths:
+      - '.gitignore'
       - 'resources/olsn0w/**'
       - 'restore.sh'
       - '.github/workflows/olsn0w.yml'

@@ -285,12 +285,18 @@ The isolated Python runtime, downloaded firmware, generated images, keys, and
 local validation reports live under the ignored `saved/olsn0w/` directory.
 The firmware relay uses direct Thumb encoding and emulator checks. System and
 compact-bootstrap image preparation compile an HFS helper with a C compiler,
-CMake and zlib. Its tar importer preserves symlink metadata without changing the
-target's permissions or ownership. Bootstrap programs use Clang and an ARM-capable Mach-O
+CMake and zlib development files. Before building the helper, olsn0w checks a
+small CMake project that compiles and links against zlib. Missing prerequisites
+are installed automatically through the host package manager, then checked
+again. On Ubuntu/Debian these are `build-essential`, `cmake` and `zlib1g-dev`.
+This repair preserves the Python runtime and prepared firmware. Its tar importer
+preserves symlink metadata without changing the target's permissions or ownership.
+Bootstrap programs use Clang and an ARM-capable Mach-O
 linker, with libraries extracted from the selected stock restore ramdisk. No Apple
 SDK, Xcode project, or macOS image mount is needed. Linux compilation and image
-checks are exercised during development; native-tool setup is not yet integrated
-into the public restoration entry point. Docker is used for development checks.
+checks are exercised during development. Cross-compilation toolchain setup for
+bootstrap programs remains separate from the host HFS helper dependencies.
+Docker is used for development checks.
 
 Normal relays on A5/A5X and A6/A6X use graphical target boot arguments and the
 same checked Apple-logo display hook. Relay recipe 24 invalidates the older A5

@@ -76,6 +76,31 @@ class RuntimeRepair(unittest.TestCase):
 
 
 class HostPrerequisites(unittest.TestCase):
+    def test_native_apt_install_does_not_touch_the_python_runtime(self):
+        with tempfile.TemporaryDirectory(prefix='olsn0w native ') as temporary:
+            root = Path(temporary)
+            tools = root / 'tools'
+            tools.mkdir()
+            log = root / 'packages.log'
+            scripts = {
+                'python3': '#!/bin/sh\necho python-was-invoked >> "$PACKAGE_LOG"\nexit 1\n',
+                'apt-get': '#!/bin/sh\necho "$*" >> "$PACKAGE_LOG"\n',
+                'sudo': '#!/bin/sh\nexec "$@"\n',
+                'id': '#!/bin/sh\necho 1000\n',
+                'uname': '#!/bin/sh\necho Linux\n',
+            }
+            for name, script in scripts.items():
+                executable = tools / name
+                executable.write_text(script)
+                executable.chmod(0o755)
+            (tools / 'dirname').symlink_to(shutil.which('dirname'))
+            result = subprocess.run(['/bin/sh', str(runtime.SOURCE / 'setup.sh'), '--native-only'],
+                                    env=dict(os.environ, PATH=str(tools), PACKAGE_LOG=str(log)),
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(log.read_text().splitlines(),
+                             ['update', 'install -y build-essential cmake zlib1g-dev'])
+
     def test_apt_installs_missing_python_or_venv_and_leaves_ready_hosts_alone(self):
         # Substitute only the host tools: never run a real package manager.
         for missing in ('python', 'venv', 'none'):
