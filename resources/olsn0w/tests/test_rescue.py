@@ -12,13 +12,19 @@ import rescue
 
 
 class PrepareDFU(unittest.TestCase):
+    def setUp(self):
+        backend = patch('usb_backend.get_backend', return_value=object())
+        self.backend = backend.start().return_value
+        self.addCleanup(backend.stop)
+
     def test_unique_dfu_ignores_normal_mode_apple_devices(self):
         selected=SimpleNamespace(idProduct=0x1227,iSerialNumber=1)
         devices=[SimpleNamespace(idProduct=0x12a8),selected,SimpleNamespace(idProduct=0x1261)]
-        with patch('usb.core.find',return_value=devices), \
+        with patch('usb.core.find',return_value=devices) as find, \
              patch('usb.util.get_string',return_value='CPID:8940 ECID:00000024c0036d8f'), \
              patch('usb.util.dispose_resources') as dispose:
             rescue.unique_usb_target(0x24c0036d8f)
+            find.assert_called_once_with(find_all=True,idVendor=0x05ac,backend=self.backend)
             dispose.assert_called_once_with(selected)
 
     def test_unique_dfu_rejects_other_boot_interfaces_and_wrong_ecid(self):

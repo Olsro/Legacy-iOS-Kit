@@ -79,10 +79,11 @@ def unique_usb_target(ecid):
     # libusb works on Linux and macOS; no system_profiler/ioreg dependency.
     import usb.core
     import usb.util
+    from usb_backend import get_backend
     # The unaddressed exploit tools operate on DFU/recovery interfaces, not
     # normal-mode iPhones or iPods (which also use Apple 0x12xx product IDs).
     # Reject a second boot interface, while retaining the exact ECID check.
-    devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac)
+    devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac,backend=get_backend())
              if d.idProduct in (0x1222,0x1227,0x1280,0x1281,0x1282,0x1283)]
     if len(devices)!=1 or devices[0].idProduct!=0x1227:
         raise ValueError('Connect only the selected device in DFU before loading the rescue')

@@ -260,8 +260,11 @@ and the kit's `iBoot32Patcher`, `xpwntool`, `dmg`, and `hfsplus` binaries. Syste
 image preparation also uses `ssh-keygen` and the same pinned ldid release used
 by the kit (downloaded into the private working directory). Capstone
 and Unicorn provide binary inspection and instruction emulation. PyCryptodome
-decrypts the firmware envelope identically on either host. PyUSB uses the
-Kit's libusb dependency for portable USB identity checks. Post-boot activation
+decrypts the firmware envelope identically on either host. PyUSB explicitly loads
+the native library supplied by the pinned `libusb-package==1.0.26.4` dependency
+in the private Python environment. This includes a macOS 10.9+ Intel wheel and
+does not require Homebrew. Runtime preflight checks the actual libusb backend,
+not just the Python import, before any firmware preparation. Post-boot activation
 acknowledgement uses libimobiledevice and libplist on either host.
 
 Linux tools receive an absolute path to the Kit's bundled shared libraries,
@@ -287,6 +290,23 @@ The Kit shows the olsn0w restore and SSH options for supported models even if
 Python is missing or too old. Selecting an option runs the prerequisite check
 and reports any installation problem in the terminal. This also applies to
 Intel Macs running older macOS versions such as High Sierra.
+
+After a cancelled preparation or a failure before any erase, selecting the same
+device, exact iOS build and activation policy reuses a completed compatible
+`guided-plan.json` from `saved/olsn0w/sessions/`. This skips rebuilding the five
+preparation steps. Saved component checksums, recipe versions, device identity,
+restore environment and ticket are checked first; sessions that may already
+have started restoring are excluded. Keep the original `saved/olsn0w/` directory.
+An early pipeline failure marker is archived as `pipeline-before-retry.json`;
+prepared images and diagnostic logs are retained. Incomplete or obsolete plans
+fall back to preparation, using the existing firmware/system caches.
+
+During one process, an unchanged file is hashed once per algorithm. IPSW SHA-1
+and SHA-256 are computed together in one read. Repeated checks reuse the result
+only while the device/inode, size, modification time and change time match;
+changed or replaced files are hashed again, and files changing during a read
+are rejected. Hash results are not persisted: a new launch verifies saved files
+again rather than trusting a previous run's filesystem metadata.
 
 Run from the kit directory:
 

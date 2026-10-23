@@ -36,9 +36,9 @@ def checkpoint(path, value):
     os.replace(temporary, path)
 
 
-def checked_manifest(folder):
+def checked_manifest(folder, manifest='manifest.json'):
     folder = Path(folder)
-    report = json.loads((folder/'manifest.json').read_text())
+    report = json.loads((folder/manifest).read_text())
     for name, expected in report['files'].items():
         path = folder/name
         if Path(name).is_absolute() or '..' in Path(name).parts or path.is_symlink():

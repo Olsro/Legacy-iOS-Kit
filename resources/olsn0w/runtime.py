@@ -20,6 +20,9 @@ def check():
     import_module('capstone').cs_version()
     import_module('unicorn').uc_version()
     import_module('usb.core')
+    # Importing PyUSB does not check that its native USB backend is usable.
+    # Load the private library now, before preparing firmware or asking to erase.
+    import_module('usb_backend').get_backend()
     aes = import_module('Crypto.Cipher.AES')
     aes.new(bytes(16), aes.MODE_ECB).encrypt(bytes(16))
 

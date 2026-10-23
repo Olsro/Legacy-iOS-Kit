@@ -181,6 +181,25 @@ class GuidedTest(unittest.TestCase):
             self.assertEqual(dfu.call_count,2)
             self.assertEqual(restore.call_count,2)
 
+    def test_saved_preparation_skips_all_five_steps_and_keeps_erase_confirmation(self):
+        plan = {'session':'already-prepared'}
+        for answer in ('n', 'y'):
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as folder, \
+                 patch.object(guided,'STATE',Path(folder)), \
+                 patch.object(guided,'connected',return_value=(IDENTITY,None)), \
+                 patch.object(guided,'releases',return_value=[RELEASE]), \
+                 patch('prepared_session.find_plan',return_value=plan) as reuse, \
+                 patch.object(guided,'prepare') as prepare, \
+                 patch.object(guided,'enter_dfu') as dfu, \
+                 patch('provision_restore.run',return_value={'success':True}) as restore:
+                answers=iter(['1','n',answer])
+                guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
+                prepare.assert_not_called()
+                self.assertFalse((Path(folder)/'sessions').exists())
+                self.assertEqual(dfu.call_count,int(answer=='y'))
+                self.assertEqual(restore.call_count,int(answer=='y'))
+                self.assertEqual(reuse.call_args.args[:3],(IDENTITY,RELEASE,False))
+
     def test_setup_removal_choice_is_bound_to_the_prepared_session(self):
         observed={};messages=[]
         def prepare(session,release,show):

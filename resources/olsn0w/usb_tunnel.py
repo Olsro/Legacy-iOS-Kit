@@ -8,12 +8,14 @@ import time
 
 from common import save
 from guided_inputs import tool
+from usb_backend import get_backend
 
 
 def normal_serial():
     import usb.core
     import usb.util
-    devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac) if 0x1200<=d.idProduct<=0x12ff]
+    devices=[d for d in usb.core.find(find_all=True,idVendor=0x05ac,backend=get_backend())
+             if 0x1200<=d.idProduct<=0x12ff]
     serials=set()
     for device in devices:
         try:

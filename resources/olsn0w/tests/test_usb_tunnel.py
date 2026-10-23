@@ -8,13 +8,19 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import usb_tunnel
 
 class TunnelTest(unittest.TestCase):
+    def setUp(self):
+        backend = patch.object(usb_tunnel, 'get_backend', return_value=object())
+        self.backend = backend.start().return_value
+        self.addCleanup(backend.stop)
+
     def test_transient_restore_interface_does_not_hide_selected_normal_device(self):
         selected=Mock(idProduct=0x12ab,iSerialNumber=1)
         transient=Mock(idProduct=0x1281,iSerialNumber=2)
-        with patch('usb.core.find',return_value=[selected,transient]), \
+        with patch('usb.core.find',return_value=[selected,transient]) as find, \
              patch('usb.util.get_string',side_effect=['A'*40,'CPID:8955 ECID:123']), \
              patch('usb.util.dispose_resources') as dispose:
             self.assertEqual(usb_tunnel.normal_serial(),'a'*40)
+            find.assert_called_once_with(find_all=True,idVendor=0x05ac,backend=self.backend)
         self.assertEqual(dispose.call_count,2)
 
     def test_duplicate_interfaces_for_selected_udid_are_one_target(self):

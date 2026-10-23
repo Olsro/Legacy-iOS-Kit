@@ -6,6 +6,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 from progress import activity
 
@@ -164,13 +165,47 @@ def tools():
     return path
 
 
+_DIGEST_CACHE = {}
+
+
+def _file_stamp(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def digest(path, algorithm='sha256'):
-    result = hashlib.new(algorithm)
-    with activity('Verifying file integrity',Path(path).stat().st_size) as update, Path(path).open('rb') as stream:
+    # Reuse only this process's verified reads. ctime catches same-size edits
+    # even if a caller restores mtime. A new launch always hashes files again.
+    path = Path(path)
+    before = path.stat()
+    key = (before.st_dev, before.st_ino, algorithm)
+    stamp = _file_stamp(before)
+    cached = _DIGEST_CACHE.get(key)
+    if stat.S_ISREG(before.st_mode) and cached is not None and cached[0] == stamp:
+        return cached[1]
+    results = {algorithm: hashlib.new(algorithm)}
+    # IPSWs need Apple's SHA-1 and our SHA-256 manifests. Compute both during
+    # the first read instead of streaming the same multi-GiB archive twice.
+    if algorithm == 'sha1':
+        results['sha256'] = hashlib.sha256()
+    with activity('Verifying file integrity',before.st_size) as update, path.open('rb') as stream:
+        if _file_stamp(os.fstat(stream.fileno())) != stamp:
+            raise ValueError('File changed before integrity verification: ' + str(path))
         done=0
         for chunk in iter(lambda: stream.read(4 * 1048576), b''):
-            result.update(chunk);done+=len(chunk);update(done)
-    return result.hexdigest()
+            for result in results.values():
+                result.update(chunk)
+            done+=len(chunk);update(done)
+        if (_file_stamp(os.fstat(stream.fileno())) != stamp or
+                _file_stamp(path.stat()) != stamp):
+            raise ValueError('File changed during integrity verification: ' + str(path))
+    values = {name: result.hexdigest() for name, result in results.items()}
+    if stat.S_ISREG(before.st_mode):
+        for name, value in values.items():
+            entry = (before.st_dev, before.st_ino, name)
+            if entry not in _DIGEST_CACHE and len(_DIGEST_CACHE) >= 2048:
+                _DIGEST_CACHE.pop(next(iter(_DIGEST_CACHE)))
+            _DIGEST_CACHE[entry] = (stamp, value)
+    return values[algorithm]
 
 
 def clone_or_copy(source, destination):

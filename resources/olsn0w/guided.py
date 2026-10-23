@@ -310,13 +310,16 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             remove_setup_app=answer in ('y','yes')
             break
         show('Please explicitly choose y or n.')
-    session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
-    record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
-                remove_setup_app=remove_setup_app)
-    if udid:record['ram_udid']=udid
-    save(session/'device.json',record)
-    show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
-    plan=prepare(session,selected,show)
+    from prepared_session import find_plan
+    plan=find_plan(identity,selected,remove_setup_app,show,state=STATE)
+    if plan is None:
+        session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
+        record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
+                    remove_setup_app=remove_setup_app)
+        if udid:record['ram_udid']=udid
+        save(session/'device.json',record)
+        show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
+        plan=prepare(session,selected,show)
     setup_note=((' Hacktiv8 will be applied; Setup.app will be kept.' if use_hacktiv8 else
                  ' Setup.app will be removed.')+' Official activation will be skipped.'
                 if remove_setup_app else '')

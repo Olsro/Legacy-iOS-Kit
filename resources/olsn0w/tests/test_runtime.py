@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runtime
@@ -62,6 +62,18 @@ class RuntimeRepair(unittest.TestCase):
              patch.object(runtime, 'import_module', side_effect=[object(), OSError('native library missing')]):
             with self.assertRaisesRegex(OSError, 'native library missing'):
                 runtime.check()
+
+    def test_pyusb_import_alone_does_not_pass_the_runtime_check(self):
+        versions = dict(line.split('==') for line in (runtime.SOURCE / 'requirements.txt').read_text().splitlines())
+        backend_module = Mock()
+        backend_module.get_backend.side_effect = RuntimeError('private libusb backend unavailable')
+        modules = {name: Mock() for name in ('pip', 'capstone', 'unicorn', 'usb.core', 'Crypto.Cipher.AES')}
+        modules['usb_backend'] = backend_module
+        with patch.object(runtime.metadata, 'version', side_effect=versions.__getitem__), \
+             patch.object(runtime, 'import_module', side_effect=modules.__getitem__):
+            with self.assertRaisesRegex(RuntimeError, 'private libusb backend unavailable'):
+                runtime.check()
+        backend_module.get_backend.assert_called_once()
 
     def test_help_and_support_checks_skip_environment_installation(self):
         import olsn0w
