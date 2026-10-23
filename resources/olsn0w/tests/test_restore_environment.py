@@ -87,20 +87,29 @@ class RestoreEnvironment(unittest.TestCase):
                         multipatch_restore_component_encoding='encrypted-donor-for-libipatcher',
                         restore_key_policy='signed-base-with-10B329-restore-components',
                         restore_filesystem_build='12H321')
-            for rescue_build in ('12H321','10B329'):
-                with self.subTest(rescue_build=rescue_build), \
+            for rescue_build,loader_error in (('12H321',False),('10B329',False),('10B329',True)):
+                with self.subTest(rescue_build=rescue_build,loader_error=loader_error), \
                      patch.object(provision_run,'checked_manifest',return_value=report), \
                      patch.object(provision_run,'session_build',return_value=rescue_build), \
                      patch.object(provision_run,'restore_arguments',return_value=['restore']), \
+                     patch.object(provision_run,'check_restore_runtime',
+                                  side_effect=RuntimeError('missing library') if loader_error else None) as loader, \
                      patch.object(provision_run,'prepare_dfu',side_effect=RuntimeError('stop before USB')) as dfu:
                     if rescue_build=='12H321':
                         with self.assertRaisesRegex(ValueError,'environments differ'):
                             provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
                         dfu.assert_not_called()
+                        loader.assert_not_called()
+                    elif loader_error:
+                        with self.assertRaisesRegex(RuntimeError,'missing library'):
+                            provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
+                        loader.assert_called_once()
+                        dfu.assert_not_called()
                     else:
                         with self.assertRaisesRegex(provision_run.DfuPreparationError,'stop before USB'):
                             provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
                         dfu.assert_called_once()
+                        loader.assert_called_once()
                     self.assertFalse((bundle/'run.json').exists())
 
     def test_ram_connections_use_the_prepared_environment(self):

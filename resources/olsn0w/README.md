@@ -264,6 +264,17 @@ decrypts the firmware envelope identically on either host. PyUSB uses the
 Kit's libusb dependency for portable USB identity checks. Post-boot activation
 acknowledgement uses libimobiledevice and libplist on either host.
 
+Linux tools receive an absolute path to the Kit's bundled shared libraries,
+including LibreSSL, even when launched from a session working directory. Before
+DFU preparation, the restore tool is started without restore arguments to check
+its loader; diagnostics are saved in `provision/restore-loader.log`.
+
+On Linux and Intel Macs, the DFU step delegates to the Kit through an internal
+mode that preserves the owning menu's temporary files and usbmuxd instance.
+It discovers and checks the selected product/ECID without opening another menu.
+The `kit-pwn` diagnostics are displayed live and saved in the session log;
+timeouts stop the helper's process group, including descendants holding pipes.
+
 The menu and standalone entry point automatically create or repair the private
 Python environment before device operations. They check the pinned package
 versions and load the native libraries, so an interrupted installation is retried

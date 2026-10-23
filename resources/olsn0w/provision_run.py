@@ -1,7 +1,6 @@
 """Run the Kit signed-base restore and authenticate its held RAM handoff."""
 import http.server
 import json
-import os
 from pathlib import Path
 import plistlib
 import platform
@@ -9,8 +8,9 @@ import posixpath
 import subprocess
 import threading
 import time
+import tempfile
 
-from common import KIT, MODELS, baseband_strategy, integer, profile, tools
+from common import KIT, MODELS, baseband_strategy, integer, profile, tools, tool_environment
 from device import same_hardware
 from provision import read_handoff, require_completed_restore
 from rescue import prepare_dfu, connect
@@ -21,6 +21,24 @@ from restore_environment import report_build, session_build
 
 class DfuPreparationError(RuntimeError):
     """A retryable DFU exploit failure that happened before any erase."""
+
+
+def check_restore_runtime(executable, env, log):
+    """Load the binary with no restore arguments before touching USB or disks."""
+    log = Path(log)
+    with tempfile.TemporaryDirectory(prefix='restore-loader-', dir=log.parent) as work:
+        try:
+            result = subprocess.run([str(executable)], cwd=work, env=env,
+                                    capture_output=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            log.write_text(str(error)+'\n')
+            raise RuntimeError('Cannot start the Kit restore tool; see '+str(log)) from error
+    output = result.stdout+result.stderr
+    log.write_bytes(output)
+    # This legacy binary returns -1 (255 on POSIX) for its no-argument usage.
+    if result.returncode not in (0, 1, 255) or b'Usage: futurerestore' not in output:
+        raise RuntimeError('Kit restore tool cannot load its runtime; see '+str(log)+'\n'+
+                           output.decode(errors='replace')[-2000:])
 
 
 def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=None):
@@ -133,6 +151,8 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
                 metadata.get('buildid')!='12H321'):
             raise ValueError('Multipatch firmware keys differ from selected base route')
     argv=restore_arguments(record['identity'],bundle/'base8.ipsw',ticket,baseband,baseband_manifest)
+    env=tool_environment()
+    check_restore_runtime(argv[0],env,bundle/'restore-loader.log')
     try:
         prepare_dfu(session,pwned=pwned,progress=progress)
     except (RuntimeError, subprocess.TimeoutExpired) as error:
@@ -152,7 +172,6 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     # Bundled legacy restore binaries use the Kit's fixed loopback port.
     server=http.server.ThreadingHTTPServer(('127.0.0.1',8888),Keys)
     worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
-    env=os.environ.copy()
     state=dict(stage='signed-base-restore-prepared',complete=False,erase_requested=True)
     work=bundle/'work';work.mkdir()
     checkpoint(journal,state)

@@ -2,10 +2,11 @@
 """Prepare olsn0w firmware for a 32-bit device with signed iOS 8.4.1."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
-from common import MODELS, STATE, SUPPORT_MESSAGE
+from common import MODELS, STATE, SUPPORT_MESSAGE, tool_environment
 from firmware import releases, extract
 
 
@@ -46,6 +47,7 @@ def main():
     if args.action != 'list':
         from runtime import ensure_runtime
         ensure_runtime(STATE)
+        os.environ.update(tool_environment())
     if args.action == 'configure-ssh':
         if not args.udid:
             parser.error('configure-ssh requires --udid')

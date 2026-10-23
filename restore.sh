@@ -43,6 +43,29 @@ error() {
     exit 1
 }
 
+olsn0w_pwn_init() {
+    [[ $olsn0w_internal_pwn == 1 ]] || return 0
+    if [[ $main_argmode != "pwned-ibss" || -z $device_type || ! $device_ecid =~ ^[0-9]+$ ]]; then
+        error "The internal olsn0w DFU helper requires --pwn, --device and a decimal --ecid."
+    fi
+    olsn0w_expected_product="$device_type"
+    olsn0w_expected_ecid="$device_ecid"
+    # Discover the actual USB identity instead of opening manual-entry prompts.
+    device_argmode=
+    device_type=
+    device_ecid=
+    device_disable_usbmuxd=1
+    device_disable_sudoloop=1
+}
+
+olsn0w_pwn_check_identity() {
+    [[ $olsn0w_internal_pwn == 1 ]] || return 0
+    if [[ $device_mode != "DFU" || $device_type != "$olsn0w_expected_product" ||
+          $device_ecid != "$olsn0w_expected_ecid" ]]; then
+        error "The DFU device differs from the selected olsn0w session."
+    fi
+}
+
 pause() {
     input "Press Enter/Return to continue (or press Ctrl+C to cancel)"
     read -s
@@ -434,7 +457,7 @@ set_tool_paths() {
         ssh2="$dir/ssh"
         cp $ssh2 . 2>/dev/null
         chmod +x ssh 2>/dev/null
-        export LD_LIBRARY_PATH="$dir/lib"
+        export LD_LIBRARY_PATH="$(cd "$dir/lib" && pwd)"
 
         # live cd/usb check
         if [[ $(id -u $USER) == 999 || $USER == "liveuser" || $(df | grep -c "/cow") != 0 ]] ||
@@ -500,7 +523,7 @@ set_tool_paths() {
             irecovery3="$sudo "
             primepwn="$sudo "
         fi
-        if [[ $(command -v gio) && ! -e ../resources/new && $device_argmode != "none" ]]; then
+        if [[ $(command -v gio) && ! -e ../resources/new && $device_argmode != "none" && $olsn0w_internal_pwn != 1 ]]; then
             log "gio detected. Unmounting all iOS devices with it"
             gio mount -l | awk '/gphoto2:\/\/Apple_Inc|afc:\/\// {print $NF}' | while read -r m; do gio mount -u "$m"; done
         fi
@@ -12598,6 +12621,7 @@ main() {
     fi
 
     device_get_info
+    olsn0w_pwn_check_identity
     mkdir -p ../saved/baseband ../saved/$device_type ../saved/shsh
 
     mode=
@@ -12723,6 +12747,7 @@ for i in "$@"; do
         # please dont use these, unless you know what youre doing
         "--no-internet-check") no_internet_check=1;;
         "--no-version-check" ) :;; # Compatibility: this fork never self-updates.
+        "--olsn0w-pwn"      ) olsn0w_internal_pwn=1;;
         "--run-as-root"      ) run_as_root=1;;
     esac
 done
@@ -12745,11 +12770,17 @@ elif [[ $main_argmode == "device_justboot" && $device_type == "iPod4,1" && $devi
     main_argmode="device_justboot_specialios7"
 fi
 
+olsn0w_pwn_init
+
 trap "clean" EXIT
 trap "exit 1" INT TERM
 
 othertmp=$(ls "$(dirname "$0")" | grep -c tmp)
-if [[ $othertmp != 0 ]]; then
+if [[ $olsn0w_internal_pwn == 1 ]]; then
+    # The owning menu is expected to have a tmp directory. Keep its files and
+    # usbmuxd instance; this helper only owns the tmp directory it creates.
+    noclean=1
+elif [[ $othertmp != 0 ]]; then
     noclean=1
     log "Detected existing tmp folder(s)."
     print "* There might be other Olsro's Legacy iOS Kit instance(s) running, or residual tmp folder(s) not deleted."

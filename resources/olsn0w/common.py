@@ -199,12 +199,25 @@ def clone_or_copy(source, destination):
     return destination
 
 
+def tool_environment():
+    """Resolve bundled Linux libraries before a subprocess changes directory."""
+    env = os.environ.copy()
+    if platform.system() == 'Linux':
+        paths = [str((tools()/'lib').resolve())]
+        existing = env.get('LD_LIBRARY_PATH')
+        if existing:
+            paths.extend(str(Path(path or '.').resolve()) for path in existing.split(':'))
+        env['LD_LIBRARY_PATH'] = ':'.join(dict.fromkeys(paths))
+    return env
+
+
 def run(argv, log=None, patcher=False, timeout=180):
     descriptions={'dmg':'Extracting system image','hfsplus':'Preparing filesystem contents',
                   'cmake':'Preparing filesystem tools','xpwntool':'Packing boot component',
                   'iBoot32Patcher':'Preparing boot component','curl':'Obtaining required files'}
     with activity(descriptions.get(Path(str(argv[0])).name,'Running preparation tool')):
-        result = subprocess.run(list(map(str, argv)), capture_output=True, timeout=timeout)
+        result = subprocess.run(list(map(str, argv)), capture_output=True, timeout=timeout,
+                                env=tool_environment())
     if log:
         Path(log).write_bytes(result.stdout + result.stderr)
     expected = 1 if patcher else 0

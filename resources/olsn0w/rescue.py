@@ -1,14 +1,73 @@
 """Load a selected RAM rescue using Legacy iOS Kit's host-specific DFU tools."""
 import json
+import os
 from pathlib import Path
 import platform
 import re
+import selectors
+import signal
 import subprocess
+import sys
 import time
 
-from common import KIT, digest, profile, tools
+from common import KIT, digest, profile, tools, tool_environment
 from device import recheck_recovery
 from restore import Rescue, checkpoint
+
+
+def run_boot_command(argv, session, label, timeout=45):
+    """Keep live diagnostics and bound the entire DFU tool process group."""
+    argv = list(map(str, argv))
+    log = Path(session)/(label+'.log')
+    output = bytearray()
+    with log.open('wb') as stream, selectors.DefaultSelector() as selector:
+        process = subprocess.Popen(argv, cwd=session, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   start_new_session=True, env=tool_environment())
+        try:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            deadline = time.monotonic()+timeout
+            while selector.get_map():
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout, output=bytes(output))
+                for key, _ in selector.select(min(remaining, .25)):
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    stream.write(chunk)
+                    stream.flush()
+                    output.extend(chunk)
+                    if label == 'kit-pwn':
+                        sys.stderr.write(chunk.decode(errors='replace'))
+                        sys.stderr.flush()
+            remaining = max(.001, deadline-time.monotonic())
+            process.wait(timeout=remaining)
+        except BaseException:
+            # Killing only bash leaves menu/exploit descendants holding the
+            # output pipe open, so subprocess.run can hang beyond its timeout.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                # macOS can report EPERM for a group containing only zombies.
+                if process.poll() is None:
+                    process.kill()
+            process.wait()
+            raise
+        finally:
+            process.stdout.close()
+    if process.returncode:
+        raise RuntimeError('DFU/RAM command failed at '+label+'; see '+str(log))
+    return output.decode(errors='replace')
 
 
 def has_checkm8_marker(output):
@@ -50,10 +109,7 @@ def boot(session, *, progress=print, pwned=False):
     checkpoint(session/'rescue-run.json',state)
     def run(argv,label,timeout=45):
         state['stage']=label;checkpoint(session/'rescue-run.json',state);progress(label)
-        r=subprocess.run(list(map(str,argv)),cwd=session,capture_output=True,timeout=timeout)
-        (session/(label+'.log')).write_bytes(r.stdout+r.stderr)
-        if r.returncode:raise RuntimeError('RAM loading failed at '+label+'; see '+str(session/(label+'.log')))
-        return r.stdout.decode(errors='replace')
+        return run_boot_command(argv,session,label,timeout)
     prepare_dfu(session, pwned=pwned, progress=progress, run=run)
     run([tools()/'irecovery','-i',hex(identity['ecid']),'-f',session/'iBEC.img3'],'ibec-upload')
     time.sleep(2)
@@ -71,10 +127,7 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
     if run is None:
         def run(argv,label,timeout=45):
             progress(label)
-            result=subprocess.run(list(map(str,argv)),cwd=session,capture_output=True,timeout=timeout)
-            (session/(label+'.log')).write_bytes(result.stdout+result.stderr)
-            if result.returncode:raise RuntimeError('DFU preparation failed at '+label)
-            return result.stdout.decode(errors='replace')
+            return run_boot_command(argv,session,label,timeout)
     if recheck_recovery(session)['mode']!='DFU':raise ValueError('The selected device must be in DFU')
     unique_usb_target(identity['ecid'])
     selected_profile=profile(identity['product'])
@@ -97,7 +150,7 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
         run(['arch','-x86_64',KIT/'bin/macos/gaster','reset'],'pwn-reset',60)
     else:
         # Reuse the kit's A6/A6X selection, USB setup, and pwned-iBSS loader.
-        run(['bash',KIT/'restore.sh','--pwn','--device='+identity['product'],
+        run(['bash',KIT/'restore.sh','--pwn','--olsn0w-pwn','--device='+identity['product'],
              '--ecid='+str(identity['ecid']),'--no-version-check','--no-internet-check','--no-color'],
             'kit-pwn',180)
     time.sleep(2)
