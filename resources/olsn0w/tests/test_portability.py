@@ -1,8 +1,12 @@
 """Host-independent checks for catalog identity and generated ARM control flow."""
 import io
+import os
 from pathlib import Path
 import plistlib
+import re
+import shlex
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -56,8 +60,59 @@ class CatalogIdentity(unittest.TestCase):
 
     def test_restore_menu_delegates_olsn0w_availability_to_catalog(self):
         script=(KIT/'restore.sh').read_text()
-        self.assertIn('olsn0w.py supports --product "$device_type"',script)
+        self.assertIn('&& olsn0w_supported; then',script)
+        self.assertIn('if olsn0w_supported; then',script)
+        self.assertNotIn('olsn0w.py supports --product "$device_type"',script)
         self.assertNotIn('iPhone5,[12] | iPad3,[456] ) menu_items+=("olsn0w',script)
+
+    def test_menu_support_matches_catalog_without_python(self):
+        script=(KIT/'restore.sh').read_text()
+        helper=re.search(r'^olsn0w_supported\(\) \{\n.*?^\}',script,re.M|re.S).group()
+        for product in sorted(SIGNED_841_PRODUCTS | {'iPhone5,3','iPad4,1','iPad1,1','unknown',''}):
+            with self.subTest(product=product):
+                result=subprocess.run(['/bin/bash','-c',helper+'\ndevice_type='+shlex.quote(product)+
+                                       '\nolsn0w_supported'],cwd=KIT/'bin',
+                                      env=dict(os.environ,PATH='/nonexistent'),capture_output=True,text=True)
+                self.assertEqual(result.returncode,0 if product in SIGNED_841_PRODUCTS else 1,result.stderr)
+
+    def test_intel_mac_menus_show_olsn0w_with_missing_or_broken_python(self):
+        script=(KIT/'restore.sh').read_text()
+        functions='\n'.join(re.search(r'^'+name+r'\(\) \{\n.*?^\}',script,re.M|re.S).group()
+                            for name in ('olsn0w_supported','menu_restore','menu_miscutilities'))
+        for python in ('missing','broken'):
+            for menu,expected in (
+                    ('menu_restore','olsn0w (choose iOS version)'),
+                    ('menu_miscutilities','Configure olsn0w restored device for SSH external access'),
+                    ('menu_restore ipsw',None)):
+                with self.subTest(python=python,menu=menu), tempfile.TemporaryDirectory() as temporary:
+                    folder=Path(temporary)
+                    if python=='broken':
+                        executable=folder/'python3'
+                        executable.write_text('#!/bin/sh\necho invoked > "$PYTHON_LOG"\nexit 1\n')
+                        executable.chmod(0o755)
+                    code=functions+'''
+platform=macos
+platform_arch=x86_64
+platform_ver=10.13.6
+device_type=iPad3,1
+device_proc=5
+device_mode=Normal
+device_latest_vers=9.3.5
+menu_print_info() { :; }
+print() { :; }
+input() { :; }
+warn() { :; }
+select_option() { printf '%s\\n' "$@"; return $(($# - 1)); }
+'''+menu
+                    result=subprocess.run(['/bin/bash','-c',code],cwd=KIT/'bin',
+                                          env=dict(os.environ,PATH=temporary,PYTHON_LOG=str(folder/'python.log')),
+                                          capture_output=True,text=True,timeout=5)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    if expected:
+                        self.assertIn(expected,result.stdout.splitlines())
+                    else:
+                        self.assertNotIn('olsn0w (choose iOS version)',result.stdout.splitlines())
+                    self.assertFalse((folder/'python.log').exists())
 
     def test_old_cellular_ipads_preserve_their_modem(self):
         preserved={'iPad2,2','iPad2,3','iPad3,2','iPad3,3'}

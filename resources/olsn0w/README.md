@@ -283,6 +283,10 @@ package manager (APT, DNF, Pacman, Zypper or XBPS; Homebrew on macOS when availa
 System package installation may request your sudo password. On macOS without
 Homebrew, install Python 3.8+ from python.org if it is missing. Help, catalog
 listing and model support checks do not require the private environment.
+The Kit shows the olsn0w restore and SSH options for supported models even if
+Python is missing or too old. Selecting an option runs the prerequisite check
+and reports any installation problem in the terminal. This also applies to
+Intel Macs running older macOS versions such as High Sierra.
 
 Run from the kit directory:
 

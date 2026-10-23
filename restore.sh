@@ -8610,6 +8610,12 @@ menu_main() {
     done
 }
 
+olsn0w_supported() {
+    # This manifest set matches common.MODELS (checked by test_portability.py).
+    # Menu discovery must work before Python is installed or repaired by run.sh.
+    [[ -f "../resources/manifest/BuildManifest_${device_type}_8.4.1.plist" ]]
+}
+
 menu_olsn0w() {
     sh ../resources/olsn0w/run.sh menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" || warn "olsn0w stopped; see the reported reason."
     pause
@@ -9225,8 +9231,7 @@ menu_restore() {
             iPhone3,* | iPad1,1 | iPod3,1 )
                 menu_items+=("powdersn0w (any iOS)");;
         esac
-        if [[ $1 != "ipsw" ]] &&
-           python3 ../resources/olsn0w/olsn0w.py supports --product "$device_type" >/dev/null 2>&1; then
+        if [[ $1 != "ipsw" ]] && olsn0w_supported; then
             menu_items+=("olsn0w (choose iOS version)")
         fi
         if [[ $device_can_drav6 == 1 ]]; then
@@ -10730,7 +10735,7 @@ menu_miscutilities() {
                     menu_items+=("Pair Device")
                 fi
                 menu_items+=("hactiv8" "Activation Records")
-                if python3 ../resources/olsn0w/olsn0w.py supports --product "$device_type" >/dev/null 2>&1; then
+                if olsn0w_supported; then
                     menu_items+=("Configure olsn0w restored device for SSH external access")
                 fi
             fi
@@ -10972,7 +10977,7 @@ device_olsn0w_external_ssh() {
     print "* Original files are backed up; the existing USB SSH key is kept."
     select_yesno
     [[ $? != 1 ]] && return
-    python3 ../resources/olsn0w/olsn0w.py configure-ssh --product "$device_type" \
+    sh ../resources/olsn0w/run.sh configure-ssh --product "$device_type" \
         --udid "$device_udid" --ecid "$device_ecid" || warn "OpenSSH configuration failed; see the reported reason."
 }
 
