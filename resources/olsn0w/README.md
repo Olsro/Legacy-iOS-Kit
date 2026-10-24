@@ -721,7 +721,17 @@ The catalog has no upper iOS version cutoff. A catalog entry does not by itself
 establish that its complete restore/boot path has been physically validated.
 
 Cellular iPad2,2, iPad2,3, iPad3,2 and iPad3,3 profiles preserve the installed
-baseband, matching the Kit's established OTA policy. Other cellular profiles
+baseband, matching the Kit's established OTA policy. Their provisioning RAM
+sets `UpdateBaseband=false` in the selected board's restore options (falling
+back to `options.plist` only when board-specific options are absent), in addition
+to the host's `--no-baseband`. An iPad3,3 failure showed that the legacy host
+flag alone still allowed a `BasebandData` request, followed by a baseband TSS
+rejection (`STATUS=94`) and restore error `-11`. Preparation retains all other
+restore options and verifies the modified file before packing the RAM. Older
+bundles without this recorded policy are rejected before DFU or erase; prepare
+a new session and preserve the failed session's diagnostics. The RAM change
+has host-side readback coverage; a physical restore still needs validation.
+Other cellular profiles
 use their explicitly qualified Trek or Mav5 donor; no model silently inherits a
 different modem recipe.
 

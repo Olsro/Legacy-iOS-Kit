@@ -16,6 +16,7 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
     from rescue_prepare import RECIPE_VERSION as RESCUE_RECIPE
     from restore_environment import selected_build
     from provision_run import restore_arguments
+    from provision import require_baseband_policy
 
     path = Path(path)
     raw = json.loads(path.read_text())
@@ -56,6 +57,7 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
     manifests.append((session, 'rescue-preparation.json'))
     reports = [json.loads((folder/name).read_text()) for folder, name in manifests]
     relay, system, bootstrap, provision, rescue = reports
+    require_baseband_policy(provision)
     if (relay.get('recipe_version') != RELAY_RECIPE or system.get('recipe_version') != SYSTEM_RECIPE
             or rescue.get('recipe_version') != RESCUE_RECIPE):
         raise ValueError('Saved preparation uses an older recipe')

@@ -10,7 +10,7 @@ import uuid
 import zipfile
 
 from archives import members
-from common import KIT, MODELS, digest, integer, profile, run, tools
+from common import KIT, MODELS, baseband_strategy, digest, integer, profile, run, tools
 from firmware import acquire, extract
 from hfs import HFS
 from img3 import img3
@@ -22,6 +22,52 @@ from progress import activity
 HANDOFF = 'olsn0w-restore-handoff'
 MULTIPATCH_BOOTARGS = ('rd=md0 -v nand-enable-reformat=1 amfi=0xff '
                        'amfi_get_out_of_my_way=1 cs_enforcement_disable=1 pio-error=0')
+
+
+def configure_baseband(image, product):
+    """Disable modem flashing in restored's own options for preserved modems.
+
+    The legacy host's --no-baseband alone does not stop iOS 8 restored from
+    requesting BasebandData. Match the Kit's ramdisk UpdateBaseband override.
+    """
+    strategy=baseband_strategy(product)
+    if strategy!='preserve':return dict(strategy=strategy)
+    directory='/usr/local/share/restore'
+    board=MODELS[product][0]
+    names={item['name'] for item in image.ls(directory)}
+    name='options.'+board[:-2]+'.plist'
+    if name not in names:
+        if 'options.plist' not in names:
+            raise ValueError('Missing restore options for modem preservation')
+        name='options.plist'
+    path=directory+'/'+name
+    original=image.read(path)
+    options=plistlib.loads(original)
+    if not isinstance(options,dict):raise ValueError('Expected a restore options dictionary')
+    options['UpdateBaseband']=False
+    fmt=plistlib.FMT_BINARY if original.startswith(b'bplist00') else plistlib.FMT_XML
+    data=plistlib.dumps(options,fmt=fmt,sort_keys=False)
+    image.add(path,data,0o644)
+    if image.read(path)!=data:
+        raise ValueError('Modem preservation options readback differs')
+    return dict(strategy=strategy,update_baseband=False,options_path=path,
+                options_sha256=hashlib.sha256(data).hexdigest())
+
+
+def require_baseband_policy(report):
+    """Reject older cellular-iPad bundles before any DFU or erase operation."""
+    if baseband_strategy(report['product'])!='preserve':return
+    policy=report.get('baseband_policy',{})
+    if not isinstance(policy,dict):
+        raise ValueError('Invalid modem preservation policy; no erase started')
+    board=MODELS[report['product']][0]
+    paths={'/usr/local/share/restore/options.'+board[:-2]+'.plist',
+           '/usr/local/share/restore/options.plist'}
+    if (policy.get('strategy')!='preserve' or policy.get('update_baseband') is not False
+            or policy.get('options_path') not in paths
+            or not isinstance(policy.get('options_sha256'),str)
+            or not re.fullmatch(r'[0-9a-f]{64}',policy.get('options_sha256',''))):
+        raise ValueError('Prepare the current modem-preserving restore RAM first; no erase started')
 
 
 def multipatch_iboot_flags(component):
@@ -219,6 +265,7 @@ def prepare(session, destination, ipsw=None, keys=None):
     image = HFS(image_path)
     if image.info()['bytes'] != RAM_VOLUME_BYTES:
         raise ValueError('Restore RAM allocation differs from the qualified rescue')
+    baseband_policy=configure_baseband(image,selected['product'])
     from asr_patch import patch as patch_asr
     from signing import resign, verify
     asr_original = image.read('/usr/sbin/asr')
@@ -372,6 +419,7 @@ def prepare(session, destination, ipsw=None, keys=None):
     report = dict(kind='signed-base-restore-handoff',identity=selected,product=selected['product'],
                   build='12H321',reboot_token=token,rescue_session=str(session),
                   stock_system_preserved=True,multipatch=multipatch,
+                  baseband_policy=baseband_policy,
                   stock_system_member_preserved=not native6,
                   restore_filesystem_build='12H321',
                   restore_environment_build=rescue.get('restore_environment_build'),

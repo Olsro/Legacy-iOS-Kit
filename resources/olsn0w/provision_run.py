@@ -12,7 +12,7 @@ import tempfile
 
 from common import KIT, MODELS, baseband_strategy, integer, profile, tools, tool_environment
 from device import same_hardware
-from provision import read_handoff, require_completed_restore
+from provision import read_handoff, require_baseband_policy, require_completed_restore
 from rescue import prepare_dfu, connect
 from restore import Rescue, checked_manifest, checkpoint
 from tickets import binding
@@ -123,6 +123,7 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     report=checked_manifest(bundle)
     if not erase or report.get('kind')!='signed-base-restore-handoff' or not same_hardware(record['identity'],report['identity']):
         raise ValueError('Explicit erase and matching provisioning identity required')
+    require_baseband_policy(report)
     environment=report_build(report)
     if session_build(session)!=environment:
         raise ValueError('Provisioning and rescue RAM environments differ; no erase started')
