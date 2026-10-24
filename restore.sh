@@ -889,7 +889,8 @@ version_get() {
 
     elif [[ -e ./resources/git_hash ]]; then
         [[ -z $version_current && -s ./resources/version ]] && version_current="$(cat ./resources/version)"
-        git_hash="$(cat ./resources/git_hash)"
+        git_hash="$(tr -d '\r\n' < ./resources/git_hash)"
+        git_hash=${git_hash:0:7}
     elif [[ -e ./resources/new ]]; then
         :
     else

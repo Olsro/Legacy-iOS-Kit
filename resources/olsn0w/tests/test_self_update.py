@@ -176,7 +176,7 @@ cd "tmp$$"
                     (root/'.git').mkdir()
                     (root/'.git/shallow').touch()
                 elif kind == 'archive':
-                    (root/'resources/git_hash').write_text('abcdef0')
+                    (root/'resources/git_hash').write_text('abcdef0'+'1'*33+'\n')
                     (root/'resources/version').write_text('v1.0.0')
                 elif kind == 'new':
                     (root/'resources/new').touch()
@@ -204,6 +204,9 @@ git() {
                 if kind in ('shallow', 'archive'):
                     self.assertIn('* Version:', result.stdout)
                 self.assertIn('* Version: v1.0.0', result.stdout)
+                if kind == 'archive':
+                    self.assertIn('(abcdef0 )', result.stdout)
+                    self.assertNotIn('abcdef0'+'1'*33, result.stdout)
 
 
 
