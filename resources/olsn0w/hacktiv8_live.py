@@ -16,6 +16,7 @@ import time
 import uuid
 
 from common import KIT, tools
+from ssh_client import known_hosts_option
 import hacktiv8
 
 ROOT_CHECK = ('if command -v id >/dev/null 2>&1; then id -u; '
@@ -75,7 +76,7 @@ class Connection:
             '-o', 'PreferredAuthentications=password,keyboard-interactive',
             '-o', 'PubkeyAuthentication=no', '-o', 'StrictHostKeyChecking=accept-new',
             '-o', 'HostKeyAlias=hacktiv8-'+self.udid,
-            '-o', 'UserKnownHostsFile='+str(self.directory.parent/'known_hosts'),
+            '-o', known_hosts_option(self.directory.parent/'known_hosts'),
             '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'HostKeyAlgorithms=+ssh-rsa',
             '-o', 'KexAlgorithms=+diffie-hellman-group14-sha1,diffie-hellman-group1-sha1',
             'root@127.0.0.1']

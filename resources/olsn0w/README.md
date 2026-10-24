@@ -280,6 +280,9 @@ and strict host-key pinning are preserved. Failed RAM handoff connections retain
 the underlying SSH diagnostic in `handoff-ssh.log` in the session directory and
 include it in the terminal error. An invalid client option fails immediately;
 temporary connection failures are still retried while the RAM service starts.
+Known-hosts paths are quoted for OpenSSH itself, so Kit folders containing spaces
+(such as `Legacy-iOS-Kit-main 2`) retain strict host-key verification. Saved RAM
+SSH arguments receive the same quoting correction when loaded.
 
 On Linux and Intel Macs, the DFU step delegates to the Kit through an internal
 mode that preserves the owning menu's temporary files and usbmuxd instance.

@@ -3,9 +3,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -27,6 +29,7 @@ class SSHCompatibility(unittest.TestCase):
         ram = Rescue(original, IDENTITY, rescue_build='10B329')
         expected = original.copy()
         expected[-2] = 'PubkeyAcceptedKeyTypes=+ssh-rsa'
+        expected[6] = 'UserKnownHostsFile="/saved/known-hosts"'
         self.assertEqual(ram.prefix, expected)
         self.assertEqual(original[-2], 'PubkeyAcceptedAlgorithms=+ssh-rsa')
 
@@ -38,6 +41,7 @@ class SSHCompatibility(unittest.TestCase):
             self.assertIn('PubkeyAcceptedKeyTypes=+ssh-rsa', prefix)
             self.assertNotIn('PubkeyAcceptedAlgorithms=+ssh-rsa', prefix)
             self.assertIn('StrictHostKeyChecking=yes', prefix)
+            self.assertIn('UserKnownHostsFile="'+str(folder/'target-known-hosts')+'"', prefix)
             self.assertEqual((folder/'target-known-hosts').read_text(),
                              '[127.0.0.1]:6414 ssh-rsa AAAAFIXTURE\n')
 
@@ -83,6 +87,70 @@ exit 0
             with self.assertRaisesRegex(RuntimeError, 'Bad configuration option: testoption'):
                 ssh_client.check()
         self.assertIn('-G', command.call_args.args[0])
+
+
+@unittest.skipUnless(shutil.which('ssh') and shutil.which('ssh-keygen') and
+                     Path('/usr/sbin/sshd').is_file(), 'requires local OpenSSH client and server')
+class SSHKnownHostsPaths(unittest.TestCase):
+    def test_new_and_saved_paths_with_spaces_keep_strict_host_pinning(self):
+        with tempfile.TemporaryDirectory(prefix='olsn0w-ssh-paths-') as temporary:
+            root = Path(temporary)
+            host = root/'ssh_host_rsa_key'
+            subprocess.run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048',
+                            '-N', '', '-f', str(host)], check=True, capture_output=True)
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            with (root/'sshd.log').open('w+') as log:
+                server = subprocess.Popen([
+                    '/usr/sbin/sshd', '-D', '-e', '-f', '/dev/null', '-h', str(host),
+                    '-p', str(port), '-o', 'ListenAddress=127.0.0.1', '-o', 'UsePAM=no',
+                    '-o', 'PermitRootLogin=no', '-o', 'PidFile='+str(root/'sshd.pid')],
+                    stdout=log, stderr=log)
+                try:
+                    deadline = time.monotonic()+5
+                    while True:
+                        if server.poll() is not None:
+                            log.seek(0)
+                            self.skipTest('Local sshd cannot start: '+log.read()[-500:])
+                        with socket.socket() as sock:
+                            if sock.connect_ex(('127.0.0.1', port)) == 0:
+                                break
+                        if time.monotonic() >= deadline:
+                            self.fail('Local sshd did not become ready')
+                        time.sleep(.05)
+                    for name in ('Legacy-iOS-Kit-main 2', 'Kit "quoted" \\ path'):
+                        folder = root/name
+                        folder.mkdir()
+                        shutil.copyfile(str(host)+'.pub', folder/'ssh_host_rsa_key.pub')
+                        shutil.copyfile(host, folder/'ssh_client_rsa')
+                        current = target_prefix(folder, port)
+                        saved = [argument if not argument.startswith('UserKnownHostsFile=')
+                                 else 'UserKnownHostsFile='+str(folder/'target-known-hosts')
+                                 for argument in current]
+                        migrated = Rescue(saved, IDENTITY, rescue_build='10B329').prefix
+                        for label, prefix in (('new', current), ('saved', migrated)):
+                            with self.subTest(path=name, prefix=label):
+                                self.assertEqual(ssh_client.compatible_prefix(prefix), prefix)
+                                result = subprocess.run(prefix[:-1]+[
+                                    '-vv', '-o', 'PreferredAuthentications=none', prefix[-1]],
+                                    capture_output=True, timeout=10)
+                                diagnostic = result.stderr.decode(errors='replace')
+                                self.assertIn('known and matches the RSA host key', diagnostic)
+                                self.assertNotIn('Host key verification failed', diagnostic)
+                        # Removing the pinned key must still reject this same server.
+                        (folder/'target-known-hosts').write_text('')
+                        result = subprocess.run(current[:-1]+[
+                            '-o', 'PreferredAuthentications=none', current[-1]],
+                            capture_output=True, timeout=10)
+                        self.assertIn(b'Host key verification failed', result.stderr)
+                finally:
+                    server.terminate()
+                    try:
+                        server.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        server.kill()
+                        server.wait()
 
 
 class HandoffDiagnostics(unittest.TestCase):

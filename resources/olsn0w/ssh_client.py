@@ -5,6 +5,13 @@ RSA_OPTIONS = ['-o', 'HostKeyAlgorithms=+ssh-rsa',
                '-o', 'PubkeyAcceptedKeyTypes=+ssh-rsa']
 
 
+def known_hosts_option(path):
+    # OpenSSH parses this option as a list of filenames even when subprocess
+    # supplies it in one argv element. Quote for SSH's parser, not a shell.
+    value = str(path).replace('\\', '\\\\').replace('"', '\\"')
+    return 'UserKnownHostsFile="' + value + '"'
+
+
 def compatible_prefix(prefix):
     # OpenSSH 8.5 renamed this keyword, retaining the old name as an alias.
     # Older saved preparations must remain usable without regenerating keys.
@@ -13,6 +20,9 @@ def compatible_prefix(prefix):
         name, separator, value = argument.partition('=')
         if separator and name.lower() == 'pubkeyacceptedalgorithms':
             argument = 'PubkeyAcceptedKeyTypes=' + value
+        elif separator and name.lower() == 'userknownhostsfile' and not value.startswith('"'):
+            # Saved olsn0w prefixes contain exactly one path, previously raw.
+            argument = known_hosts_option(value)
         result.append(argument)
     return result
 
