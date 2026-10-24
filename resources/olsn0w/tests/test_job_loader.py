@@ -20,3 +20,16 @@ class JobRegistration(unittest.TestCase):
                             str(source), dead_strip, '-o', str(binary)], check=True,
                            capture_output=True)
             subprocess.run([str(binary)], check=True, timeout=10)
+            empty=Path(work)/'empty.plist';empty.touch()
+            malformed=Path(work)/'malformed.plist';malformed.write_bytes(b'broken')
+            dictionary=Path(work)/'dictionary.plist';dictionary.write_bytes(b'Dictionary')
+            array=Path(work)/'array.plist';array.write_bytes(b'Array')
+            for path,optional,expected in (
+                    (empty,1,'empty'),(empty,0,'error'),
+                    (Path(work)/'missing',1,'empty'),(Path(work)/'missing',0,'error'),
+                    (malformed,1,'error'),(malformed,0,'error'),
+                    (array,1,'error'),(dictionary,1,'dictionary'),(dictionary,0,'dictionary'),
+                    (Path(work),1,'error')):
+                with self.subTest(path=path.name,optional=optional):
+                    subprocess.run([str(binary),str(path),str(optional),expected],
+                                   check=True,timeout=10)

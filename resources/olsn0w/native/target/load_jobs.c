@@ -63,6 +63,9 @@ static int read_dictionary(const char *path, void **result, int optional) {
     if (!file) return optional && *__error() == 2 ? 0 : -1;
     if (fseek(file, 0, 2)) goto done;
     long size = ftell(file);
+    /* A fresh launchd database can contain an empty overrides placeholder.
+     * It has no persistent settings; required job plists must still parse. */
+    if (size == 0 && optional) { status = 0; goto done; }
     if (size <= 0 || size > 4 * 1024 * 1024 || fseek(file, 0, 0)) goto done;
     bytes = malloc((usize)size);
     if (!bytes || fread(bytes, 1, (usize)size, file) != (usize)size) goto done;

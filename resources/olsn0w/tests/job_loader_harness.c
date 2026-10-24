@@ -42,7 +42,36 @@ const void *CFDictionaryGetValue(const void *p, const void *k) {
 }
 void CFRelease(const void *p) { (void)p; }
 
-int main(void) {
+/* Exercise real file opening/length checks; the parser stub distinguishes
+ * valid dictionaries, other plist types and malformed nonempty data. */
+#ifdef __linux__
+extern int *__errno_location(void);
+int *__error(void) { return __errno_location(); }
+#endif
+static struct object parsed_dictionary={1,0,0,0,0}, parsed_array={4,0,0,0,0};
+static int parser_called;
+void *CFDataCreate(const void *allocator, const unsigned char *bytes, index_t size) {
+    (void)allocator; (void)size;
+    return (void *)bytes;
+}
+void *CFPropertyListCreateWithData(const void *allocator, const void *data,
+                                 usize options, void *format, void *error) {
+    (void)allocator; (void)options; (void)format; (void)error;
+    parser_called=1;
+    return *(const char *)data=='D' ? &parsed_dictionary :
+           *(const char *)data=='A' ? &parsed_array : 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc==4) {
+        void *result=(void *)1;
+        int status=read_dictionary(argv[1],&result,argv[2][0]=='1');
+        if (!strcmp(argv[3],"empty"))
+            return status==0 && !result && !parser_called ? 0 : 20;
+        if (!strcmp(argv[3],"dictionary"))
+            return status==0 && result==&parsed_dictionary && parser_called ? 0 : 21;
+        return status==-1 && !result ? 0 : 22;
+    }
     response_type=1;
     if (registered("registered-without-pid") != 1) return 1;
     response_type=9; response_error=3;

@@ -540,7 +540,12 @@ checked launch job remain installed; Apple services and Cydia use the firmware's
 complete shared-cache implementations.
 
 The small ARMv7 helper is shipped with source/build checksums in
-`target/load-jobs.json`. `native/target/build.sh` rebuilds it with Clang, an ARM
+`target/load-jobs.json`. An absent or zero-byte optional launchd overrides file
+means no persistent Disabled settings, as seen on a fresh iOS 7.1.2 installation.
+Nonempty malformed overrides and empty required job plists still fail closed.
+System recipe 51 rebuilds cached images with this correction.
+
+`native/target/build.sh` rebuilds it with Clang, an ARM
 Mach-O linker and stock iOS libraries on Linux or macOS; sign the result with
 the existing `signing.resign` function and update the checksums together. Its
 minimum deployment target is iOS 6. Image integration covers iOS 6 and 7.
