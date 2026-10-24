@@ -59,6 +59,32 @@ class RestoreEnvironment(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Wrong RAM'):ram.guard()
         self.assertEqual(Rescue(prefix,identity).rescue_build,'12H321')
 
+    def test_ram_guard_accepts_apple_board_revision_case_on_both_environments(self):
+        prefix=['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1']
+        for product,model in (('iPad2,4','K93aAP'),('iPad3,3','J2aAP')):
+            board,chip,board_id=MODELS[product]
+            identity=dict(product=product,board=board,chip=chip,board_id=board_id)
+            for build in ('10B329','12H321'):
+                with self.subTest(product=product,build=build):
+                    ram=Rescue(prefix,identity,rescue_build=build)
+                    state=('hw.model: '+model+'\nkern.osversion: '+build+'\n').encode()
+                    with patch.object(ram,'run',side_effect=[state,b'/dev/md0 on / (hfs)\n']) as run:
+                        ram.guard()
+                    self.assertEqual(run.call_args_list[-1].args,('/sbin/mount',))
+
+    def test_ram_guard_rejects_wrong_board_or_build_with_observed_identity(self):
+        prefix=['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1']
+        board,chip,board_id=MODELS['iPad2,4']
+        ram=Rescue(prefix,dict(product='iPad2,4',board=board,chip=chip,board_id=board_id),
+                   rescue_build='12H321')
+        for state in ('hw.model: K93AP\nkern.osversion: 12H321\n',
+                      'hw.model: K93aAP\nkern.osversion: 10B329\n'):
+            with self.subTest(state=state),patch.object(ram,'run',return_value=state.encode()) as run:
+                with self.assertRaisesRegex(ValueError,'expected hw.model=K93aAP.*received') as error:
+                    ram.guard()
+                self.assertIn(repr(state),str(error.exception))
+                run.assert_called_once()
+
     def test_session_binding_rejects_other_product(self):
         with tempfile.TemporaryDirectory() as folder:
             folder=Path(folder)

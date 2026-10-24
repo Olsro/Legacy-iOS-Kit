@@ -182,6 +182,17 @@ class ExternalSSHTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'service'):
             ssh.check_target(connection, report)
 
+    def test_external_ssh_accepts_apple_board_revision_case(self):
+        from unittest.mock import Mock
+        job=dict(Label='org.olsn0w.sshd',KeepAlive=True,
+                 ProgramArguments=['/usr/sbin/sshd','-D','-e','-f',ssh.CONFIGS[1]])
+        for product,model in (('iPad2,4','K93aAP'),('iPad3,3','J2aAP')):
+            with self.subTest(product=product):
+                connection=Mock()
+                connection.run.side_effect=[b'',(model+'\n11D257\nselected\n').encode(),b'0\n']
+                connection.read.return_value=plistlib.dumps(job)
+                ssh.check_target(connection,dict(product=product,build='11D257',generation='selected'))
+
     def test_configure_restarts_and_requires_a_password_login(self):
         from unittest.mock import Mock
         connection = Mock()

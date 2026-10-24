@@ -172,6 +172,23 @@ class HandoffDiagnostics(unittest.TestCase):
             self.assertIn('Connection refused', (session/'handoff-ssh.log').read_text())
             ram.guard.assert_not_called()
 
+    def test_identity_validation_error_is_logged_without_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session=self.fixture(temporary)
+            ram=Mock()
+            ram.run.return_value=b'/dev/md0 on / (hfs)\n'
+            detail='Wrong RAM system identity: expected hw.model=K93aAP; received K93AP'
+            ram.guard.side_effect=ValueError(detail)
+            with patch.object(provision_run,'Rescue',return_value=ram), \
+                 patch.object(provision_run,'session_build',return_value='12H321'), \
+                 patch.object(provision_run.time,'sleep') as sleep:
+                with self.assertRaisesRegex(ValueError,'Wrong RAM system identity') as error:
+                    provision_run.connect_handoff(session)
+            self.assertIn(detail,(session/'handoff-ssh.log').read_text())
+            self.assertIn(str(session/'handoff-ssh.log'),str(error.exception))
+            sleep.assert_not_called()
+            ram.guard.assert_called_once_with([])
+
     def test_invalid_client_configuration_fails_immediately_without_usb_retry(self):
         with tempfile.TemporaryDirectory() as temporary:
             session = self.fixture(temporary)

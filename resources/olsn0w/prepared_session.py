@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from common import STATE
+from common import STATE, hardware_model
 from device import same_hardware
 from restore import checked_manifest
 
@@ -70,6 +70,7 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
             or system.get('relay_binary_sha256') != relay['files']['relay.bin']):
         raise ValueError('Saved system inputs differ from the selected relay or activation policy')
     if (bootstrap.get('base_build') != '12H321' or bootstrap.get('autoboot_policy') != 'persistent-enable'
+            or bootstrap.get('hardware_model') != hardware_model(identity['board'])
             or bootstrap.get('launchd_policy') != 'stock-signed'
             or bootstrap.get('target_rearm_required') is not False):
         raise ValueError('Saved bootstrap uses an older boot policy')

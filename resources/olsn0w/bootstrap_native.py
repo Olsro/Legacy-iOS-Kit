@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import re
 
-from common import MODELS, digest, run
+from common import MODELS, digest, hardware_model, run
 from restore import checkpoint
 from signing import resign
 
@@ -18,7 +18,7 @@ ENTITLEMENTS = {'platform-application': True, 'get-task-allow': True,
 def configuration(product, usb_serial):
     if product not in MODELS or not re.fullmatch(r'[a-fA-F0-9]{40}', usb_serial):
         raise ValueError('Expected a supported product and selected USB identity')
-    return ('#pragma once\n#define OLSN0W_BOARD '+json.dumps(MODELS[product][0].upper())+
+    return ('#pragma once\n#define OLSN0W_BOARD '+json.dumps(hardware_model(MODELS[product][0]))+
             '\n#define OLSN0W_USB_SERIAL '+json.dumps(usb_serial.lower())+'''
 #define OLSN0W_DISK_DEFAULT_ROOT
 #define OLSN0W_ROOT_MARKER_PATH "/olsn0w/bootstrap.marker"

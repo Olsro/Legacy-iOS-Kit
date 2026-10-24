@@ -33,6 +33,14 @@ MODELS = {
     'iPod5,1': ('n78ap', 0x8942, 0),
 }
 
+
+def hardware_model(board):
+    """Return Apple's case-sensitive hw.model for a firmware board identity."""
+    if board not in {model[0] for model in MODELS.values()}:
+        raise ValueError('Unsupported hardware board')
+    return {'k93aap': 'K93aAP', 'j2aap': 'J2aAP'}.get(board, board.upper())
+
+
 # This is the exact 32-bit OTA 8.4.1 signing set exposed by the Kit. Keep the
 # restore menu and the checked model profiles equal to this set.
 SIGNED_841_PRODUCTS = frozenset(MODELS)

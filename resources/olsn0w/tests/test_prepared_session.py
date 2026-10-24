@@ -37,6 +37,7 @@ class PreparedSession(unittest.TestCase):
                       recipe_version=SYSTEM_RECIPE, setup_customized=False, relay_recipe_version=RELAY_RECIPE,
                       relay_devicetree_sha256=relay['files']['devicetree'], relay_binary_sha256=relay['files']['relay.bin']), ['system.hfs'])
         self.manifest(self.plan['bootstrap'], dict(product='iPad3,1', base_build='12H321',
+                      hardware_model='J1AP',
                       autoboot_policy='persistent-enable', launchd_policy='stock-signed', target_rearm_required=False), ['root8.hfs'])
         self.manifest(self.plan['bundle'], dict(product='iPad3,1', identity=IDENTITY,
                       kind='signed-base-restore-handoff', rescue_session=str(self.session)), ['base8.ipsw'])
@@ -106,6 +107,16 @@ class PreparedSession(unittest.TestCase):
         report['recipe_version'] -= 1
         self.write(manifest, report)
         self.assertIsNone(self.find())
+        self.ticket.assert_not_called()
+
+    def test_bootstrap_without_current_hardware_model_is_not_reused(self):
+        path=self.plan['bootstrap']/'manifest.json'
+        report=json.loads(path.read_text())
+        for model in (None,'J2aAP'):
+            with self.subTest(model=model):
+                report['hardware_model']=model
+                self.write(path,report)
+                self.assertIsNone(self.find())
         self.ticket.assert_not_called()
 
     def test_changed_rescue_file_or_path_outside_state_is_not_reused(self):

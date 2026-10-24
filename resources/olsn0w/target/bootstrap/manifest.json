@@ -23,7 +23,7 @@
     "native/bootstrap/power_ready.c": "c0f95a1116b6b26dc55aac14a3464cf1e56b62b992e5359e04bcef4199f78693",
     "native/bootstrap/wake_a5.c": "93ca58160042b682b200bc424b686cc0cdf5c20a364c91c05b6e4cfbfe1377b9",
     "native/bootstrap/root_start.c": "5f9a13fe6327cad7756c2241edce18c64c48dba146b4bacb809652a80008949f",
-    "bootstrap_native.py": "22bebe44c18ae23a492bb30ef375e61a586637d8f017a9dd93a151cb14ac5962",
+    "bootstrap_native.py": "79dd7a7dfa0be8b2c55e757b459171162b50f4ed4c68ddea755793c899de6536",
     "native/bootstrap-assets/build.py": "530c4559a7321efed5075670573a4f62500ebfff3e3e9b7ec7471f48fb15bba9"
   },
   "templates": {

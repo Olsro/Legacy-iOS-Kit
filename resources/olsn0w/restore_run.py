@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 
-from common import profile, tools, version
+from common import hardware_model, profile, tools, version
 from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
@@ -87,7 +87,7 @@ def services_ready(text, release, cydia_initialized, generation=None):
 
 def target_identity_ready(lines, report):
     """Require the selected root and Data generation without failing early boot."""
-    expected=[report['identity']['board'].upper(),report['build'],report['generation']]
+    expected=[hardware_model(report['identity']['board']),report['build'],report['generation']]
     return lines[:3] == expected
 
 

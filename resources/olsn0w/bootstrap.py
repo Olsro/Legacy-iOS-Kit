@@ -11,7 +11,7 @@ import tarfile
 from archives import members, write_tar
 from bootstrap_registry import configure, jobs
 from compact_cache import write_sparse
-from common import KIT, digest, profile, run, tools
+from common import KIT, MODELS, digest, hardware_model, profile, run, tools
 from hfs import HFS
 from img3 import img3
 from signing import resign, verify
@@ -264,6 +264,7 @@ UsePrivilegeSeparation no
             if (stat.S_IMODE(record['mode']), record['uid'], record['gid']) != (item.mode, item.uid, item.gid):
                 raise ValueError('Bootstrap permissions readback mismatch: '+path)
     report=dict(product=product,base_build='12H321',cache_architecture=architecture,
+        hardware_model=hardware_model(MODELS[product][0]),
         relay_policy=('a5-two-image-relative-wake' if a5_boot else 'a6-contiguous'),
         kernel_policy=('stock-encrypted-a5' if a5_boot else 'relay-admitted-plaintext'),
         kernel_sha256=hashlib.sha256(kernel).hexdigest(),

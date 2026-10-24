@@ -13,7 +13,7 @@ import struct
 import subprocess
 
 from archives import members
-from common import MODELS, baseband_strategy, clone_or_copy, digest, profile, version
+from common import MODELS, baseband_strategy, clone_or_copy, digest, hardware_model, profile, version
 from hfs import HFS
 from hfs_extents import allocated_ranges
 from hfs_policy import require_reserve
@@ -191,9 +191,10 @@ class Rescue:
     def tool(self,name):return self.maintenance+'/'+name
     def guard(self, mounted=()):
         state=self.run(self.tool('sysctl')+' hw.model kern.osversion').decode()
-        if ('hw.model: '+self.identity['board'].upper()+'\n' not in state or
-                'kern.osversion: '+self.rescue_build+'\n' not in state):
-            raise ValueError('Wrong RAM system identity')
+        model=hardware_model(self.identity['board'])
+        if state.splitlines() != ['hw.model: '+model,'kern.osversion: '+self.rescue_build]:
+            raise ValueError('Wrong RAM system identity: expected hw.model='+model+
+                             ', kern.osversion='+self.rescue_build+'; received '+repr(state[-500:]))
         mounts=self.run('/sbin/mount').decode().splitlines()
         if not any(x.startswith('/dev/md0 on / ') for x in mounts):raise ValueError('Root is not RAM')
         internal=[x.split(' (',1)[0] for x in mounts if re.match(r'/dev/r?disk',x)]

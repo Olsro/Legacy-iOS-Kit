@@ -14,7 +14,7 @@ import tempfile
 import time
 import uuid
 
-from common import MODELS, STATE, integer, tools
+from common import MODELS, STATE, hardware_model, integer, tools
 from restore_run import target_prefix
 
 CONFIGS = ('/etc/ssh/sshd_config', '/usr/local/share/olsn0w/sshd_config')
@@ -170,7 +170,7 @@ def connect(udid, bundle):
 
 def check_target(connection, report):
     connection.run('/usr/local/libexec/olsn0w/guard-target.sh')
-    expected = [MODELS[report['product']][0].upper(), report['build'], report['generation']]
+    expected = [hardware_model(MODELS[report['product']][0]), report['build'], report['generation']]
     actual = connection.run('/usr/sbin/sysctl -n hw.model; /usr/sbin/sysctl -n kern.osversion; '
                             '/bin/cat /var/lib/olsn0w/generation').decode().splitlines()
     if actual != expected or connection.run(ROOT_CHECK).strip() != b'0':

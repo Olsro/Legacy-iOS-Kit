@@ -283,6 +283,11 @@ temporary connection failures are still retried while the RAM service starts.
 Known-hosts paths are quoted for OpenSSH itself, so Kit folders containing spaces
 (such as `Legacy-iOS-Kit-main 2`) retain strict host-key verification. Saved RAM
 SSH arguments receive the same quoting correction when loaded.
+RAM, bootstrap and target identity checks retain Apple's mixed-case board names
+(`K93aAP` on iPad2,4 and `J2aAP` on iPad3,3). Older system preparations are rebuilt
+to update the on-device guards and bootstrap helpers. A RAM identity rejection
+reports the expected model/build and the received `sysctl` output, and retains
+that diagnostic in `handoff-ssh.log` without retrying validation.
 
 On Linux and Intel Macs, the DFU step delegates to the Kit through an internal
 mode that preserves the owning menu's temporary files and usbmuxd instance.

@@ -17,6 +17,15 @@ import restore_run
 from activation import ActivationPending, SavedActivationRestored, ActivationRequiresInput
 
 class DistributedState(unittest.TestCase):
+    def test_normal_boot_qualification_preserves_board_revision_and_generation(self):
+        for board,model in (('k93aap','K93aAP'),('j2aap','J2aAP')):
+            with self.subTest(board=board):
+                report=dict(identity={'board':board},build='11D257',generation='selected')
+                self.assertTrue(restore_run.target_identity_ready([model,'11D257','selected'],report))
+                self.assertFalse(restore_run.target_identity_ready([model,'12H321','selected'],report))
+                self.assertFalse(restore_run.target_identity_ready([model,'11D257','other'],report))
+                self.assertFalse(restore_run.target_identity_ready(['N42AP','11D257','selected'],report))
+
     def test_stale_usb_pairing_is_renewed_without_bypassing_qualification(self):
         report=dict(product='iPad3,4',version='6.1.3',build='10B329',generation='selected',
                     identity={'board':'p101ap'},activation_mode='skipped-setup-removed',

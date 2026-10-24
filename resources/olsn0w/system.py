@@ -17,7 +17,7 @@ from archives import members, deb_payload, write_tar
 from aquila import (ios7_payload, job_loader, prepare_payload,
                     prepare_ios6_payload, prepare_ios8_payload,
                     prepare_pangu71_payload)
-from common import KIT, MODELS, clone_or_copy, digest, profile, run, save, version
+from common import KIT, MODELS, clone_or_copy, digest, hardware_model, profile, run, save, version
 from hfs import HFS
 from hacktiv8 import (install as install_hacktiv8,
                      preflight as preflight_hacktiv8,
@@ -29,8 +29,8 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-# Rebuild older images so every lockdownd recipe retains valid signed pages.
-RECIPE_VERSION = 49
+# Rebuild target guards with Apple's case-sensitive hardware model names.
+RECIPE_VERSION = 50
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -756,7 +756,7 @@ Subsystem sftp /usr/libexec/sftp-server
         raise ValueError('Invalid target boot-success job')
     payload['Library/LaunchDaemons/org.olsn0w.boot-success.plist'] = entry(
         'Library/LaunchDaemons/org.olsn0w.boot-success.plist', boot_success_job)
-    config = dict(AG_BOARD=MODELS[source['product']][0].upper(), AG_BUILD=source['build'],
+    config = dict(AG_BOARD=hardware_model(MODELS[source['product']][0]), AG_BUILD=source['build'],
                   AG_ROOT_DEVICE=root_device, AG_DATA_DEVICE=data_device, AG_GENERATION=generation)
     # The physically qualified iOS 8 first boot keeps the native daemon at a
     # private path and leaves a tiny wrapper at Apple's executable path.  The
