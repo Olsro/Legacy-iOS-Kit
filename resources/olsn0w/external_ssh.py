@@ -118,6 +118,17 @@ class Connection:
     def __init__(self, prefix):
         self.prefix = prefix
 
+    def check_password_client(self):
+        # Parse the real password-verification command without connecting. In
+        # particular, sshpass must be able to execute the selected SSH binary
+        # before we change any target files or restart its listener.
+        prefix = [self.prefix[0], '-G', *self.prefix[1:]]
+        try:
+            Connection(prefix).run('', timeout=15, password=True)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError('Cannot run the host password SSH verifier (sshpass/ssh). '
+                               'Target configuration left unchanged. '+str(error)) from error
+
     def run(self, command, data=None, timeout=30, password=False):
         prefix = self.prefix
         env = None
@@ -245,6 +256,7 @@ def configure(product, udid, ecid=None, bundle=None, progress=print):
     folder, report = selected
     with connect(udid, folder) as connection:
         check_target(connection, report)
+        connection.check_password_client()
         progress('Saving the original configuration and enabling root/alpine network SSH.')
         backup = apply(connection)
         try:
@@ -261,10 +273,12 @@ def configure(product, udid, ecid=None, bundle=None, progress=print):
                 if connection.run(ROOT_CHECK).strip() != b'0':
                     raise RuntimeError('The existing olsn0w SSH key no longer works')
                 break
-            except (RuntimeError, subprocess.TimeoutExpired):
+            except (RuntimeError, subprocess.TimeoutExpired) as error:
                 if attempt == 9:
-                    raise RuntimeError('Could not verify password and key logins after restarting OpenSSH. '
-                                       'Originals are saved on the device in '+backup)
+                    raise RuntimeError('SSH configuration was applied, but could not verify password and key '
+                                       'logins after restarting OpenSSH. Network SSH may already be enabled. '
+                                       'Originals are saved on the device in '+backup+
+                                       '\nLast SSH error: '+str(error)) from error
                 time.sleep(1)
         progress('OpenSSH verified: root / alpine, TCP port 22 on all network interfaces. '
                  'The existing USB SSH key remains valid. Backup: '+backup)

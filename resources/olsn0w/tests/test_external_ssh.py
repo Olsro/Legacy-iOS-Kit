@@ -164,6 +164,34 @@ class ExternalSSHTests(unittest.TestCase):
             self.assertNotIn('alpine', argv)
             self.assertEqual(prefix[2], 'BatchMode=yes')
 
+    def test_password_client_preflight_executes_sshpass_without_connecting(self):
+        prefix = ['ssh', '-F', '/dev/null', '-o', 'BatchMode=yes', 'root@127.0.0.1']
+        with patch.object(ssh.subprocess, 'run') as run:
+            run.return_value = subprocess.CompletedProcess([], 0, b'host 127.0.0.1\n', b'')
+            ssh.Connection(prefix).check_password_client()
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:4], [str(ssh.tools()/'sshpass'), '-e', 'ssh', '-G'])
+        self.assertIn('BatchMode=no', argv)
+        self.assertIn('PubkeyAuthentication=no', argv)
+        self.assertEqual(run.call_args.kwargs['timeout'], 15)
+        self.assertNotIn('-G', prefix)
+
+    def test_password_client_failure_leaves_target_unchanged(self):
+        from unittest.mock import Mock
+        connection = Mock(wraps=ssh.Connection(['missing-ssh', 'root@127.0.0.1']))
+        with (patch.object(ssh, 'device_info', return_value={}),
+              patch.object(ssh, 'candidates', return_value=[(Path('/fixture'), {})]),
+              patch.object(ssh, 'connect') as connect,
+              patch.object(ssh, 'check_target'),
+              patch.object(ssh, 'apply') as apply,
+              patch.object(ssh.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                  [], 3, b'', b'SSHPASS: Failed to run command: No such file or directory'))):
+            connect.return_value.__enter__.return_value = connection
+            with self.assertRaisesRegex(RuntimeError, 'configuration left unchanged.*SSHPASS'):
+                ssh.configure('iPad2,5', 'a'*40)
+        apply.assert_not_called()
+        connection.run.assert_not_called()
+
     def test_target_generation_or_service_mismatch_is_rejected(self):
         report = dict(product='iPad2,5', build='11D257', generation='a'*32)
         job = dict(Label='org.olsn0w.sshd', KeepAlive=True,
@@ -206,6 +234,7 @@ class ExternalSSHTests(unittest.TestCase):
             messages = []
             ssh.configure('iPad2,5', 'a'*40, progress=messages.append)
         connection.run.assert_any_call(ssh.RESTART_SSH)
+        connection.check_password_client.assert_called_once_with()
         connection.run.assert_any_call(ssh.ROOT_CHECK, password=True)
         connection.run.assert_any_call(ssh.ROOT_CHECK)
         self.assertTrue(any('OpenSSH verified' in message for message in messages))
@@ -254,7 +283,7 @@ if args[0] == 'unload':
               patch.object(ssh, 'apply', return_value='/backup')):
             connect.return_value.__enter__.return_value = connection
             messages = []
-            with self.assertRaisesRegex(RuntimeError, 'password and key logins'):
+            with self.assertRaisesRegex(RuntimeError, 'Last SSH error: Public key rejected'):
                 ssh.configure('iPad2,5', 'a'*40, progress=messages.append)
         self.assertFalse(any('OpenSSH verified' in message for message in messages))
 
