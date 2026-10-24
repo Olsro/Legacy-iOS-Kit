@@ -29,5 +29,5 @@ class RescuePreparation(unittest.TestCase):
         if not compiler:self.skipTest('Native C compiler unavailable')
         with tempfile.TemporaryDirectory() as work:
             output=Path(work)/'test'
-            subprocess.run([compiler,str(Path(__file__).with_name('rescue_unmount_harness.c')),'-o',str(output)],capture_output=True,check=True)
+            subprocess.run([compiler,'-std=gnu11',str(Path(__file__).with_name('rescue_unmount_harness.c')),'-o',str(output)],capture_output=True,check=True)
             subprocess.run([str(output)],check=True,timeout=10)

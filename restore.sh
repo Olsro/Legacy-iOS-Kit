@@ -3484,6 +3484,9 @@ jailbreak_sources_tar() {
     local payload_root="${3:-$jelbrek}"
     local operation="-cf"
     [[ $2 == append ]] && operation="-rf"
+    # Git checkouts inherit the host umask; ship the same file mode everywhere.
+    chmod 644 "$payload_root/olsro/private/etc/apt/sources.list.d/Olsro.list" || \
+        error "Failed to set Olsro repository permissions."
     local owners=(--owner=0 --group=0)
     [[ $platform == macos ]] && owners=(--uid 0 --gid 0 --uname root --gname wheel)
     COPYFILE_DISABLE=1 tar --format=ustar "${owners[@]}" "$operation" "$archive" \
