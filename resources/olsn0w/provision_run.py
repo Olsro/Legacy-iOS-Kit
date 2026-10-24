@@ -145,6 +145,7 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     if Path(report['rescue_session']).resolve()!=session:
         raise ValueError('Provisioning RAM belongs to another session')
     journal=bundle/'run.json'
+    restore_log=bundle/'restore.log'
     if journal.exists():raise ValueError('Inspect the previous provisioning run before retrying')
     base_metadata=json.loads(Path(keys).read_text())
     if base_metadata.get('identifier')!=record['identity']['product'] or base_metadata.get('buildid')!='12H321':
@@ -192,10 +193,11 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
         progress('The phone progress bar belongs to this base restore. Later installation progress will be shown on this computer.')
         from progress import RestoreProgress
         display=RestoreProgress(progress)
-        with (bundle/'restore.log').open('wb') as log:
+        with restore_log.open('wb') as log:
+            progress('Restore log: '+str(restore_log))
             process=subprocess.Popen(argv,cwd=work,env=env,stdout=log,stderr=subprocess.STDOUT)
             state.update(pid=process.pid,stage='signed-base-restore-started');checkpoint(journal,state)
-            with (bundle/'restore.log').open('r',errors='replace') as status:
+            with restore_log.open('r',errors='replace') as status:
                 while True:
                     chunk=status.read();display.feed(chunk);display.tick()
                     try:
@@ -205,9 +207,10 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
                     except subprocess.TimeoutExpired:
                         pass
         state.update(stage='restore-tool-exited',returncode=code);checkpoint(journal,state)
-        output=(bundle/'restore.log').read_text(errors='replace')
+        output=restore_log.read_text(errors='replace')
         if code or not any(line.strip()=='DONE' for line in output.splitlines()):
-            raise RuntimeError('Kit restore did not report success; inspect restore.log')
+            raise RuntimeError('Kit restore did not report success (exit code '+str(code)+
+                               '); inspect '+str(restore_log))
         if record.get("manage_usb_tunnel"):
             from usb_tunnel import start
             tunnel=start(session)
@@ -236,7 +239,8 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
         checkpoint(journal,state)
         from usb_tunnel import stop
         stop(tunnel)
-        progress('Signed-base restore failed. Logs retained; no automatic retry or reboot.')
+        progress('Signed-base restore failed. Diagnostics retained in '+str(bundle)+
+                 '; no automatic retry or reboot.')
         raise
     finally:
         server.shutdown();server.server_close();worker.join(timeout=5)

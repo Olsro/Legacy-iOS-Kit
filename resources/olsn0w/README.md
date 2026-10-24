@@ -271,6 +271,13 @@ Linux tools receive an absolute path to the Kit's bundled shared libraries,
 including LibreSSL, even when launched from a session working directory. Before
 DFU preparation, the restore tool is started without restore arguments to check
 its loader; diagnostics are saved in `provision/restore-loader.log`.
+The signed-base restore saves its full stdout and stderr in
+`saved/olsn0w/sessions/<session>/provision/restore.log` for menu sessions
+(or `<bundle>/restore.log` when using an explicit `--bundle`). The terminal
+prints the absolute log path when the file is created and repeats it with the
+exit code if the restore tool fails or exits without reporting `DONE`.
+Failed restores retain the session directory, including `provision/run.json`
+and any available RAM diagnostics.
 Before firmware preparation, `ssh -G` checks that the host SSH client accepts
 the required options without connecting. RSA compatibility uses
 `PubkeyAcceptedKeyTypes`, accepted by both older High Sierra clients and newer

@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import plistlib
 import io
 import subprocess
@@ -13,7 +14,57 @@ from provision import (HANDOFF, copy_ipsw, handoff_sleep, multipatch_manifest,
                        multipatch_iboot_flags, multipatch_key_metadata,
                        reboot_hook, require_completed_restore)
 from provision_run import record_failed_restore
+import provision_run
 from provision_collect import personalized_modem
+
+
+class RestoreLogging(unittest.TestCase):
+    def test_failed_process_retains_both_streams_and_reports_existing_absolute_log(self):
+        # Exercise real subprocess redirection, including an exit without DONE.
+        # All device operations and the firmware-key server stay mocked.
+        for code in (9,0):
+            with self.subTest(code=code), tempfile.TemporaryDirectory(prefix='restore logs ') as temporary:
+                session=Path(temporary);bundle=session/'provision';bundle.mkdir()
+                identity=dict(product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2,ecid=123)
+                (session/'device.json').write_text(json.dumps(dict(identity=identity)))
+                keys=session/'keys.json'
+                keys.write_text(json.dumps(dict(identifier='iPhone5,2',buildid='12H321')))
+                report=dict(kind='signed-base-restore-handoff',identity=identity,product='iPhone5,2',multipatch=False,
+                            restore_environment_build='12H321',rescue_session=str(session),
+                            asr_source='original-udif-without-filevault-envelope',handoff_storage='nvram',
+                            asr_patch={'method':'kit-asr-failure-to-success'},
+                            restore_bootchain_policy='futurerestore-stock-rsa')
+                argv=[sys.executable,'-c',
+                      'import sys; print("restore output"); print("modem error", file=sys.stderr); sys.exit('+str(code)+')']
+                log=bundle.resolve()/'restore.log'
+                messages=[]
+                def progress(message):
+                    messages.append(message)
+                    if message.startswith('Restore log: '):
+                        self.assertEqual(message,'Restore log: '+str(log))
+                        self.assertTrue(log.is_file())
+                with patch.object(provision_run,'checked_manifest',return_value=report), \
+                     patch.object(provision_run,'session_build',return_value='12H321'), \
+                     patch.object(provision_run,'restore_arguments',return_value=argv), \
+                     patch.object(provision_run,'tool_environment',return_value=None), \
+                     patch.object(provision_run,'check_restore_runtime'), \
+                     patch.object(provision_run,'prepare_dfu'), \
+                     patch.object(provision_run.http.server,'ThreadingHTTPServer'), \
+                     patch.object(provision_run,'record_failed_restore'), \
+                     patch.object(provision_run,'connect_handoff') as handoff:
+                    with self.assertRaises(RuntimeError) as error:
+                        provision_run.run(session,bundle,session/'ticket',keys,erase=True,progress=progress)
+                self.assertIn('Restore log: '+str(log),messages)
+                self.assertIn(str(log),str(error.exception))
+                self.assertIn('exit code '+str(code),str(error.exception))
+                self.assertEqual(set(log.read_text().splitlines()),{'restore output','modem error'})
+                self.assertIn(str(bundle.resolve()),messages[-1])
+                state=json.loads((bundle/'run.json').read_text())
+                self.assertEqual(state['returncode'],code)
+                self.assertEqual(state['error'],str(error.exception))
+                self.assertFalse(state['complete'])
+                handoff.assert_not_called()
+
 
 class ProvisionHandoff(unittest.TestCase):
     def test_personalized_modem_archive_supplies_hidden_restore_component(self):
