@@ -2,10 +2,10 @@
 <app version="1">
   <name>A5Mate Wii — A5 8942</name>
   <coder>Olsro</coder>
-  <version>0.1.1-pwndfu-production</version>
-  <release_date>20260921191000</release_date>
-  <short_description>pwnDFU production via Wii pour A5_8942.</short_description>
-  <long_description>Profil A5_8942 utilisant le payload checkm8 sans demotion, afin de conserver les cles de production necessaires aux images Apple. Connecter un appareil Apple en DFU avec CPID 8942. La sequence a5mate applique le payload puis revient automatiquement au Homebrew Channel.</long_description>
+  <version>0.1.2-ehci-topology</version>
+  <release_date>20261025000000</release_date>
+  <short_description>pwnDFU A5_8942 via Wii et Wii U/vWii.</short_description>
+  <long_description>Profil A5_8942 utilisant le payload checkm8 sans demotion, afin de conserver les cles de production necessaires aux images Apple. Correctif EHCI confirme fonctionnel par un utilisateur sur Wii U/vWii le 25 octobre 2026. Connecter un appareil Apple en DFU avec CPID 8942, sans hub. La sequence a5mate applique le payload puis revient automatiquement au Homebrew Channel ; verifier ensuite le pwnDFU sur le Mac.</long_description>
   <arguments><arg>--pwndfu</arg></arguments>
   <ahb_access/><no_ios_reload/>
 </app>

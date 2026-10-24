@@ -704,8 +704,9 @@ static int a5mate_wait_frame(u32 micros,u32 *before,u32 *after) {
     return -1;
 }
 
-static int a5mate_begin(a5mate_context *ctx,u8 address) {
+static int a5mate_begin(a5mate_context *ctx,u8 address,a5mate_result *out) {
     memset(ctx,0,sizeof(*ctx));
+    out->topology.selected_port=-1;
     if(!address || address>127 || rd(0xcd800064)!=0xffffffff ||
        rd(0xcd040000)!=0x01000010)return -1;
     if(heap<0)heap=iosCreateHeap(2048);
@@ -716,10 +717,12 @@ static int a5mate_begin(a5mate_context *ctx,u8 address) {
     if(!(ctx->command&1) || !(ctx->command&ASE) || !(ctx->status&ASS)) {
         iosFree(heap,ctx->work);ctx->work=NULL;return -3;
     }
-    unsigned ports=rd(0xcd040004)&15,connected=0;
-    if(ports!=4){iosFree(heap,ctx->work);ctx->work=NULL;return -20;}
-    for(unsigned p=0;p<ports;p++)if(rd(PORT_BASE+4*p)&1){ctx->port=p;connected++;}
-    if(connected!=1){iosFree(heap,ctx->work);ctx->work=NULL;return -20;}
+    out->topology.hcsparams=rd(0xcd040004);
+    unsigned ports=out->topology.hcsparams&15U;
+    for(unsigned p=0;p<ports;p++)out->topology.portsc[p]=rd(PORT_BASE+4*p);
+    int selection=a5mate_select_port(&out->topology);
+    if(selection){iosFree(heap,ctx->work);ctx->work=NULL;return selection;}
+    ctx->port=(u8)out->topology.selected_port;
     wr(IRQ,0);wr(CMD,ctx->command&~(ASE|PSE|1U));
     if(!wait_bits(STS,HALT,HALT,10000)) {
         wr(CMD,ctx->command);wr(IRQ,ctx->irq);iosFree(heap,ctx->work);ctx->work=NULL;return -4;
@@ -1159,7 +1162,7 @@ int packet_a5mate_profile(u8 address,u8 serial_index,a5mate_result *out) {
     a5mate_context ctx;memset(out,0,sizeof(*out));out->result=-1;
     out->global_out_failure_result=0;out->heap_out_failure_result=0;
     if(!address || !serial_index)return out->result=-1;
-    int result=a5mate_begin(&ctx,address);if(result){out->result=result;return result;}
+    int result=a5mate_begin(&ctx,address,out);if(result){out->result=result;return result;}
     out->phase=1;
     if((result=a5mate_initial_settle(&ctx)))goto done;
     if((result=a5mate_reset_default(&ctx,out)))goto done;
@@ -1193,7 +1196,7 @@ int packet_a5mate_hold_existing(u8 address,a5mate_result *out) {
     a5mate_context ctx;
     memset(out,0,sizeof(*out));out->result=-1;
     if(!address || address>127)return out->result=-1;
-    int result=a5mate_begin(&ctx,address);
+    int result=a5mate_begin(&ctx,address,out);
     if(result){out->result=result;return result;}
     /* No descriptor, reset, or endpoint transaction follows this point. */
     out->phase=5;out->pwn_marker_seen=1;out->pwn_ready=1;

@@ -2,10 +2,10 @@
 <app version="1">
   <name>A5Mate Wii — A5 8945</name>
   <coder>Olsro</coder>
-  <version>0.1.0-pwndfu-milestone</version>
-  <release_date>20260911044307</release_date>
+  <version>0.1.2-ehci-topology</version>
+  <release_date>20261025000000</release_date>
   <short_description>pwnDFU via Wii pour A5_8945 — validé sur matériel.</short_description>
-  <long_description>Profil A5_8945 validé sur matériel (iPad 3). Connecter un appareil Apple en DFU avec CPID 8945. Le marqueur pwnDFU et le démarrage vers un ramdisk ont été confirmés par un dump SHSH.</long_description>
+  <long_description>Profil A5_8945 validé sur Wii (iPad 3). Inclut le correctif de topologie EHCI ; ce profil reste à valider sur Wii U/vWii. Connecter un appareil Apple en DFU avec CPID 8945. Le marqueur pwnDFU et le démarrage vers un ramdisk ont été confirmés par un dump SHSH sur Wii.</long_description>
   <arguments><arg>--pwndfu</arg></arguments>
   <ahb_access/><no_ios_reload/>
 </app>

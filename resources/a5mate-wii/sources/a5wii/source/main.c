@@ -28,6 +28,9 @@
 #ifndef A5WII_PROFILE_LABEL
 #error "A5WII_PROFILE_LABEL must be selected by the Makefile"
 #endif
+#ifndef A5WII_BUILD_LABEL
+#define A5WII_BUILD_LABEL "local"
+#endif
 
 #if A5WII_ENABLE_NETWORK
 static int logfd=-1;
@@ -56,10 +59,11 @@ static void report_usb_topology(void) {
            (unsigned long)mmio_read(ehci+0x08),(unsigned long)mmio_read(ehci+0x0c),
            (unsigned long)mmio_read(ehci+0x50),(unsigned long)mmio_read(ehci+0x10),
            (unsigned long)mmio_read(ehci+0x14),(unsigned long)mmio_read(ehci+0x20));
-    report("EHCI frame=%08lx async=%08lx ports=%08lx/%08lx/%08lx/%08lx",
-           (unsigned long)mmio_read(ehci+0x1c),(unsigned long)mmio_read(ehci+0x28),
-           (unsigned long)mmio_read(ehci+0x54),(unsigned long)mmio_read(ehci+0x58),
-           (unsigned long)mmio_read(ehci+0x5c),(unsigned long)mmio_read(ehci+0x60));
+    unsigned ports=mmio_read(ehci+0x04)&15U;
+    report("EHCI frame=%08lx async=%08lx port_count=%u",
+           (unsigned long)mmio_read(ehci+0x1c),(unsigned long)mmio_read(ehci+0x28),ports);
+    for(unsigned p=0;p<ports;p++)
+        report("EHCI port[%u]=%08lx",p,(unsigned long)mmio_read(ehci+0x54+4*p));
     for(unsigned controller=0;controller<2;controller++) {
         u32 ohci=0xcd050000U+controller*0x10000U;
         report("OHCI%u rev=%08lx ctrl=%08lx cmd=%08lx int=%08lx/%08lx hcca=%08lx chead=%08lx ccur=%08lx",
@@ -95,6 +99,17 @@ static void report(const char *fmt,...) {
         if(sent<0)printf("Network send error: %ld\n",(long)sent);
     }
 #endif
+}
+
+static void report_a5mate_topology(const a5mate_result *r) {
+    const a5mate_topology *t=&r->topology;
+    report("A5MATE topology params=%08lx ports=%u connected=%u ehci=%u selected=%d",
+           (unsigned long)t->hcsparams,t->ports,t->connected,t->ehci_connected,t->selected_port);
+    for(unsigned p=0;p<t->ports;p++)
+        report("A5MATE port[%u]=%08lx",p,(unsigned long)t->portsc[p]);
+    if(r->result==-20)report("A5MATE blocked: controller reports zero root ports");
+    if(r->result==-27)report("A5MATE blocked: need exactly one EHCI-owned connection; use a direct cable, unplug other USB devices");
+    if(r->result==-28)report("A5MATE blocked: selected port is not powered/enabled or is resetting");
 }
 
 static void inspect_async_ring_core(void) {
@@ -139,7 +154,8 @@ static void inspect_async_ring(void) {
     report("MEM_PROT_DDR restored=%04x",*protection);
     // Address zero can be probed only with one connected, enabled EHCI port.
     unsigned enabled_ports=0;
-    for(unsigned port=0;port<4;port++)if((mmio_read(0xcd040054+4*port)&0x2005)==5)enabled_ports++;
+    unsigned ports=mmio_read(0xcd040004)&15U;
+    for(unsigned port=0;port<ports;port++)if((mmio_read(0xcd040054+4*port)&0x2005)==5)enabled_ports++;
     if(enabled_ports==1 && control_address_count<16)control_addresses[control_address_count++]=0;
 }
 
@@ -423,6 +439,7 @@ int main(int argc,char **argv) {
     console_init(xfb,20,20,mode->fbWidth,mode->xfbHeight,mode->fbWidth*2);
     VIDEO_Configure(mode);VIDEO_SetNextFramebuffer(xfb);VIDEO_SetBlack(FALSE);VIDEO_Flush();VIDEO_WaitVSync();
     printf("A5Mate Wii USB diagnostic (%s) by Olsro\n",A5WII_PROFILE_LABEL);
+    printf("Build: %s\n",A5WII_BUILD_LABEL);
 #if A5WII_ENABLE_NETWORK
     printf("Development network initialization...\n");
     char ip[16]={0},mask[16]={0};
@@ -541,6 +558,7 @@ int main(int argc,char **argv) {
             /* a5mate_begin only seizes the controller; it emits no USB
              * transfer, so the marker-bearing pwnDFU device is untouched. */
             int hold_result=packet_a5mate_hold_existing(1,&transition);
+            report_a5mate_topology(&transition);
             report("A5MATE existing-pwn hold result=%d restored=%d marker=%d pwn_ready=%d held=%d",
                    hold_result,transition.restored,transition.pwn_marker_seen,
                    transition.pwn_ready,transition.held);
@@ -676,6 +694,7 @@ int main(int argc,char **argv) {
             report("A5MATE reset packets setup=%08lx status=%08lx",
                    (unsigned long)transition.reset_setup_token,
                    (unsigned long)transition.reset_status_token);
+            report_a5mate_topology(&transition);
             if(!transition_result && transition.pwn_ready && transition.held) {
                 report("A5MATE pwnDFU verified; holding direct EHCI ownership until clean ejection");
                 if(pwn_hold_console()) {

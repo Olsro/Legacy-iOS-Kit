@@ -1,6 +1,7 @@
 #ifndef A5WII_PACKET_PROBE_H
 #define A5WII_PACKET_PROBE_H
 #include <gccore.h>
+#include "ehci_topology.h"
 #define PACKET_MAX_STAGES 8
 typedef struct {
     u8 pid, toggle;
@@ -44,6 +45,7 @@ typedef struct {
     u32 last_token;
     int pwn_marker_seen, normal_dfu_restored;
     int pwn_ready, held, ejected;
+    a5mate_topology topology;
     unsigned packets_ok, packets_timeout, packets_error;
     /* Completed qTD service time.  This characterizes the EHCI cadence on
      * the Wii before deliberately applying any full-speed-frame shaping. */

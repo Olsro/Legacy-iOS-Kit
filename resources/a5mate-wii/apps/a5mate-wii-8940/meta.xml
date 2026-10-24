@@ -2,10 +2,10 @@
 <app version="1">
   <name>A5Mate Wii — A5 8940</name>
   <coder>Olsro</coder>
-  <version>0.1.0-pwndfu-milestone</version>
-  <release_date>20260911044307</release_date>
+  <version>0.1.2-ehci-topology</version>
+  <release_date>20261025000000</release_date>
   <short_description>pwnDFU via Wii pour A5_8940 — validé sur matériel.</short_description>
-  <long_description>Profil A5_8940 validé sur matériel (iPhone 4S). Connecter un appareil Apple en DFU avec CPID 8940. La séquence a5mate applique le payload checkm8 puis revient automatiquement au Homebrew Channel.</long_description>
+  <long_description>Profil A5_8940 validé sur Wii (iPhone 4S). Inclut le correctif de topologie EHCI ; ce profil reste à valider sur Wii U/vWii. Connecter un appareil Apple en DFU avec CPID 8940. Après vérification du marqueur checkm8, appuyer sur A pour éjecter, débrancher le câble, puis appuyer sur B pour revenir à la Homebrew Channel.</long_description>
   <arguments><arg>--pwndfu</arg></arguments>
   <ahb_access/><no_ios_reload/>
 </app>

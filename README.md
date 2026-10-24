@@ -130,6 +130,9 @@ separate 8940, 8942 and 8945 builds for the Homebrew Channel SD card. PwnDFU
 was observed on the 4S (8940) and iPod touch 5G (8942); PwnDFU and ramdisk
 boot were also confirmed on the test iPad 3 (8945), as recorded in the homebrew guide.
 The 8942 payload preserves production keys for the subsequent signed iBSS.
+The 0.1.2 EHCI topology fix also has user-confirmed success on Wii U/vWii
+with a CPID 8942 iPad (25 October 2026). This vWii validation covers profile
+8942; the other profiles have not yet been validated on Wii U.
 
 ### Hardware validation
 
