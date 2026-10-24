@@ -493,12 +493,25 @@ def untether_jetsam_properties(data, label):
     return plistlib.dumps(document)
 
 
-def configure_untether_jetsam(image, product, label):
+def jetsam_properties_path(image, product):
+    """Resolve the selected board while retaining the stock catalog's case."""
     if product not in MODELS:
-        raise ValueError('Expected an iOS 7 jetsam board identity')
+        raise ValueError('Expected a jetsam board identity')
     system = '/System/Library/LaunchDaemons'
     board = MODELS[product][0]
-    path = system+'/com.apple.jetsamproperties.'+board[:-2].upper()+'.plist'
+    expected = 'com.apple.jetsamproperties.'+board[:-2]+'.plist'
+    # Board revision letters can remain lowercase (K93a on iPad2,4).
+    # HFSX lookups are case-sensitive; preserve the actual filename in payloads.
+    matches = [record['name'] for record in image.ls(system)
+               if record['name'].casefold() == expected.casefold()]
+    if len(matches) != 1:
+        raise ValueError('Expected one stock jetsam properties file for '+product+
+                         ' ('+expected+'); found '+str(len(matches)))
+    return system+'/'+matches[0]
+
+
+def configure_untether_jetsam(image, product, label):
+    path = jetsam_properties_path(image, product)
     configured = untether_jetsam_properties(image.read(path), label)
     image.add(path, configured)
     if image.read(path) != configured:

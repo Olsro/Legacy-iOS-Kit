@@ -11,11 +11,11 @@ import tarfile
 from archives import members, write_tar
 from bootstrap_registry import configure, jobs
 from compact_cache import write_sparse
-from common import KIT, MODELS, digest, profile, run, tools
+from common import KIT, digest, profile, run, tools
 from hfs import HFS
 from img3 import img3
 from signing import resign, verify
-from system import entry, add_parents
+from system import entry, add_parents, jetsam_properties_path
 
 STOCK_FILES = '''bin/launchctl sbin/fsck sbin/launchd sbin/mount
 private/etc/group private/etc/master.passwd usr/lib/dyld usr/libexec/amfid
@@ -97,7 +97,6 @@ def held_untether(original, output):
 def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
             compact_cache, root_template, var_template, destination):
     """Inputs are already selected/verified by the caller; no device I/O occurs."""
-    board = MODELS[product][0]
     architecture=profile(product)['cache_arch']
     firmware, native, destination = map(Path, (firmware, native, destination))
     if destination.exists():
@@ -108,10 +107,12 @@ def prepare(product, firmware, loose_libraries, native, relay_file, kernel_file,
     if version['ProductBuildVersion'] != '12H321' or version['ProductVersion'] != '8.4.1':
         raise ValueError('Unqualified bootstrap firmware')
     payload = {}
-    paths = STOCK_FILES+['System/Library/LaunchDaemons/com.apple.jetsamproperties.'+board[:-2].upper()+'.plist']
+    paths = STOCK_FILES+[jetsam_properties_path(stock,product).lstrip('/')]
     for name in paths:
         parent, leaf = name.rsplit('/',1)
-        record = next(r for r in stock.ls('/'+parent) if r['name'] == leaf)
+        record = next((r for r in stock.ls('/'+parent) if r['name'] == leaf), None)
+        if record is None:
+            raise ValueError('Missing stock bootstrap file for '+product+': /'+name)
         if not stat.S_ISREG(record['mode']):
             raise ValueError('Expected a stock regular file: '+name)
         data = stock.read('/'+name)

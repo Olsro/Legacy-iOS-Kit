@@ -55,7 +55,7 @@ class LaunchdBootstrapPlist(unittest.TestCase):
 
 
 class StockLaunchdPayload(unittest.TestCase):
-    def test_normal_boot_payload_preserves_firmware_launchd_on_both_architectures(self):
+    def test_normal_boot_payload_preserves_firmware_launchd_and_jetsam_names(self):
         # Stop after stock-file collection, before collecting the Kit packages.
         # A modified CodeDirectory here would require AMFI bypass at boot,
         # before the very untether that is supposed to provide it can run.
@@ -67,13 +67,16 @@ class StockLaunchdPayload(unittest.TestCase):
         stock.ls.return_value = [dict(name=Path(path).name, mode=0o100755)
                                 for path in bootstrap.STOCK_FILES] + [
             dict(name='com.apple.jetsamproperties.N42.plist', mode=0o100644),
-            dict(name='com.apple.jetsamproperties.N94.plist', mode=0o100644)]
+            dict(name='com.apple.jetsamproperties.N94.plist', mode=0o100644),
+            # The iPad2,4 12H321 HFS catalog uses a lowercase revision suffix.
+            dict(name='com.apple.jetsamproperties.K93a.plist', mode=0o100644)]
         stock.read.side_effect = lambda path: (
             plistlib.dumps(dict(ProductBuildVersion='12H321', ProductVersion='8.4.1'))
             if path.endswith('/SystemVersion.plist') else
             original if path == '/sbin/launchd' else b'stock-file')
         with tempfile.TemporaryDirectory() as temporary:
-            for product in ('iPhone5,2', 'iPhone4,1'):
+            for product, jetsam in (('iPhone5,2', 'N42'), ('iPhone4,1', 'N94'),
+                                    ('iPad2,4', 'K93a')):
                 with self.subTest(product=product), \
                         mock.patch.object(bootstrap, 'HFS', return_value=stock), \
                         mock.patch.object(bootstrap, 'members', side_effect=PayloadCollected), \
@@ -86,6 +89,8 @@ class StockLaunchdPayload(unittest.TestCase):
                                if call.args[0] == 'sbin/launchd']
                     self.assertEqual(len(launchd), 1)
                     self.assertEqual(launchd[0].args[1], original)
+                    entry.assert_any_call('System/Library/LaunchDaemons/com.apple.jetsamproperties.'+
+                                          jetsam+'.plist', b'stock-file', 0o644)
 
 
 if __name__ == '__main__':

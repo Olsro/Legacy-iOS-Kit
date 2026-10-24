@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import system
@@ -61,7 +61,7 @@ class IPodAquila(unittest.TestCase):
         original = plistlib.dumps({'Version': 3, 'Defaults': {}})
         configured = system.untether_jetsam_properties(original, 'org.olsn0w.aquila')
         image = Mock()
-        image.ls.return_value = []
+        image.ls.return_value = [{'name': 'com.apple.jetsamproperties.N94.plist'}]
         image.read.side_effect = [job, job, original, configured]
         name, result = system.prepare_ios71_daemon(image, 'iPhone4,1', 'aquila')
         self.assertEqual(name, 'System/Library/LaunchDaemons/org.olsn0w.aquila.plist')
@@ -70,6 +70,32 @@ class IPodAquila(unittest.TestCase):
             '/System/Library/LaunchDaemons/com.apple.jetsamproperties.N94.plist', configured)
         image.command.assert_not_called()
         self.assertTrue(system.profile('iPhone4,1')['multipatch'])
+
+    def test_ipad24_jetsam_uses_stock_revision_case(self):
+        original = plistlib.dumps({'Version': 3, 'Defaults': {}})
+        label = 'io.pangu.axe.untether'
+        configured = system.untether_jetsam_properties(original, label)
+        image = Mock()
+        image.ls.return_value = [
+            {'name': 'com.apple.jetsamproperties.K93.plist'},
+            {'name': 'com.apple.jetsamproperties.K93a.plist'}]
+        image.read.side_effect = [original, configured]
+        system.configure_untether_jetsam(image, 'iPad2,4', label)
+        path = '/System/Library/LaunchDaemons/com.apple.jetsamproperties.K93a.plist'
+        image.add.assert_called_once_with(path, configured)
+        self.assertEqual(image.read.call_args_list, [call(path), call(path)])
+
+    def test_missing_or_ambiguous_board_jetsam_is_rejected(self):
+        for names in (['com.apple.jetsamproperties.K93.plist'],
+                      ['com.apple.jetsamproperties.K93a.plist',
+                       'com.apple.jetsamproperties.K93A.plist']):
+            with self.subTest(names=names):
+                image = Mock()
+                image.ls.return_value = [{'name': name} for name in names]
+                with self.assertRaisesRegex(ValueError, 'stock jetsam.*iPad2,4'):
+                    system.configure_untether_jetsam(image, 'iPad2,4', 'io.pangu.axe.untether')
+                image.read.assert_not_called()
+                image.add.assert_not_called()
 
     def test_stock_jobs_and_keybag_are_not_relocated(self):
         root = '/System/Library/LaunchDaemons/'
