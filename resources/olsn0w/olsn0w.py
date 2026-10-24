@@ -37,7 +37,7 @@ def main():
     parser.add_argument('--erase',action='store_true',help='Erase the selected device during restoration')
     parser.add_argument('--ram-ready',action='store_true',help='Resume from an already authenticated RAM rescue')
     parser.add_argument('--hacktiv8','--remove-setup-app',dest='remove_setup_app',action='store_true',
-                        help='Apply Hacktiv8 keeping Setup.app, or remove Setup.app when unsupported')
+                        help='Apply Hacktiv8 keeping Setup.app (iOS 8 cellular service is disabled), or remove Setup.app when unsupported')
     args=parser.parse_args()
     if (args.remove_setup_app and
             args.action not in ('prepare-system','prepare-restore','provision-restore')):

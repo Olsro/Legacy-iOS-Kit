@@ -79,7 +79,7 @@ def library(name):
 
 
 def acknowledge(udid, identity):
-    """Set the handshake acknowledgement only after Apple activation is present.
+    """Acknowledge the handshake only after the device reports Activated.
 
     This does not create activation records, alter activation state, or complete
     Setup Assistant. The ECID and product are checked through this connection.
@@ -116,13 +116,13 @@ def acknowledge(udid, identity):
             raise RuntimeError('Cannot open selected activation handshake')
         if get('UniqueChipID')!=identity['ecid'] or get('ProductType')!=identity['product']:
             raise ValueError('Activation handshake belongs to another device')
-        if get('ActivationState')!='Activated':raise ValueError('Official activation must complete first')
+        if get('ActivationState')!='Activated':raise ValueError('Device activation must complete first')
         value=plist.plist_new_bool(1)
         if not value:raise RuntimeError('Cannot allocate activation acknowledgement')
         # lockdownd_set_value transfers this node into its request dictionary
         # and frees the dictionary, including the value. Do not free it twice.
         if mobile.lockdownd_set_value(client,None,b'ActivationStateAcknowledged',value):
-            raise RuntimeError('Cannot acknowledge official activation')
+            raise RuntimeError('Cannot acknowledge device activation')
         if get('ActivationStateAcknowledged') is not True:raise RuntimeError('Activation acknowledgement readback failed')
         return dict(activation_state='Activated',acknowledged=True)
     finally:

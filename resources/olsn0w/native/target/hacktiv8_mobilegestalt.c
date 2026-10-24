@@ -14,6 +14,7 @@ extern int chown(const char *, unsigned int, unsigned int);
 extern unsigned int geteuid(void);
 extern int rename(const char *, const char *);
 extern int remove(const char *);
+extern int strcmp(const char *, const char *);
 
 extern void *CFDataCreate(const void *, const unsigned char *, index_t);
 extern index_t CFDataGetLength(const void *);
@@ -70,6 +71,7 @@ static int write_file(const char *path, const void *data) {
 
 int main(int argc, char **argv) {
     if (argc != 2 && argc != 3) return 2;
+    int check_only = argc == 3 && !strcmp(argv[1], "--check");
     unsigned char *bytes = 0;
     long size = 0;
     void *data = 0, *plist = 0, *cache_key = 0, *flag_key = 0, *serialized = 0;
@@ -88,6 +90,10 @@ int main(int argc, char **argv) {
     result = 14;
     void *cache = (void *)CFDictionaryGetValue(plist, cache_key);
     if (!cache || CFGetTypeID(cache) != CFDictionaryGetTypeID()) goto done;
+    if (check_only) {
+        result = CFDictionaryGetValue(cache, flag_key) == kCFBooleanTrue ? 0 : 17;
+        goto done;
+    }
     CFDictionarySetValue(cache, flag_key, kCFBooleanTrue);
     result = 15;
     serialized = CFPropertyListCreateData(0, plist, 200, 0, 0);

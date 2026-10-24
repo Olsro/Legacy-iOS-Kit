@@ -162,6 +162,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
     untether_label = 'Aquila' if untether == 'aquila' else 'Pangu'
     from hacktiv8 import activation_skipped as selected_activation_skipped
     activation_skipped=selected_activation_skipped(report)
+    cellular_disabled=(report.get('hacktiv8') or {}).get('cellular_service_disabled') is True
     started=time.monotonic();deadline=started+timeout;last_notice=started
     status='Waiting for the target USB connection.'
     values=None;activation_acknowledgement=None
@@ -262,7 +263,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
             values=plistlib.loads(output.stdout)
             if (values.get('ProductType'),values.get('ProductVersion'),values.get('BuildVersion'))!=(report['product'],report['version'],report['build']):
                 raise ValueError('Lockdown reports a different target')
-            baseband_ready=(not profile(report['product'])['has_baseband']
+            baseband_ready=(cellular_disabled or not profile(report['product'])['has_baseband']
                             or bool(values.get('BasebandVersion')))
             if retry_stalled_untether and baseband_ready:
                 progress('Pangu completed without remounting the selected System volume. '
@@ -298,13 +299,16 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                         values['ActivationState']='Activated'
                 if values.get('ActivationState')!='Activated':
                     status='Official activation is not ready; retrying through the connected computer.'
-            if (not activation_skipped and baseband_ready and
+            if (not report.get('setup_app_removed') and baseband_ready and
                     values.get('ActivationState')=='Activated' and
                     activation_acknowledgement is None):
                 from activation import acknowledge
                 activation_acknowledgement=acknowledge(udid,report['identity'])
+            if (activation_skipped and report.get('hacktiv8') is not None and
+                    values.get('ActivationState')!='Activated'):
+                status='Waiting for Hacktiv8 to finish; Setup Assistant still reports an unactivated device.'
             if (services and baseband_ready and
-                    (activation_skipped or values.get('ActivationState')=='Activated')):
+                    (report.get('setup_app_removed') or values.get('ActivationState')=='Activated')):
                 break
         elif lockdown_pairing_required(output):
             status=('Waiting for USB pairing. Unlock the device and accept '
@@ -352,6 +356,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 generation_verified=True,forced_reset_verified=False,
                 writable_root_verified=verify_writable_root,autoboot_verified=True,
                 activation_skipped=activation_skipped,
+                cellular_service_disabled=cellular_disabled,
                 untether_retry_rebooted=untether_retry_rebooted)
     result['activation_acknowledgement']=activation_acknowledgement
     checkpoint(bundle/'qualification.json',result)

@@ -295,13 +295,15 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             return result
     selected=choose(releases(product,refresh),read,show)
     if selected is None:return
-    from hacktiv8 import available as hacktiv8_available
+    from hacktiv8 import available as hacktiv8_available, requires_cellular_disable
     use_hacktiv8=hacktiv8_available(
         selected['version'], product, selected['buildid'])
     show('Optional configuration: official activation will be skipped if enabled.')
     show('Apply Hacktiv8 while preserving Setup.app.'
          if use_hacktiv8 else
          'Hacktiv8 does not support this device/build. Setup.app can still be removed.')
+    if use_hacktiv8 and requires_cellular_disable(selected['version'],product):
+        show('Hacktiv8 on this iOS 8 cellular device disables the telephony service. Calls, SMS and cellular data will be unavailable; Wi-Fi remains available. Choose n to keep official activation and cellular service.')
     prompt=('Apply Hacktiv8 and keep Setup.app? [y/n]: ' if use_hacktiv8 else
             'Remove Setup.app and skip activation? [y/n]: ')
     while True:
@@ -330,7 +332,8 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     from provision_run import DfuPreparationError
     while True:
         enter_dfu(identity,read,show)
-        final_check=('boot verification without activation' if remove_setup_app
+        final_check=('Hacktiv8 activation and boot verification' if remove_setup_app and use_hacktiv8
+                     else 'boot verification without activation' if remove_setup_app
                      else 'activation and boot verification')
         show('Restoration: signed 8.4.1 base → compact bootstrap → selected iOS → '+final_check+'.')
         show('Apple logos, a stationary progress bar and black-screen transitions can occur. Follow the status here and keep the cable connected; an error will be reported explicitly.')
@@ -349,7 +352,7 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             read(prompt)
     if remove_setup_app:
         show('Restoration verified: iOS '+selected['version']+
-             ('. Hacktiv8 applied; Setup.app preserved; activation was intentionally skipped.'
+             ('. Hacktiv8 activation verified; Setup.app preserved; official activation was intentionally skipped.'
               if use_hacktiv8 else '. Setup.app was removed before first boot; activation was intentionally skipped.'))
     else:
         show('Restoration verified: iOS '+selected['version']+'. Complete Setup Assistant on the device.')

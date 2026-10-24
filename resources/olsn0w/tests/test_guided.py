@@ -251,7 +251,7 @@ class GuidedTest(unittest.TestCase):
             answers=iter(['1','y','y'])
             guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
         self.assertIs(observed['remove_setup_app'],True)
-        self.assertTrue(any('Hacktiv8 applied; Setup.app preserved' in line for line in messages))
+        self.assertTrue(any('Hacktiv8 activation verified; Setup.app preserved' in line for line in messages))
 
     def test_preparation_failure_never_requests_dfu_or_erase(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',side_effect=RuntimeError('checksum')):

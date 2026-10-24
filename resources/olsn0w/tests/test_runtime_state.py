@@ -17,6 +17,38 @@ import restore_run
 from activation import ActivationPending, SavedActivationRestored, ActivationRequiresInput
 
 class DistributedState(unittest.TestCase):
+    def test_hacktiv8_preserving_setup_requires_activated_usb_state(self):
+        report=dict(product='iPhone5,2',version='8.3',build='12F70',generation='selected',
+                    identity={'board':'n42ap','product':'iPhone5,2','ecid':123},
+                    activation_mode='skipped-hacktiv8',setup_app_removed=False,
+                    hacktiv8={'method':'mobilegestalt-flag','deferred':True,
+                              'cellular_service_disabled':True})
+        jobs=(b'N42AP\n12F70\nselected\nCYDIA_READY:selected\nBOOT_SUCCESS:selected\n'
+              b'10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n')
+        for state in ('Unactivated','Activated'):
+            with self.subTest(state=state),tempfile.TemporaryDirectory() as work:
+                # CommCenter is deliberately disabled, so no live modem version
+                # is required; the signed-base restore already checked the modem.
+                values=plistlib.dumps(dict(ProductType='iPhone5,2',ProductVersion='8.3',
+                                           BuildVersion='12F70',ActivationState=state))
+                replies=[subprocess.CompletedProcess([],0,jobs,b''),
+                         subprocess.CompletedProcess([],0,values,b'')]
+                with patch.object(restore_run,'checked_manifest',return_value=report), \
+                     patch.object(restore_run.subprocess,'run',side_effect=replies), \
+                     patch('activation.activate') as activate, \
+                     patch('activation.acknowledge',return_value={'acknowledged':True}) as acknowledge:
+                    if state=='Unactivated':
+                        with self.assertRaisesRegex(RuntimeError,'Waiting for Hacktiv8'):
+                            restore_run.qualify(Path(work),['ssh'],'fixture',timeout=0,progress=lambda _:None)
+                        acknowledge.assert_not_called()
+                    else:
+                        result=restore_run.qualify(Path(work),['ssh'],'fixture',timeout=0,progress=lambda _:None)
+                        self.assertTrue(result['activation_skipped'])
+                        self.assertTrue(result['cellular_service_disabled'])
+                        acknowledge.assert_called_once()
+                    activate.assert_not_called()
+                self.assertEqual((Path(work)/'qualification.json').exists(),state=='Activated')
+
     def test_normal_boot_qualification_preserves_board_revision_and_generation(self):
         for board,model in (('k93aap','K93aAP'),('j2aap','J2aAP')):
             with self.subTest(board=board):

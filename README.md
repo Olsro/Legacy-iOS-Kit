@@ -6,11 +6,19 @@ and license are retained. This fork adds olsn0w restoration, integrated
 Hacktiv8, Olsro Cydia repositories and the hardware-tested improvements below.
 Upstream wiki links describe the original project; fork-specific instructions
 and validation results are documented here and in the linked local guides.
-Automatic program update checks and self-updates are disabled in this fork.
-Startup reads local version metadata only; it does not fetch Git history,
-query LukeZGD's releases or replace the checkout. Update the fork manually,
-preserving local changes. Git remotes are not changed automatically. Firmware
-and required tool/dependency downloads still work normally.
+
+The fork's version is **1.0.0**, maintained in [`VERSION`](VERSION).
+The toolkit checks for updates from [Olsro/Legacy-iOS-Kit](https://github.com/Olsro/Legacy-iOS-Kit)
+at startup and asks before installing them. Updating is optional: declining
+continues with the installed version.
+Both Git clones and release ZIP installations can update in place; saved data
+and firmware files outside the program folders are retained. Run the script
+again after updating. Git updates require a clean checkout and fast-forward
+history; commit or stash local changes first. Existing Git remotes are left
+unchanged, and toolkit updates always come from this fork. Release ZIPs include
+the complete toolkit and do not require an initial Git clone. Use
+`--no-version-check` to skip the check. If no release is published yet, the check
+uses the fork's `main` branch.
 
 - (formerly iOS-OTA-Downgrader)
 - **An all-in-one tool to [restore/downgrade](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Restore-Downgrade), [save SHSH blobs](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Saving-SHSH-blobs), [jailbreak](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Jailbreaking) legacy iOS devices, and more**

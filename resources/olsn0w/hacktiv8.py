@@ -8,7 +8,7 @@ import stat
 import tempfile
 import zipfile
 
-from common import KIT, run, tools, version
+from common import KIT, profile, run, tools, version
 from hfs import HFS
 from signing import rehash_adhoc, verify
 
@@ -27,7 +27,7 @@ FIRSTBOOT_JOB = '/Library/LaunchDaemons/org.legacyioskit.hacktiv8.plist'
 FIRSTBOOT_HELPER = '/usr/local/libexec/hacktiv8-mobilegestalt'
 FIRSTBOOT_PROFILE = '/usr/local/share/hacktiv8-mobilegestalt.plist'
 HELPER_ASSET = Path(__file__).parent / 'target/hacktiv8-mobilegestalt'
-HELPER_SHA256 = 'c4a693b6610c176319a1e1e126cad1df0806893cb628fc52adfd556c9150befe'
+HELPER_SHA256 = '7a428f02fe6ad4febbe7d28de559db38a91b0d42e34d240d943a53f05765087b'
 
 # Shared by IPSW preparation, olsn0w and the live-device utility. Only this
 # exact 3GS/4S 9B206 executable may use the historic patch's fixed offset.
@@ -188,6 +188,17 @@ def available(release, product, build=None):
     return technique(release, product, build) is not None
 
 
+def requires_cellular_disable(release, product):
+    """The upstream jailbroken iOS 8 recipe also disables CommCenter."""
+    if version(release)[0] != 8:
+        return False
+    if product.startswith('iPhone'):
+        return True
+    if product.startswith('iPod'):
+        return False
+    return profile(product)['has_baseband']
+
+
 def remove_setup_application(image, required=True):
     matches = [item for item in image.ls('/Applications')
                if item['name'] == 'Setup.app']
@@ -257,19 +268,32 @@ def firstboot_files(report):
         command = f'"{FIRSTBOOT_HELPER}" "$target"'
     else:
         raise ValueError('Invalid deferred Hacktiv8 method')
+    cellular = ('/bin/launchctl disable system/com.apple.CommCenter || exit 1\n'
+                if report.get('cellular_service_disabled') is True else '')
+    ready_exit = '[ -e "$marker" ] && exit 0' if cellular else 'exit 0'
     script = f'''#!/bin/sh
 marker=/var/lib/hacktiv8/mobilegestalt-ready
 target={target}
-[ -e "$marker" ] && exit 0
+{cellular}if "{FIRSTBOOT_HELPER}" --check "$target"; then
+    {ready_exit}
+fi
 i=0
 while ! {wait} && [ "$i" -lt 180 ]; do
     /bin/sleep 2
     i=$((i+1))
 done
 {wait} || exit 1
+/bin/mkdir -p /var/lib/hacktiv8 || exit 1
+attempts=$(/bin/cat "$marker.attempts" 2>/dev/null || true)
+case "$attempts" in ''|0) attempts=0;; 1) attempts=1;; *)
+    echo 'Hacktiv8 cache did not persist after two restart attempts' >&2
+    exit 1;;
+esac
 {command} || exit 1
-/bin/mkdir -p /var/lib/hacktiv8
+"{FIRSTBOOT_HELPER}" --check "$target" || exit 1
+printf '%s\n' "$((attempts+1))" > "$marker.attempts" || exit 1
 : > "$marker"
+/bin/sync
 /sbin/reboot
 '''.encode()
     job = plistlib.dumps({
@@ -321,7 +345,8 @@ def preflight(image, release, product, build):
         patch_lockdownd(image.read(LOCKDOWN), product, build)
     else:
         firstboot_files(_report(method, _gestalt_target(release), b'', b'',
-                                deferred=True, product=product, build=build))
+                                deferred=True, product=product, build=build,
+                                cellular_service_disabled=requires_cellular_disable(release, product)))
 
 
 def install(image, release, product, build=None):
@@ -354,9 +379,11 @@ def install(image, release, product, build=None):
     if method == 'mobilegestalt-profile':
         patched = _profile(product, build)
         report = _report(method, target, b'', patched, deferred=True,
-                         product=product, build=build)
+                         product=product, build=build,
+                         cellular_service_disabled=requires_cellular_disable(release, product))
     else:
-        report = _report(method, target, b'', b'', deferred=True)
+        report = _report(method, target, b'', b'', deferred=True,
+                         cellular_service_disabled=requires_cellular_disable(release, product))
     _install_firstboot(image, report)
     return report
 
@@ -373,7 +400,8 @@ def prepare_data(entries, release, product, build):
     else:
         if not original:
             return _report(method, '/private/var/'+target, b'', b'',
-                           deferred=True)
+                           deferred=True,
+                           cellular_service_disabled=requires_cellular_disable(release, product))
         patched = _patch_gestalt(original)
     mobile = entries.get('mobile')
     if mobile is None or not mobile[0].isdir():
@@ -384,7 +412,9 @@ def prepare_data(entries, release, product, build):
     item.mode = 0o644
     item.size = len(patched)
     entries[target] = item, patched
-    return _report(method, '/private/var/'+target, original, patched)
+    return _report(method, '/private/var/'+target, original, patched, deferred=True,
+                   product=product, build=build,
+                   cellular_service_disabled=requires_cellular_disable(release, product))
 
 
 def verify_installed(image, report, release, product):

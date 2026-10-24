@@ -160,6 +160,7 @@ List of options:
     --no-color                Disable colors for script output
     --no-finder               Disable Finder device detection and keep it disabled after script exit
                               To re-enable it, run the script without this flag and exit
+    --no-version-check        Skip checking for toolkit updates
     --no-device               Enable no device mode
     --old-menu                Use the old menus with number select and y/n
     --pwn                     Pwn the connected device
@@ -777,31 +778,109 @@ download_from_url() {
     wget "$url"
 }
 
+version_is_newer() {
+    local candidate current i
+    [[ ${1#v} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && ${2#v} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    IFS=. read -r -a candidate <<< "${1#v}"
+    IFS=. read -r -a current <<< "${2#v}"
+    for i in 0 1 2; do
+        (( 10#${candidate[$i]} > 10#${current[$i]} )) && return 0
+        (( 10#${candidate[$i]} < 10#${current[$i]} )) && return 1
+    done
+    return 1
+}
+
+version_update_check() {
+    local api="https://api.github.com/repos/Olsro/Legacy-iOS-Kit"
+    local branch="${branch_current:-main}"
+    version_latest=
+    git_hash_latest=
+    commits_latest=
+    pushd "tmp$$" >/dev/null
+    log "Checking for updates..."
+    if [[ $branch == "main" ]]; then
+        if $curl -fsSL --connect-timeout 5 --max-time 15 "$api/releases/latest" -o latest 2>/dev/null; then
+            version_latest=$($jq -r '.name // empty' latest 2>/dev/null)
+            version_latest=${version_latest#Latest-}
+            git_hash_latest=$($jq -r '.target_commitish // empty' latest 2>/dev/null)
+            if [[ $version_latest =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && $git_hash_latest =~ ^[[:xdigit:]]{40}$ ]]; then
+                git_hash_latest=${git_hash_latest:0:7}
+                popd >/dev/null
+                return
+            fi
+        fi
+        # A newly public fork may not have a release yet. Use main until it does.
+        version_latest=
+        git_hash_latest=
+    fi
+    if $curl -fsSL --connect-timeout 5 --max-time 15 --dump-header latest-headers \
+        --get --data-urlencode "sha=$branch" --data-urlencode "per_page=1" \
+        "$api/commits" -o latest 2>/dev/null; then
+        git_hash_latest=$($jq -r 'if type == "array" and length > 0 then .[0].sha // empty else empty end' latest 2>/dev/null)
+        commits_latest=$(sed -n 's/.*[Ll]ink:.*page=\([0-9][0-9]*\)>; rel="last".*/\1/p' latest-headers | tail -n 1)
+        [[ -n $git_hash_latest && -z $commits_latest ]] && commits_latest=1
+    fi
+    if [[ $git_hash_latest =~ ^[[:xdigit:]]{40}$ ]]; then
+        git_hash_latest=${git_hash_latest:0:7}
+    else
+        git_hash_latest=
+    fi
+    popd >/dev/null
+}
+
+version_update() {
+    local repo="https://github.com/Olsro/Legacy-iOS-Kit"
+    select_yesno "Do you want to update now?" 1
+    if [[ $? != 1 ]]; then
+        log "Update skipped. Continuing with the current version."
+        return 0
+    fi
+    if [[ -e .git ]]; then
+        if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
+            error "Local changes detected. Commit or stash them before updating."
+        fi
+        log "Pulling updates from Olsro/Legacy-iOS-Kit..."
+        # origin may still point to upstream in existing installations.
+        git pull --ff-only "$repo" "$branch_current" || \
+            error "git pull failed. Your checkout was not reset; please update it manually."
+    else
+        pushd "tmp$$" >/dev/null
+        log "Downloading..."
+        if ! git clone --filter=blob:none --branch main --single-branch "$repo" Legacy-iOS-Kit; then
+            rm -rf Legacy-iOS-Kit
+            git clone --branch main --single-branch "$repo" Legacy-iOS-Kit || \
+                error "git clone failed. Please check your connection and Git installation, then run the script again."
+        fi
+        if [[ ! -s Legacy-iOS-Kit/restore.sh || ! -d Legacy-iOS-Kit/resources || ! -d Legacy-iOS-Kit/bin ]]; then
+            error "The downloaded toolkit is incomplete. Please run the script again."
+        fi
+        popd >/dev/null
+        log "Updating..."
+        rm -rf bin/ LICENSE README.md restore.sh || error "Failed to replace toolkit files."
+        if [[ $device_sudoloop == 1 ]]; then
+            $sudo rm -rf resources/ || error "Failed to replace the resources folder."
+        else
+            rm -rf resources/ || error "Failed to replace the resources folder."
+        fi
+        cp -R "tmp$$/Legacy-iOS-Kit/." . || \
+            error "Failed to copy the updated toolkit into place."
+    fi
+    pushd "tmp$$" >/dev/null
+    log "Done! Please run the script again"
+    exit
+}
+
 version_get() {
     pushd .. >/dev/null
-    if [[ -d .git ]]; then
+    version_current=
+    if [[ -s VERSION ]]; then
+        version_current="v$(tr -d '\r\n' < VERSION)"
+        [[ $version_current =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || error "Invalid toolkit VERSION file."
+    fi
+    if [[ -e .git ]]; then
         # Version display uses local metadata only, including shallow clones.
-        # Never fetch or replace this fork as part of startup.
         git_hash=$(git rev-parse HEAD | cut -c -7)
         [[ -n $(git status --porcelain --untracked-files=no) ]] && git_hash+="-dirty"
-
-        export TZ=UTC
-        local ts=$(git log -1 --format=%ct)
-        local yy
-        local mm
-        local month_start
-        if [[ $(uname) == Darwin ]]; then
-            yy=$(date -r "$ts" +%y)
-            mm=$(date -r "$ts" +%m)
-            month_start=$(date -j -f "%Y-%m-%d %H:%M:%S" "20$yy-$mm-01 00:00:00" +%s)
-        else
-            yy=$(date -d "@$ts" +%y)
-            mm=$(date -d "@$ts" +%m)
-            month_start=$(date -d "20$yy-$mm-01 00:00:00" +%s)
-        fi
-        local count=$(git rev-list --count HEAD --since="$month_start")
-        version_current="v$yy.$mm.$(printf "%02d" "$count")"
-        unset TZ
 
         branch_current="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
         if [[ -n $branch_current && $branch_current != "main" ]]; then
@@ -809,18 +888,60 @@ version_get() {
         fi
 
     elif [[ -e ./resources/git_hash ]]; then
-        version_current="$(cat ./resources/version)"
+        [[ -z $version_current && -s ./resources/version ]] && version_current="$(cat ./resources/version)"
         git_hash="$(cat ./resources/git_hash)"
     elif [[ -e ./resources/new ]]; then
         :
     else
         log ".git directory and git_hash file not found, cannot determine version."
-        print "* Local version metadata is unavailable; automatic updates are disabled in this fork."
+        if [[ $no_version_check != 1 ]]; then
+            warn "Your copy has no version metadata. Download the toolkit using git clone or from GitHub releases."
+            print "* https://github.com/Olsro/Legacy-iOS-Kit/releases"
+        fi
     fi
     if [[ -n $commits_current ]]; then
         print "* Version: $version_current-$commits_current ($git_hash $branch_current)"
     elif [[ -n $version_current ]]; then
         print "* Version: $version_current ($git_hash $branch_current)"
+    fi
+    popd >/dev/null
+}
+
+version_check() {
+    # The internal DFU helper is launched by an active olsn0w restore.
+    [[ $olsn0w_internal_pwn == 1 ]] && return
+    if [[ $no_version_check == 1 ]]; then
+        warn "No version check flag detected, update check is disabled."
+        return
+    fi
+    pushd .. >/dev/null
+    version_update_check
+    if [[ -z $git_hash_latest ]]; then
+        warn "Failed to check for updates. GitHub may be down or the current branch may not exist on the fork."
+    elif [[ $git_hash_latest != "${git_hash%-dirty}" ]]; then
+        if [[ ( -z $branch_current || $branch_current == "main" ) && -n $version_latest && -n $version_current ]] &&
+            ! version_is_newer "$version_latest" "$version_current"; then
+            warn "Current version is newer/different than remote: $version_latest ($git_hash_latest)"
+        elif [[ -z $branch_current ]]; then
+            print "* Latest version: ${version_latest:-main} ($git_hash_latest)"
+            print "* You can update now or keep using the current version."
+            version_update
+        elif [[ $branch_current != "main" || -z $version_latest ]]; then
+            local count=$(git rev-list --count HEAD)
+            if git merge-base --is-ancestor "$git_hash_latest" HEAD 2>/dev/null || (( count >= commits_latest )); then
+                warn "Current branch is newer/different than remote: $commits_latest ($git_hash_latest)"
+            else
+                print "* A newer version of Olsro's Legacy iOS Kit is available."
+                print "* Current branch: $count ($git_hash)"
+                print "* Latest branch:  $commits_latest ($git_hash_latest)"
+                version_update
+            fi
+        else
+            print "* A newer version of Olsro's Legacy iOS Kit is available."
+            print "* Current version: $version_current ($git_hash)"
+            print "* Latest version:  $version_latest ($git_hash_latest)"
+            version_update
+        fi
     fi
     popd >/dev/null
 }
@@ -6819,6 +6940,9 @@ ipsw_hacktiv8_option() {
             setup_question="Apply Hacktiv8 and keep Setup.app?"
         fi
         print "* Hacktiv8 requires the jailbreak for this restore, which will be enabled."
+        if [[ $target_vers_maj == 8 ]]; then
+            print "* On cellular devices, iOS 8 Hacktiv8 disables telephony: calls, SMS and cellular data will be unavailable."
+        fi
     else
         print "* Hacktiv8 does not support this iOS/device/build."
         print "* Setup.app can still be removed without applying Hacktiv8."
@@ -12620,10 +12744,12 @@ main() {
         install_depends
     fi
 
-    # Retain first-run macOS quarantine handling independently of the removed updater.
+    # Clear first-run macOS quarantine before running bundled tools.
     if [[ $platform == "macos" && ! -s ../saved/firstrun ]]; then
         /usr/bin/xattr -cr ../bin/macos
     fi
+
+    version_check
 
     device_get_info
     olsn0w_pwn_check_identity
@@ -12751,7 +12877,7 @@ for i in "$@"; do
 
         # please dont use these, unless you know what youre doing
         "--no-internet-check") no_internet_check=1;;
-        "--no-version-check" ) :;; # Compatibility: this fork never self-updates.
+        "--no-version-check" ) no_version_check=1;;
         "--olsn0w-pwn"      ) olsn0w_internal_pwn=1;;
         "--run-as-root"      ) run_as_root=1;;
     esac

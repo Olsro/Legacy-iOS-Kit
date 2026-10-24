@@ -1,0 +1,10 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ armv7-ios, arm64-ios ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+current-version: 169
+exports:
+  - targets:         [ armv7-ios, arm64-ios ]
+    symbols:         [ _access, _strcmp, _strlen, _strstr, _memcpy,
+                       _malloc, _free, _syslog, dyld_stub_binder ]
+...

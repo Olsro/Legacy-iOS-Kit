@@ -701,7 +701,20 @@ target SSH and lockdownd is restarted (the device is not rebooted);
 old `data_ark`, pairing and radio preferences are not copied over the new Data
 volume. Only an `Activated` readback counts as success. Missing or rejected
 records fall back to official online activation; malformed or mismatched
-backups stop with an error. Setup-removal/Hacktiv8 modes still skip activation.
+backups stop with an error. Setup-removal/Hacktiv8 modes skip official activation.
+With Setup.app preserved, Hacktiv8 must still reach `ActivationState=Activated`
+over the selected USB connection before restoration is reported as complete.
+Its activation handshake is acknowledged after that state is observed.
+
+On cellular iOS 8 devices, the upstream jailbroken Hacktiv8 recipe also disables
+CommCenter. The menu warns before selection that calls, SMS and cellular data
+will be unavailable; Wi-Fi remains available. The first-boot job applies this
+policy before editing MobileGestalt. An old completion marker cannot hide a
+regenerated cache: the bundled helper checks the actual boolean on every boot.
+Cache repair can request at most two restarts. System recipe 52 rebuilds older
+prepared images with this policy and verification. Cellular versions may be
+absent after CommCenter is disabled; the signed-base stage still validates the
+selected modem before installation.
 An Apple account challenge stops automatic retries and requires owner input;
 a saved certificate does not guarantee acceptance or remove Activation Lock.
 This saved-record path was verified on iPod touch 5G with target 6.1.3: the

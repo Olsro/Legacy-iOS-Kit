@@ -89,6 +89,15 @@ products, reapplication, shared image/live paths and rejection of unknown inputs
 The host reports file-patch verification, not successful official activation.
 After restart, verify Setup Assistant, device connectivity and normal use.
 
+For olsn0w restores on cellular iOS 8 devices, the
+[upstream jailbroken recipe](https://github.com/overcast302/hacktiv8/blob/main/exploits/sftp/sftp.py)
+requires disabling CommCenter in addition to editing MobileGestalt. This disables
+calls, SMS and cellular data. The restore menu explains this before selection.
+The generated first-boot job checks the actual cache flag instead of trusting
+an old marker and limits cache-repair restarts to two. A preserved Setup.app
+requires USB `ActivationState=Activated` before restoration can be qualified;
+skipping Apple's activation request alone is no longer treated as success.
+
 Hardware validation: iPhone 4S on iOS 5.1.1 (9B206), 2026-09-25. The patched
 device returned after restart with `ActivationState=Activated`; the user
 completed Setup Assistant and reached SpringBoard. A second application was

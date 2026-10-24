@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>AutomaticProducts</key><true/>
+  <key>ExcludedBundles</key>
+  <array/>
+  <key>com.gameprom.software.PinballHD</key>
+  <dict>
+    <key>Enabled</key><true/>
+    <key>CatalogPlists</key>
+    <array>
+      <string>Tables_iPhone.plist</string>
+      <string>Tables.plist</string>
+    </array>
+    <key>ProductIDs</key>
+    <dict>
+      <key>com.gameprom.software.PinballHD.purchase.cheatspack1</key><string>Cheats Pack</string>
+      <key>com.gameprom.software.PinballHD.purchase.goldenball</key><string>Golden Ball</string>
+      <key>com.gameprom.software.PinballHD.purchase.unlockalltables</key><string>Unlock All Tables</string>
+      <key>com.gameprom.software.PinballHD.purchase.ballsaver</key><string>Ball Saver</string>
+      <key>com.gameprom.software.PinballHD.purchase.tablespack1</key><string>Tables Pack</string>
+      <key>com.gameprom.software.PinballHD.purchase.extraball</key><string>Extra Ball</string>
+      <key>com.gameprom.software.PinballHD.purchase.multiball</key><string>Multiball</string>
+    </dict>
+  </dict>
+</dict>
+</plist>
