@@ -11,6 +11,7 @@ from common import profile, tools, version
 from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
+from ssh_client import RSA_OPTIONS
 
 PANGU_READONLY_RETRY_POLLS = 12
 
@@ -23,8 +24,7 @@ def target_prefix(bundle, port):
     return ['ssh','-F','/dev/null','-p',str(port),'-i',str(bundle/'ssh_client_rsa'),
             '-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=5',
             '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),
-            '-o','GlobalKnownHostsFile=/dev/null','-o','HostKeyAlgorithms=+ssh-rsa',
-            '-o','PubkeyAcceptedAlgorithms=+ssh-rsa','root@127.0.0.1']
+            '-o','GlobalKnownHostsFile=/dev/null',*RSA_OPTIONS,'root@127.0.0.1']
 
 
 def startup_jobs(text):

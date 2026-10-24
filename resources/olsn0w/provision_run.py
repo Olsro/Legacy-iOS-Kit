@@ -75,6 +75,8 @@ def connect_handoff(session, timeout=120):
                rescue_build=session_build(session))
     allowed={'/dev/disk0s1s1 on /mnt1','/dev/disk0s1s2 on /mnt2'}
     deadline=time.monotonic()+timeout
+    diagnostic=session/'handoff-ssh.log'
+    previous_error=None
     while True:
         try:
             mounts=ram.run('/sbin/mount').decode().splitlines()
@@ -83,8 +85,15 @@ def connect_handoff(session, timeout=120):
                 raise ValueError('Unexpected internal mount after signed-base restore')
             ram.guard(internal)
             return ram
-        except (RuntimeError,subprocess.TimeoutExpired):
-            if time.monotonic()>=deadline:raise RuntimeError('Restore RAM handoff did not open SSH')
+        except (RuntimeError,subprocess.TimeoutExpired) as error:
+            detail=str(error)
+            if detail != previous_error:
+                with diagnostic.open('a') as log:
+                    log.write(detail+'\n')
+                previous_error=detail
+            message='Restore RAM handoff did not open SSH. See '+str(diagnostic)+'\n'+detail
+            if 'bad configuration option' in detail.lower() or time.monotonic()>=deadline:
+                raise RuntimeError(message) from error
             time.sleep(3)
 
 

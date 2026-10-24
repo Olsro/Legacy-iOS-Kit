@@ -48,6 +48,8 @@ def main():
         from runtime import ensure_runtime
         ensure_runtime(STATE)
         os.environ.update(tool_environment())
+        from ssh_client import check as check_ssh_client
+        check_ssh_client()
     if args.action == 'configure-ssh':
         if not args.udid:
             parser.error('configure-ssh requires --udid')

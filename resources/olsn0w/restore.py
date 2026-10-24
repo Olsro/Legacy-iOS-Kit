@@ -178,7 +178,8 @@ class Rescue:
         board,chip,board_id=MODELS[identity['product']]
         if (identity['board'],identity['chip'],identity['board_id'])!=(board,chip,board_id):
             raise ValueError('Invalid selected hardware identity')
-        self.prefix,self.identity,self.maintenance=prefix,identity,maintenance
+        from ssh_client import compatible_prefix
+        self.prefix,self.identity,self.maintenance=compatible_prefix(prefix),identity,maintenance
         from restore_environment import checked_build, selected_build
         self.rescue_build=checked_build(identity['product'],
             rescue_build if rescue_build is not None else selected_build(identity['product']))

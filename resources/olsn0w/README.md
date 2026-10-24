@@ -271,6 +271,15 @@ Linux tools receive an absolute path to the Kit's bundled shared libraries,
 including LibreSSL, even when launched from a session working directory. Before
 DFU preparation, the restore tool is started without restore arguments to check
 its loader; diagnostics are saved in `provision/restore-loader.log`.
+Before firmware preparation, `ssh -G` checks that the host SSH client accepts
+the required options without connecting. RSA compatibility uses
+`PubkeyAcceptedKeyTypes`, accepted by both older High Sierra clients and newer
+OpenSSH versions. Saved RAM SSH argument vectors using the newer
+`PubkeyAcceptedAlgorithms` spelling are normalized when loaded; existing keys
+and strict host-key pinning are preserved. Failed RAM handoff connections retain
+the underlying SSH diagnostic in `handoff-ssh.log` in the session directory and
+include it in the terminal error. An invalid client option fails immediately;
+temporary connection failures are still retried while the RAM service starts.
 
 On Linux and Intel Macs, the DFU step delegates to the Kit through an internal
 mode that preserves the owning menu's temporary files and usbmuxd instance.
