@@ -339,8 +339,14 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             break
         except DfuPreparationError as error:
             show('DFU exploit failed before any erase: '+str(error))
-            show('All preparation is retained. Force-restart the device, re-enter DFU and run the matching A5Mate profile before retrying.')
-            read('Press Enter once the freshly pwned DFU device is reconnected (Ctrl+C to cancel): ')
+            show('All preparation is retained. Force-restart the device and re-enter DFU.')
+            if profile(product).get('external_pwndfu'):
+                show('Run the matching A5/A5X A5Mate profile before retrying.')
+                prompt='Press Enter once the freshly pwned DFU device is reconnected (Ctrl+C to cancel): '
+            else:
+                show('The Kit will retry the DFU exploit automatically on this computer.')
+                prompt='Press Enter once the device is back in DFU (Ctrl+C to cancel): '
+            read(prompt)
     if remove_setup_app:
         show('Restoration verified: iOS '+selected['version']+
              ('. Hacktiv8 applied; Setup.app preserved; activation was intentionally skipped.'
