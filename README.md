@@ -68,6 +68,11 @@ uses the fork's `main` branch.
 - This program was created to fight ewaste and to allow anyone to use their legacy iOS device how they like to enjoy the super speed & the vibes (skeuomorphic, cover flow, etc) of older iOS versions. You regain even a few GB of storage by using very old iOS versions compared to the latest ones so you can just store more content. Easy Hacktivation is provided in the only intent to fight ewaste. Apple remote locking a device so much you can't even use YOUR device as an mp3 player is super anti-consumer to me and many legitimate users just forget their Apple ID over time.
 - Hacktivated devices can be used as an iPod Touch basically and even synced through iTunes, but the baseband remains unactivated (no mobile networks like 2G/3G/4G but wifi/bluetooth works). This is not a bug and won't be addressed
 
+## LLM usage
+This project was made with heavy LLMs assistance, but also heavily tested against real hardware.
+
+If for whatever reason you don't wanna use a project touched by LLMs, please don't use it.
+
 ## Additions and verified results in this fork
 
 ### olsn0w: iOS 5, 6, 7 and 8 restoration
