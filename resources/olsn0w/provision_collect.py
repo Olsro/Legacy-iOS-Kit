@@ -1,4 +1,5 @@
 """Collect newly restored signed firmware while the original RAM stays alive."""
+from collections import Counter
 import io
 import json
 from pathlib import Path
@@ -24,13 +25,19 @@ def modem_components(product):
     return 'usr/local/standalone/firmware/Baseband/'+family+'/',baseband_files(family)
 
 
-def personalized_modem(data, names):
-    """Read the complete, personalized modem set from Apple's restore ZIP."""
+def personalized_modem(data, names, *, optional=()):
+    """Read required runtime files, allowing explicitly named restore-only files."""
     expected=set(names)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        listed=archive.namelist()
-        if len(listed)!=len(expected) or set(listed)!=expected:
-            raise ValueError('Personalized modem archive has an unexpected component set')
+        counts=Counter(archive.namelist())
+        missing=expected-set(counts)
+        unexpected=set(counts)-expected-set(optional)
+        duplicates={name for name,count in counts.items() if count>1}
+        if missing or unexpected or duplicates:
+            details='; '.join(label+': '+(', '.join(map(repr,sorted(values))) or 'none')
+                             for label,values in (('missing',missing),('unexpected',unexpected),
+                                                  ('duplicate',duplicates)))
+            raise ValueError('Personalized modem archive has an unexpected component set ('+details+')')
         result={name:archive.read(name) for name in names}
     if any(not value for value in result.values()):
         raise ValueError('Personalized modem archive contains an empty component')
@@ -73,7 +80,11 @@ def collect(bundle, ram, destination):
         if modem and native6:
             family=profile(report['product'])['baseband_family']
             packed=ram.run('cat /mnt1/'+modem+family+'-personalized.zip')
-            packed_modem=personalized_modem(packed,modem_files)
+            # Mav5's personalized restore ZIP retains RestoreSBL1. The loose
+            # runtime set used by the iOS 8 collector does not include it;
+            # collect the same runtime payload on the native iOS 6 path.
+            optional=('restoresbl1.mbn',) if family=='Mav5' else ()
+            packed_modem=personalized_modem(packed,modem_files,optional=optional)
         carrier_version=ram.run('cat /mnt1/'+names[0])
         carrier=plistlib.loads(carrier_version)
         expected_carrier=('8.4.1','12H321')

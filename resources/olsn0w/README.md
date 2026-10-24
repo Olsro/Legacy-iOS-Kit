@@ -216,6 +216,15 @@ activation is performed on the target through the Kit's activation utility;
 no fabricated records or prior activation from another device are used.
 Recovery using an already attested base remains a separate path.
 
+For the native iOS 6 restore environment, Mav5 collection accepts the additional
+restore-only `restoresbl1.mbn` member in the personalized ZIP, including on the
+cellular iPad mini (`iPad2,6` and `iPad2,7`). Only the required runtime modem
+files are transferred to the target. Missing required files, unknown members
+and duplicate ZIP entries still stop collection, with their names in the error.
+An earlier `Personalized modem archive has an unexpected component set` failure
+can therefore be caused by the old collector rejecting this restore-only member;
+the original error alone does not identify the archive's actual contents.
+
 For a prepared rescue, provisioning bundle and compact bootstrap,
 `provision-restore` runs the entire sequence. The device must initially be in
 DFU. Use `--base-keys` for 8.4.1; optional `--keys` and `--ipsw` refer to the
