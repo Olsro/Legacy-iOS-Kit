@@ -57,6 +57,15 @@ users consume the checked artifacts and do not need this SDK.
 
 ## Qualification checklist
 
+### iPad2,2 with 8 KiB sectors: user report
+
+On 2026-10-25, the reporter in
+[issue #11](https://github.com/Olsro/Legacy-iOS-Kit/issues/11#issuecomment-6401931903)
+confirmed that restoration to iOS 5.1.1 worked after the disk-sector fix.
+The preceding RAM diagnostics identified a 64 GB iPad2,2 with 8,192-byte
+logical sectors and a valid stock GPT. The earlier 4,096-byte raw read failed
+with `Invalid argument`; a 16 KiB read succeeded.
+
 ### iPhone 4S first restoration and modem path
 
 On 2026-09-28, iPhone4,1 / 5.1.1 (9B206) with multipatch passed the signed

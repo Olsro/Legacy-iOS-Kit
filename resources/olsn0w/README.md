@@ -175,8 +175,10 @@ the requested HFS bytes; sparse writes merge adjacent HFS ranges sharing a
 sector. Unaligned writes are rejected. The device-bound System image is grown
 through the HFS editor when needed to fill whole sectors, preserving its
 alternate volume header. Host tests cover the 64 GB iPad2,2 geometry reported
-in [issue #11](https://github.com/Olsro/Legacy-iOS-Kit/issues/11); installation
-on that 8 KiB device still requires hardware validation.
+in [issue #11](https://github.com/Olsro/Legacy-iOS-Kit/issues/11). On 2026-10-25,
+the reporter confirmed that restoration to iOS 5.1.1 worked after this fix.
+Official activation is confirmed; see the
+[iOS 5 compatibility notes](IOS5-COMPATIBILITY.md#ipad22-with-8-kib-sectors-user-report).
 
 The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
