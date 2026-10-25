@@ -17,6 +17,7 @@ class RescueDiskDiagnostics(unittest.TestCase):
         self.ram=Rescue(['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1'],
                         dict(product='iPad2,2',board='k94ap',chip=0x8940,board_id=6),
                         rescue_build='10B329')
+        self.ram._block_size=4096
 
     def test_binary_read_keeps_dd_statistics_out_of_partition_bytes(self):
         data=bytes(range(256))*96
@@ -44,7 +45,7 @@ class RescueDiskDiagnostics(unittest.TestCase):
         with patch('restore.subprocess.run',return_value=Mock(
                 returncode=0,stdout=b'x'*4096,stderr=b'1+0 records out\n')):
             with self.assertRaisesRegex(RuntimeError,
-                    'Short partition read from /dev/rdisk0s1: expected 24576 bytes, received 4096'):
+                    'Short partition read from /dev/rdisk0s1: expected 16384 bytes, received 4096'):
                 self.ram.table()
 
     def test_failed_write_retains_dd_error_and_does_not_start_readback(self):
@@ -168,7 +169,7 @@ class RestoreGuards(unittest.TestCase):
                 resume_system_fsck(folder,ram)
         self.assertFalse(ram.method_calls)
     def test_failed_chunk_stops_subsequent_writes(self):
-        ram=Mock();ram.write.side_effect=RuntimeError('Readback failed')
+        ram=Mock(block_size=4096);ram.write.side_effect=RuntimeError('Readback failed')
         with tempfile.TemporaryDirectory() as folder:
             image=Path(folder)/'image';image.write_bytes(bytes(3*4096))
             with patch('restore.CHUNK',1),self.assertRaises(RuntimeError):copy_image(ram,image,'/dev/rdisk0s1s3',progress=lambda _:None)

@@ -18,10 +18,12 @@ from hfs import HFS
 from hfs_extents import allocated_ranges
 from hfs_policy import require_reserve
 from device import same_hardware
-from layout import header, inspect, encode, editor_commands
+from layout import ENTRY_BYTES, header, inspect, encode, editor_commands, probe_sector_size
 from personalization import prepare as personalize
 from system import uses_protected_data
 
+# HFS allocation/transfer units stay at 4 KiB; GPT LBAs use the measured disk
+# sector size, which can be 8 KiB on high-capacity A5 devices.
 BLOCK = 4096
 CHUNK = 4096
 
@@ -131,6 +133,8 @@ def prepare(session, system, relay, base, destination):
     for name in ('gpt-primary.bin','gpt-secondary.bin'):
         shutil.copyfile(base/name,destination/name)
     old_a=(destination/'gpt-primary.bin').read_bytes();old_b=(destination/'gpt-secondary.bin').read_bytes()
+    sector=inspect(old_a,old_b)[0]['block_size']
+    align_image(destination/'system.hfs',sector)
     size=(destination/'system.hfs').stat().st_size
     new_a,new_b,layout=encode(old_a,old_b,size,source['version'])
     editor_commands(old_a,old_b,size,source['version'])
@@ -150,6 +154,15 @@ def prepare(session, system, relay, base, destination):
                 files={n:digest(destination/n) for n in names},physical_boot_verified=False)
     checkpoint(destination/'manifest.json',report)
     return destination
+
+
+def align_image(path, sector):
+    """Grow the device-bound HFS copy, including its alternate volume header."""
+    image=HFS(path)
+    size=Path(path).stat().st_size
+    if size%sector:
+        image.grow((size+sector-1)//sector*sector)
+    require_reserve(path,root=True)
 
 
 def update_bootstrap_relay(boot, product, relay):
@@ -183,6 +196,11 @@ class Rescue:
         from restore_environment import checked_build, selected_build
         self.rescue_build=checked_build(identity['product'],
             rescue_build if rescue_build is not None else selected_build(identity['product']))
+        self._block_size=None
+    @property
+    def block_size(self):
+        if self._block_size is None:self.table()
+        return self._block_size
     def run(self, command, data=None, timeout=180):
         result=subprocess.run(self.prefix+[command],input=data,capture_output=True,timeout=timeout)
         if result.returncode:
@@ -201,25 +219,43 @@ class Rescue:
         internal=[x.split(' (',1)[0] for x in mounts if re.match(r'/dev/r?disk',x)]
         if sorted(internal)!=sorted(mounted):raise ValueError('Unexpected mounted internal volumes: '+repr(internal))
     def read(self,device,first,count):
+        """Read 4 KiB units through aligned raw disk-sector requests."""
         if not re.fullmatch(r'/dev/rdisk0s1(?:s[1-4])?',device) or first<0 or count<=0:
             raise ValueError('Invalid partition read')
-        # run() captures stderr separately, so dd diagnostics cannot corrupt
-        # the binary read and remain available if the command fails.
-        blob=self.run(f'{self.tool("dd")} if={device} bs={BLOCK} skip={first} count={count}')
-        if len(blob)!=count*BLOCK:
-            raise RuntimeError('Short partition read from '+device+': expected '+str(count*BLOCK)+
+        sector=self.block_size
+        start=first*BLOCK;end=(first+count)*BLOCK
+        begin=start//sector;stop=(end+sector-1)//sector
+        blob=self._read_sectors(device,begin,stop-begin,sector)
+        return blob[start-begin*sector:end-begin*sector]
+    def _read_sectors(self,device,first,count,sector):
+        # Capture stderr separately so dd diagnostics cannot corrupt disk bytes.
+        blob=self.run(f'{self.tool("dd")} if={device} bs={sector} skip={first} count={count}')
+        if len(blob)!=count*sector:
+            raise RuntimeError('Short partition read from '+device+': expected '+str(count*sector)+
                                ' bytes, received '+str(len(blob)))
         return blob
     def write(self,device,first,blob):
+        """Write at a 4 KiB unit offset, requiring complete disk sectors."""
         if not re.fullmatch(r'/dev/rdisk0s1s[1-4]',device) or first<0 or not blob or len(blob)%BLOCK:
             raise ValueError('Invalid partition write')
-        self.run(f'{self.tool("dd")} of={device} bs={BLOCK} seek={first} count={len(blob)//BLOCK} iflag=fullblock conv=notrunc,fsync',blob)
+        sector=self.block_size
+        if first*BLOCK%sector or len(blob)%sector:
+            raise ValueError('Partition write must occupy whole disk sectors')
+        self.run(f'{self.tool("dd")} of={device} bs={sector} seek={first*BLOCK//sector} count={len(blob)//sector} iflag=fullblock conv=notrunc,fsync',blob)
         if self.read(device,first,len(blob)//BLOCK)!=blob:raise RuntimeError('Partition readback mismatch')
     def table(self):
-        first=self.read('/dev/rdisk0s1',0,6)
-        hdr=header(first[BLOCK:2*BLOCK])
-        last=self.read('/dev/rdisk0s1',hdr['other']-4,5)
+        # One 16 KiB request is aligned on both supported geometries. Read
+        # and validate both GPT copies before trusting the inferred sector size.
+        probe=self._read_sectors('/dev/rdisk0s1',0,1,16384)
+        sector=probe_sector_size(probe);entries=ENTRY_BYTES//sector
+        first=self._read_sectors('/dev/rdisk0s1',0,2+entries,sector)
+        hdr=header(first[sector:2*sector])
+        if hdr['other']<=entries:raise ValueError('Invalid backup GPT address')
+        last=self._read_sectors('/dev/rdisk0s1',hdr['other']-entries,1+entries,sector)
         inspect(first,last)
+        if self._block_size is not None and self._block_size!=sector:
+            raise ValueError('Disk sector size changed during restoration')
+        self._block_size=sector
         return first,last
     def fsck(self,device):
         command='/sbin/fsck_hfs'
@@ -255,7 +291,7 @@ def refresh_layout(bundle, ram):
         raise ValueError('Cannot refresh an unrelated or already started restore')
     previous=inspect((bundle/'gpt-primary.bin').read_bytes(),(bundle/'gpt-secondary.bin').read_bytes())
     ram.guard();a,b=ram.table();current=inspect(a,b)
-    for key in ('guid','first','last','other'):
+    for key in ('guid','first','last','other','block_size'):
         if previous[0][key]!=current[0][key]:raise ValueError('Provisioned disk identity or capacity changed')
     if previous[1][0]['guid']!=current[1][0]['guid']:
         raise ValueError('Signed base partition identity changed')
@@ -271,14 +307,17 @@ def refresh_layout(bundle, ram):
 
 def copy_image(ram, path, device, *, sparse=False, progress=print, label='Image'):
     size=Path(path).stat().st_size
-    if size%BLOCK:raise ValueError('Unaligned image')
+    sector=ram.block_size
+    if size%sector:raise ValueError('Image must occupy whole disk sectors')
     spans=list(allocated_ranges(path)) if sparse else [(0,size//BLOCK)]
+    spans=aligned_ranges(spans,sector//BLOCK)
+    chunk=max(sector//BLOCK,CHUNK//(sector//BLOCK)*(sector//BLOCK))
     total=sum(count for _,count in spans)*BLOCK
     done=0;last_percent=-1
     with Path(path).open('rb') as stream:
         for first,count in spans:
             while count:
-                n=min(count,CHUNK);stream.seek(first*BLOCK);blob=stream.read(n*BLOCK)
+                n=min(count,chunk);stream.seek(first*BLOCK);blob=stream.read(n*BLOCK)
                 if len(blob)!=n*BLOCK:raise ValueError('Short image read')
                 ram.write(device,first,blob)
                 first+=n;count-=n
@@ -286,6 +325,22 @@ def copy_image(ram, path, device, *, sparse=False, progress=print, label='Image'
                 if percent//5>last_percent//5 or done==total:
                     progress(f'{label}: {percent}% — {done/1048576:.1f}/{total/1048576:.1f} MiB written and read back.')
                     last_percent=percent
+
+
+def aligned_ranges(spans, alignment):
+    """Expand HFS extents to whole disk sectors, merging shared boundary sectors."""
+    result=[]
+    for first,count in spans:
+        end=(first+count+alignment-1)//alignment*alignment
+        first=first//alignment*alignment
+        if result:
+            previous,length=result[-1]
+            previous_end=previous+length
+            if first<=previous_end:
+                result[-1]=(previous,max(end,previous_end)-previous)
+                continue
+        result.append((first,end-first))
+    return result
 
 
 def data_formatter(rescue_build):
@@ -327,10 +382,11 @@ def _finish_install(bundle,ram,report,layout,expected,state,roles,progress):
         if (bundle/name).stat().st_size!=part['bytes']:raise ValueError('Image does not fill planned partition')
         dev=part['device'].replace('/dev/disk','/dev/rdisk')
         # Verify that the native child mapping has the exact new endpoint.
-        probe=ram.run(f'{ram.tool("dd")} if={dev} bs=4096 skip={part["bytes"]//4096} count=1 2>/dev/null')
+        sector=layout['block_size']
+        probe=ram.run(f'{ram.tool("dd")} if={dev} bs={sector} skip={part["bytes"]//sector} count=1')
         if probe:raise RuntimeError('Stale child partition endpoint')
         stage('writing-'+role);copy_image(ram,bundle/name,dev,progress=progress,label={'system':'iOS '+report['version'],'bootstrap':'Boot system','bootstrap-data':'Boot data'}[role])
-        if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read(dev,0,1):raise RuntimeError('Parent/child mapping differs')
+        if ram.read('/dev/rdisk0s1',part['first']*sector//BLOCK,1)!=ram.read(dev,0,1):raise RuntimeError('Parent/child mapping differs')
         (bundle/(role+'-fsck.log')).write_bytes(ram.fsck(dev));state['verified_volumes'].append(role);checkpoint(journal,state)
     return _finish_data(bundle,ram,report,layout,expected,state,stage,progress)
 
@@ -428,6 +484,9 @@ def read_fresh_image(ram, device, path, expected_bytes):
             if start+count>total:raise ValueError('Bitmap extent outside partition')
             while count:
                 n=min(count,CHUNK);stream.seek(start*BLOCK);stream.write(ram.read(device,start,n));start+=n;count-=n
+        # allocated_ranges opens the host image separately; publish even a
+        # small buffered bitmap before it validates the allocation metadata.
+        stream.flush()
         for start,count in allocated_ranges(path):
             while count:
                 n=min(count,CHUNK);stream.seek(start*BLOCK);stream.write(ram.read(device,start,n));start+=n;count-=n
@@ -505,7 +564,7 @@ def resume_system_fsck(bundle,ram,progress=print):
     layout=report['layout'];ram.guard()
     if ram.table()!=expected:raise ValueError('Interrupted restore partition table changed')
     part=next(p for p in layout['partitions'] if p['role']=='system')
-    if ram.read('/dev/rdisk0s1',part['first'],1)!=ram.read('/dev/rdisk0s1s3',0,1):
+    if ram.read('/dev/rdisk0s1',part['first']*layout['block_size']//BLOCK,1)!=ram.read('/dev/rdisk0s1s3',0,1):
         raise RuntimeError('Interrupted system parent/child mapping differs')
     progress('Repairing and verifying the prepared iOS filesystem metadata.')
     try:

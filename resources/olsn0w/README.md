@@ -165,6 +165,19 @@ reserve. The budget uses uncompressed file sizes and never relies on compression
 or replacement of stock files to make the payload fit. Each personalized file
 is read back before the partition layout is calculated.
 
+GPT discovery supports 4 KiB and 8 KiB logical disk sectors. A 16 KiB raw
+prefix identifies the header geometry, then both full GPT copies, their CRCs,
+placement and partition ranges must validate before that geometry is used.
+Partition LBAs, native editor commands and parent/child mapping checks use
+the detected sector size. Bootstrap volumes remain 30 MiB and 2 MiB.
+HFS allocation blocks remain 4 KiB: raw reads align to disk sectors and return
+the requested HFS bytes; sparse writes merge adjacent HFS ranges sharing a
+sector. Unaligned writes are rejected. The device-bound System image is grown
+through the HFS editor when needed to fill whole sectors, preserving its
+alternate volume header. Host tests cover the 64 GB iPad2,2 geometry reported
+in [issue #11](https://github.com/Olsro/Legacy-iOS-Kit/issues/11); installation
+on that 8 KiB device still requires hardware validation.
+
 The installer verifies the prepared inputs and current partition table before
 committing the native LwVM layout. It writes and reads back the system and compact
 bootstrap, formats fresh target Data with the selected iOS formatter, seeds it,

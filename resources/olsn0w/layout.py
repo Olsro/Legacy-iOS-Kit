@@ -9,11 +9,35 @@ import zlib
 from common import version
 
 HFS_TYPE = uuid.UUID('48465300-0000-11aa-aa11-00306543ecac').bytes_le
+SECTOR_SIZES = (4096, 8192)
+ENTRY_BYTES = 16384
+
+
+def sector_size(primary, secondary):
+    matches=[size for size in SECTOR_SIZES
+             if len(primary)==ENTRY_BYTES+2*size and len(secondary)==ENTRY_BYTES+size]
+    if len(matches)!=1:raise ValueError('Expected complete primary and backup GPT regions')
+    return matches[0]
+
+
+def probe_sector_size(data):
+    """Identify LBA 1 from a raw prefix readable on both supported geometries."""
+    matches=[]
+    for size in SECTOR_SIZES:
+        try:
+            candidate=header(data[size:2*size])
+        except ValueError:
+            continue
+        if (candidate['here']==1 and candidate['entries']==2 and
+                candidate['first']==2+ENTRY_BYTES//size):
+            matches.append(size)
+    if len(matches)!=1:raise ValueError('Missing or ambiguous supported GPT sector size')
+    return matches[0]
 
 
 def header(block):
-    if len(block) != 4096 or block[:8] != b'EFI PART':
-        raise ValueError('Expected a 4096-byte GPT header block')
+    if len(block) not in SECTOR_SIZES or block[:8] != b'EFI PART':
+        raise ValueError('Expected a supported GPT header block')
     revision, size, checksum, reserved = struct.unpack_from('<4I', block, 8)
     if revision not in (1, 0x10000) or size != 92 or reserved:
         raise ValueError('Unsupported GPT header revision or size')
@@ -27,22 +51,21 @@ def header(block):
         raise ValueError('Unsupported GPT entry geometry')
     return dict(revision=revision, here=here, other=other, first=first, last=last,
                 guid=bytes(block[56:72]), entries=entries, count=count,
-                entry_size=entry_size, entries_crc=entries_crc)
+                entry_size=entry_size, entries_crc=entries_crc,block_size=len(block))
 
 
 def inspect(primary, secondary):
-    if len(primary) != 6*4096 or len(secondary) != 5*4096:
-        raise ValueError('Expected complete primary and backup GPT regions')
-    a, b = header(primary[4096:8192]), header(secondary[-4096:])
+    block=sector_size(primary,secondary);entry_blocks=ENTRY_BYTES//block
+    a, b = header(primary[block:2*block]), header(secondary[-block:])
     if (a['here'] != 1 or a['entries'] != 2 or a['other'] != b['here'] or
-            b['other'] != 1 or b['entries'] != b['here']-4 or
-            a['first'] != 6 or a['last'] != b['here']-5):
+            b['other'] != 1 or b['entries'] != b['here']-entry_blocks or
+            a['first'] != 2+entry_blocks or a['last'] != b['here']-entry_blocks-1):
         raise ValueError('Unexpected GPT placement')
     for key in ('revision', 'first', 'last', 'guid', 'count', 'entry_size', 'entries_crc'):
         if a[key] != b[key]:
             raise ValueError('GPT copies disagree: '+key)
     length = a['count']*128
-    entries = primary[8192:8192+length]
+    entries = primary[2*block:2*block+length]
     if entries != secondary[:length] or zlib.crc32(entries) != a['entries_crc']:
         raise ValueError('GPT entry arrays disagree or have invalid checksums')
     partitions, identifiers = [], set()
@@ -67,18 +90,19 @@ def inspect(primary, secondary):
 
 def plan(primary, secondary, target_bytes, release):
     source, previous = inspect(primary, secondary)
-    if type(target_bytes) is not int or target_bytes <= 0 or target_bytes % 4096:
-        raise ValueError('Target image must occupy whole allocation blocks')
+    block=source['block_size']
+    if type(target_bytes) is not int or target_bytes <= 0 or target_bytes % block:
+        raise ValueError('Target image must occupy whole disk sectors')
     if version(release) < (5,0,0):
         raise ValueError('Expected an iOS release from 5.0 onward')
     if any(item['type'] != HFS_TYPE for item in previous):
         raise ValueError('This layout recipe requires HFS source partitions')
-    block, root_blocks, var_blocks = 4096, 30*256, 2*256
+    root_blocks, var_blocks = 30*1024**2//block, 2*1024**2//block
     end = source['last']
     root_start = end+1-root_blocks-var_blocks
     target_start, target_end = source['first'], source['first']+target_bytes//block-1
     data_start, data_end = target_end+1, root_start-1
-    if data_end-data_start+1 < 256*256:
+    if (data_end-data_start+1)*block < 256*1024**2:
         raise ValueError('Insufficient capacity for target Data and bootstrap')
     # iOS 7+ receives its own newly generated keybag, without the iOS 6
     # effaceable-storage flags that its kernel cannot use on a secondary root.
@@ -108,7 +132,8 @@ def encode(primary, secondary, target_bytes, release):
     """Produce both GPT copies for the computed layout, preserving disk identity."""
     source, previous = inspect(primary, secondary)
     layout = plan(primary, secondary, target_bytes, release)
-    entries = bytearray(4*4096)
+    sector=source['block_size']
+    entries = bytearray(ENTRY_BYTES)
     names = partition_names(release)
     for item in layout['partitions']:
         offset = (item['index']-1)*128
@@ -128,14 +153,14 @@ def encode(primary, secondary, target_bytes, release):
         entries[offset+56:offset+56+len(name)] = name
         item['guid'] = str(uuid.UUID(bytes_le=identifier))
     def packed(here, other, entries_lba):
-        block=bytearray(4096)
+        block=bytearray(sector)
         struct.pack_into('<8sIIIIQQQQ16sQIII',block,0,b'EFI PART',source['revision'],92,0,0,
             here,other,source['first'],source['last'],source['guid'],entries_lba,4,128,
             zlib.crc32(entries[:512]))
         struct.pack_into('<I',block,16,zlib.crc32(block[:92]))
         return block
-    first=primary[:4096]+packed(1,source['other'],2)+entries
-    last=entries+packed(source['other'],1,source['other']-4)
+    first=primary[:sector]+packed(1,source['other'],2)+entries
+    last=entries+packed(source['other'],1,source['other']-ENTRY_BYTES//sector)
     _,checked=inspect(first,last)
     for expected,actual in zip(layout['partitions'],checked):
         for key in ('index','first','last','attributes'):
@@ -150,7 +175,7 @@ def editor_commands(source_primary, source_secondary, target_bytes, release, com
     Raw writes to the synthetic GPT sectors may be silently discarded by LwVM.
     Newly created volumes must be populated through their post-commit mappings.
     """
-    _,previous=inspect(source_primary,source_secondary)
+    source,previous=inspect(source_primary,source_secondary)
     _,_,layout=encode(source_primary,source_secondary,target_bytes,release)
     indices = [p['index'] for p in previous]
     if indices not in ([1,2], [1,2,3,4]):
@@ -158,10 +183,11 @@ def editor_commands(source_primary, source_secondary, target_bytes, release, com
     if len(indices) == 4:
         # A reinstallation may change the target system size. Require the
         # existing compact bootstrap geometry before deleting any mappings.
-        end = inspect(source_primary, source_secondary)[0]['last']
-        if ((previous[0]['first'], previous[0]['last']) != (end+1-32*256, end-2*256) or
-                (previous[3]['first'], previous[3]['last']) != (end+1-2*256, end) or
-                previous[2]['first'] != 6 or previous[1]['first'] != previous[2]['last']+1 or
+        end=source['last'];block=source['block_size']
+        root_blocks,var_blocks=30*1024**2//block,2*1024**2//block
+        if ((previous[0]['first'], previous[0]['last']) != (end+1-root_blocks-var_blocks, end-var_blocks) or
+                (previous[3]['first'], previous[3]['last']) != (end+1-var_blocks, end) or
+                previous[2]['first'] != source['first'] or previous[1]['first'] != previous[2]['last']+1 or
                 previous[1]['last'] != previous[0]['first']-1):
             raise ValueError('Existing partitions do not match the olsn0w layout')
     names=partition_names(release)

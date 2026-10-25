@@ -30,7 +30,7 @@ class ProgressMessages(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             file=Path(tmp)/'data.hfs'
             with file.open('wb') as stream:stream.truncate(1001*4096)
-            ram=Mock();messages=[]
+            ram=Mock(block_size=4096);messages=[]
             with patch('restore.allocated_ranges',return_value=[(0,1),(1000,1)]):
                 copy_image(ram,file,'/dev/rdisk0s1s2',sparse=True,progress=messages.append,label='Initial data')
             self.assertEqual(ram.write.call_count,2)
