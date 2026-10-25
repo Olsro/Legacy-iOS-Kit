@@ -215,6 +215,16 @@ that no internal volume is mounted, then opens a root shell. Type `exit` to clos
 the shell and USB tunnel; the device remains in the RAM rescue until rebooted.
 When the rescue is already running, append `--ram-ready` to reconnect without
 putting the device back in DFU or sending the boot chain again.
+`--ram-ready` requires the rescue to still be running; DFU itself has no SSH
+service. If the device has restarted, enter the selected model's pwnDFU again
+and run the rescue command without `--ram-ready` to reload RAM, without a
+restoration. Connection and validation failures retain the underlying error
+in the session's `rescue-ssh.log` and include it in the terminal message.
+After sending iBEC, the loader polls for the selected device's Recovery
+identity instead of relying on a single check after two seconds. Transient
+USB disconnects and a lingering DFU state are retried within the wait;
+identity mismatches stop immediately. `ibec-ready.log` records the transition,
+and no RAM payload is sent until the selected device returns in Recovery.
 
 The rescue uses a 64,000,000-byte HFS volume, preserving the allocation size
 qualified with the stock boot chain. A 64 MiB volume caused an early kernel

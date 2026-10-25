@@ -109,6 +109,34 @@ def unique_usb_target(ecid):
         usb.util.dispose_resources(devices[0])
 
 
+def wait_for_recovery(session, timeout=30):
+    """Wait for the selected iBEC to re-enumerate without resending it."""
+    session=Path(session)
+    diagnostic=session/'ibec-ready.log'
+    deadline=time.monotonic()+timeout
+    previous_error=None
+    with diagnostic.open('w') as log:
+        while True:
+            try:
+                actual=recheck_recovery(session)
+                if actual['mode']=='Recovery':
+                    log.write('Selected device entered Recovery\n')
+                    return actual
+                detail='Selected device is still in '+actual['mode']
+            except ValueError as error:
+                # A different model/ECID is not a transient USB disconnect.
+                log.write(str(error)+'\n')
+                raise
+            except (RuntimeError,subprocess.TimeoutExpired) as error:
+                detail=str(error)
+            if detail != previous_error:
+                log.write(detail+'\n');log.flush()
+                previous_error=detail
+            if time.monotonic()>=deadline:
+                raise RuntimeError('RAM iBEC did not enter recovery. See '+str(diagnostic)+'\n'+detail)
+            time.sleep(1)
+
+
 def boot(session, *, progress=print, pwned=False):
     session=Path(session).resolve()
     identity=json.loads((session/'device.json').read_text())['identity']
@@ -127,8 +155,9 @@ def boot(session, *, progress=print, pwned=False):
         return run_boot_command(argv,session,label,timeout)
     prepare_dfu(session, pwned=pwned, progress=progress, run=run)
     run([tools()/'irecovery','-i',hex(identity['ecid']),'-f',session/'iBEC.img3'],'ibec-upload')
-    time.sleep(2)
-    if recheck_recovery(session)['mode']!='Recovery':raise RuntimeError('RAM iBEC did not enter recovery')
+    state['stage']='ibec-ready';checkpoint(session/'rescue-run.json',state)
+    progress('Waiting for the selected iBEC to reconnect in Recovery')
+    wait_for_recovery(session)
     for name,command in [('Ramdisk.img3','ramdisk'),('DeviceTree.img3','devicetree'),('Kernelcache.img3','bootx')]:
         run([tools()/'irecovery','-i',hex(identity['ecid']),'-f',session/name],command+'-upload')
         run([tools()/'irecovery','-i',hex(identity['ecid']),'-c',command],command)
@@ -187,12 +216,22 @@ def connect(session, timeout=120):
     from restore_environment import session_build
     ram=Rescue(prefix,record['identity'],maintenance,rescue_build=session_build(session))
     deadline=time.monotonic()+timeout
+    diagnostic=session/'rescue-ssh.log'
+    previous_error=None
     while True:
         try:
             ram.guard()
             return ram
-        except (RuntimeError,subprocess.TimeoutExpired) as error:
-            if time.monotonic()>=deadline:raise RuntimeError('RAM SSH did not become ready') from error
+        except (RuntimeError,subprocess.TimeoutExpired,ValueError) as error:
+            detail=str(error)
+            if detail != previous_error:
+                with diagnostic.open('a') as log:
+                    log.write(detail+'\n')
+                previous_error=detail
+            if isinstance(error,ValueError):
+                raise ValueError('RAM rescue validation failed. See '+str(diagnostic)+'\n'+detail) from error
+            if 'bad configuration option' in detail.lower() or time.monotonic()>=deadline:
+                raise RuntimeError('RAM SSH did not become ready. See '+str(diagnostic)+'\n'+detail) from error
             time.sleep(3)
 
 

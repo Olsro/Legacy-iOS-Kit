@@ -129,6 +129,137 @@ class PrepareDFU(unittest.TestCase):
             rescue.prepare_dfu(self.session(root),pwned=True,run=Mock(return_value='SRTG: iBoot-1\n'))
 
 
+class RecoveryTransition(unittest.TestCase):
+    def test_disconnect_and_lingering_dfu_wait_for_matching_recovery(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=Path(root)
+            ready=dict(mode='Recovery',product='iPad2,2',ecid=123)
+            observations=[RuntimeError('irecovery: ERROR: Unable to connect to device'),
+                          {'mode':'DFU'},ready]
+            with patch.object(rescue,'recheck_recovery',side_effect=observations) as check, \
+                 patch.object(rescue.time,'monotonic',return_value=0), \
+                 patch.object(rescue.time,'sleep') as sleep:
+                self.assertIs(rescue.wait_for_recovery(session),ready)
+            self.assertEqual(check.call_count,3)
+            self.assertEqual(sleep.call_count,2)
+            log=(session/'ibec-ready.log').read_text()
+            self.assertIn('Unable to connect',log)
+            self.assertIn('still in DFU',log)
+            self.assertIn('entered Recovery',log)
+
+    def test_timeout_preserves_last_usb_error_and_log_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=Path(root)
+            detail='irecovery: ERROR: Unable to connect to device'
+            with patch.object(rescue,'recheck_recovery',side_effect=RuntimeError(detail)), \
+                 patch.object(rescue.time,'monotonic',side_effect=[0,0,30]), \
+                 patch.object(rescue.time,'sleep') as sleep:
+                with self.assertRaises(RuntimeError) as error:
+                    rescue.wait_for_recovery(session)
+            self.assertIn(detail,str(error.exception))
+            self.assertIn(str(session/'ibec-ready.log'),str(error.exception))
+            self.assertEqual((session/'ibec-ready.log').read_text(),detail+'\n')
+            sleep.assert_called_once_with(1)
+
+    def test_wrong_identity_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as root:
+            detail='Connected device differs from the selected restoration target'
+            with patch.object(rescue,'recheck_recovery',side_effect=ValueError(detail)) as check, \
+                 patch.object(rescue.time,'sleep') as sleep:
+                with self.assertRaisesRegex(ValueError,'selected restoration target'):
+                    rescue.wait_for_recovery(root)
+            check.assert_called_once();sleep.assert_not_called()
+            self.assertIn(detail,(Path(root)/'ibec-ready.log').read_text())
+
+    def test_boot_does_not_send_ram_payload_until_recovery_is_verified(self):
+        for ready in (True,False):
+            with self.subTest(ready=ready),tempfile.TemporaryDirectory() as root:
+                session=Path(root)
+                (session/'device.json').write_text(json.dumps(dict(identity={'ecid':123})))
+                names=('iBEC.img3','DeviceTree.img3','Kernelcache.img3','Ramdisk.img3')
+                report=dict(automatic_disk_mounts=False,ram_root='md0',files={name:'hash' for name in names})
+                (session/'rescue-preparation.json').write_text(json.dumps(report))
+                events=[]
+                def command(argv,folder,label,timeout):
+                    events.append(label)
+                    return ''
+                def wait(folder):
+                    events.append('recovery-verified' if ready else 'recovery-failed')
+                    if not ready:raise RuntimeError('RAM iBEC did not enter recovery')
+                with patch.object(rescue,'digest',return_value='hash'), \
+                     patch.object(rescue,'prepare_dfu'), \
+                     patch.object(rescue,'run_boot_command',side_effect=command), \
+                     patch.object(rescue,'wait_for_recovery',side_effect=wait):
+                    if ready:
+                        rescue.boot(session,progress=lambda message:None)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError,'did not enter recovery'):
+                            rescue.boot(session,progress=lambda message:None)
+                state=json.loads((session/'rescue-run.json').read_text())
+                if ready:
+                    self.assertEqual(events[:3],['ibec-upload','recovery-verified','ramdisk-upload'])
+                    self.assertTrue(state['ram_boot_requested'])
+                else:
+                    self.assertEqual(events,['ibec-upload','recovery-failed'])
+                    self.assertEqual(state['stage'],'ibec-ready')
+                    self.assertFalse(state['ram_boot_requested'])
+                self.assertFalse(state['persistent_storage_commands_sent'])
+
+
+class RescueConnectionDiagnostics(unittest.TestCase):
+    def session(self, root):
+        session=Path(root)
+        (session/'device.json').write_text(json.dumps(dict(identity={'product':'iPad2,2'})))
+        (session/'ssh-prefix.json').write_text(json.dumps(['ssh']))
+        return session
+
+    def test_timeout_includes_original_ssh_error_and_log_path(self):
+        for detail in ('ssh: connect to host 127.0.0.1 port 6414: Connection refused',
+                       'root@127.0.0.1: Permission denied (publickey).'):
+            with self.subTest(detail=detail), tempfile.TemporaryDirectory() as root:
+                session=self.session(root);ram=Mock()
+                ram.guard.side_effect=RuntimeError(detail)
+                with patch.object(rescue,'Rescue',return_value=ram), \
+                     patch('restore_environment.session_build',return_value='10B329'), \
+                     patch.object(rescue.time,'monotonic',side_effect=[0,120]), \
+                     patch.object(rescue.time,'sleep') as sleep:
+                    with self.assertRaises(RuntimeError) as error:
+                        rescue.connect(session)
+                self.assertIn(detail,str(error.exception))
+                self.assertIn(str(session/'rescue-ssh.log'),str(error.exception))
+                self.assertEqual((session/'rescue-ssh.log').read_text(),detail+'\n')
+                ram.guard.assert_called_once();sleep.assert_not_called()
+
+    def test_transient_failures_retry_without_duplicate_log_entries(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=self.session(root);ram=Mock()
+            ram.guard.side_effect=[RuntimeError('Connection refused'),
+                                   RuntimeError('Connection refused'),None]
+            with patch.object(rescue,'Rescue',return_value=ram), \
+                 patch('restore_environment.session_build',return_value='10B329'), \
+                 patch.object(rescue.time,'monotonic',return_value=0), \
+                 patch.object(rescue.time,'sleep') as sleep:
+                self.assertIs(rescue.connect(session),ram)
+            self.assertEqual(sleep.call_count,2)
+            self.assertEqual((session/'rescue-ssh.log').read_text(),'Connection refused\n')
+
+    def test_invalid_configuration_and_wrong_ram_fail_without_retry(self):
+        cases=(RuntimeError('Bad configuration option: testoption'),
+               ValueError('Wrong RAM system identity: expected K94AP; received K93AP'))
+        for failure in cases:
+            with self.subTest(failure=str(failure)), tempfile.TemporaryDirectory() as root:
+                session=self.session(root);ram=Mock()
+                ram.guard.side_effect=failure
+                with patch.object(rescue,'Rescue',return_value=ram), \
+                     patch('restore_environment.session_build',return_value='10B329'), \
+                     patch.object(rescue.time,'sleep') as sleep:
+                    with self.assertRaises(type(failure)) as error:
+                        rescue.connect(session)
+                self.assertIn(str(failure),str(error.exception))
+                self.assertEqual((session/'rescue-ssh.log').read_text(),str(failure)+'\n')
+                ram.guard.assert_called_once();sleep.assert_not_called()
+
+
 class InteractiveRescue(unittest.TestCase):
     def test_boots_guards_opens_shell_and_stops_owned_tunnel(self):
         with tempfile.TemporaryDirectory() as root:
