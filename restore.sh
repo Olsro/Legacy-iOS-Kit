@@ -828,6 +828,70 @@ version_update_check() {
     popd >/dev/null
 }
 
+version_install_download() {
+    (
+        # Bash 3.2 unwinds function-local variables before a subshell EXIT
+        # trap. Keep transaction state in this isolated shell's variables.
+        source=$1
+        backup=
+        committed=0
+        rollback_failed=0
+        installed=()
+        displaced=()
+        shopt -s dotglob nullglob
+        entries=("$source"/*)
+        backup=$(mktemp -d "./.legacy-ios-kit-update.XXXXXX") || \
+            error "Cannot create an update backup. Existing toolkit left unchanged."
+        mkdir "$backup/old" "$backup/failed" || \
+            error "Cannot prepare the update backup. Existing toolkit left unchanged."
+        version_install_finish() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ $committed != 1 ]]; then
+                # Keep displaced files outside tmp$$: the normal exit handler
+                # removes that directory, including the downloaded checkout.
+                for (( i=${#installed[@]}-1; i>=0; i-- )); do
+                    name=${installed[$i]}
+                    if [[ -e ./$name || -L ./$name ]]; then
+                        mv -- "./$name" "$backup/failed/$name" || rollback_failed=1
+                    fi
+                done
+                for name in "${displaced[@]}"; do
+                    if [[ -e $backup/old/$name || -L $backup/old/$name ]]; then
+                        if [[ -e ./$name || -L ./$name ]]; then
+                            rollback_failed=1
+                        else
+                            mv -- "$backup/old/$name" "./$name" || rollback_failed=1
+                        fi
+                    fi
+                done
+                if [[ $rollback_failed == 1 ]]; then
+                    warn "Update rollback incomplete. Original files retained in $backup/old; keep this folder for recovery."
+                    exit 1
+                fi
+                warn "Update failed. The previous toolkit has been restored."
+            fi
+            # Cleanup failure must never remove the newly installed toolkit or
+            # turn a successful replacement into a failed update.
+            rm -rf -- "$backup" || warn "Old update files retained in $backup; the toolkit is usable."
+            exit "$status"
+        }
+        trap version_install_finish EXIT
+        trap 'exit 1' INT TERM
+        for entry in "${entries[@]}"; do
+            name=${entry##*/}
+            if [[ -e ./$name || -L ./$name ]]; then
+                displaced+=("$name")
+                mv -- "./$name" "$backup/old/$name" || \
+                    error "Cannot back up $name for update."
+            fi
+            installed+=("$name")
+            mv -- "$entry" "./$name" || error "Cannot install updated $name."
+        done
+        committed=1
+    )
+}
+
 version_update() {
     local repo="https://github.com/Olsro/Legacy-iOS-Kit"
     select_yesno "Do you want to update now?" 1
@@ -856,14 +920,8 @@ version_update() {
         fi
         popd >/dev/null
         log "Updating..."
-        rm -rf bin/ LICENSE README.md restore.sh || error "Failed to replace toolkit files."
-        if [[ $device_sudoloop == 1 ]]; then
-            $sudo rm -rf resources/ || error "Failed to replace the resources folder."
-        else
-            rm -rf resources/ || error "Failed to replace the resources folder."
-        fi
-        cp -R "tmp$$/Legacy-iOS-Kit/." . || \
-            error "Failed to copy the updated toolkit into place."
+        version_install_download "tmp$$/Legacy-iOS-Kit" || \
+            error "Toolkit update failed. See the recovery details above."
     fi
     pushd "tmp$$" >/dev/null
     log "Done! Please run the script again"

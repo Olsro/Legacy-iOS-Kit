@@ -22,7 +22,8 @@ def function(name):
 
 
 FUNCTIONS = '\n'.join(function(name) for name in (
-    'version_is_newer', 'version_get', 'version_update_check', 'version_update', 'version_check'))
+    'version_is_newer', 'version_get', 'version_update_check', 'version_install_download',
+    'version_update', 'version_check'))
 HELPERS = '''
 print() { echo "$1"; }; log() { echo "$1"; }; warn() { echo "$1"; }
 error() { echo "$1" >&2; exit 1; }
@@ -257,7 +258,7 @@ class UpdateInstallTests(unittest.TestCase):
         (self.install / 'firmware.ipsw').write_text('keep firmware')
 
     def update(self, settings=''):
-        script = HELPERS + function('version_update') + '''
+        script = HELPERS + function('version_install_download') + '\n' + function('version_update') + '''
 branch_current=main
 mkdir "tmp$$"
 ''' + settings + '\nversion_update\necho TOOLKIT_CONTINUES\n'
@@ -343,6 +344,89 @@ git() {
         self.assertIn('git clone failed', result.stderr)
         self.assertEqual((self.install / 'restore.sh').read_text(), 'old script\n')
         self.assertEqual((self.install / 'resources' / 'payload').read_text(), 'payload\n')
+
+    def test_zip_cleanup_failure_keeps_new_script_and_reports_backup(self):
+        self.archive()
+        result = self.update('''
+rm() {
+    if [[ "$*" == *'.legacy-ios-kit-update.'* ]]; then
+        echo 'rm: cannot remove bin/linux/x86_64: Directory not empty' >&2
+        return 1
+    fi
+    command rm "$@"
+}
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Old update files retained', result.stdout)
+        self.assertEqual((self.install/'restore.sh').read_text(), 'new script\n')
+        self.assertEqual((self.install/'bin/tool').read_text(), 'tool\n')
+        self.assertEqual((self.install/'saved/blobs').read_text(), 'keep blobs')
+        backups = list(self.install.glob('.legacy-ios-kit-update.*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual((backups[0]/'old/restore.sh').read_text(), 'old script\n')
+
+    def test_zip_move_failures_restore_original_installation(self):
+        for phase, item in (('backup', 'bin'), ('install', 'resources'), ('install', 'restore.sh')):
+            with self.subTest(phase=phase, item=item):
+                if self.install.exists():
+                    shutil.rmtree(self.install)
+                shutil.copytree(self.fork, self.install, ignore=shutil.ignore_patterns('.git'))
+                (self.install/'restore.sh').write_text('original script\n')
+                (self.install/'resources/payload').write_text('original payload\n')
+                self.saved_data()
+                result = self.update('''
+mv() {
+    if [[ "$2" == ''' + ("'./"+item+"'" if phase=='backup' else 'tmp*/Legacy-iOS-Kit/'+item) + ''' ]]; then
+        echo 'simulated filesystem rename failure' >&2
+        return 1
+    fi
+    command mv "$@"
+}
+''')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('previous toolkit has been restored', result.stdout)
+                self.assertEqual((self.install/'restore.sh').read_text(), 'original script\n')
+                self.assertEqual((self.install/'resources/payload').read_text(), 'original payload\n')
+                self.assertEqual((self.install/'bin/tool').read_text(), 'tool\n')
+                self.assertEqual((self.install/'saved/blobs').read_text(), 'keep blobs')
+                self.assertFalse((self.install/'.git').exists())
+
+    def test_zip_interrupted_replacement_restores_original_installation(self):
+        self.archive()
+        result = self.update('''
+mv() {
+    if [[ "$2" == tmp*/Legacy-iOS-Kit/resources ]]; then
+        command bash -c 'kill -TERM "$PPID"'
+        return 1
+    fi
+    command mv "$@"
+}
+''')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('previous toolkit has been restored', result.stdout)
+        self.assertEqual((self.install/'restore.sh').read_text(), 'old script\n')
+        self.assertEqual((self.install/'resources/payload').read_text(), 'payload\n')
+        self.assertFalse((self.install/'.git').exists())
+
+    def test_zip_failed_rollback_retains_originals_outside_temporary_cleanup(self):
+        self.archive()
+        result = self.update('''
+mv() {
+    if [[ "$2" == tmp*/Legacy-iOS-Kit/resources || "$2" == ./.legacy-ios-kit-update.*/old/bin ]]; then
+        return 1
+    fi
+    command mv "$@"
+}
+''')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Update rollback incomplete', result.stdout)
+        for temporary in self.install.glob('tmp*'):
+            shutil.rmtree(temporary)
+        backups = list(self.install.glob('.legacy-ios-kit-update.*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual((backups[0]/'old/bin/tool').read_text(), 'tool\n')
+        self.assertEqual((self.install/'restore.sh').read_text(), 'old script\n')
+        self.assertEqual((self.install/'saved/blobs').read_text(), 'keep blobs')
 
     def test_release_workflow_packages_full_toolkit_version_and_revision(self):
         workflow = (KIT / '.github/workflows/build.yml').read_text()

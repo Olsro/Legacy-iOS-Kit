@@ -19,6 +19,11 @@ unchanged, and toolkit updates always come from this fork. Release ZIPs include
 the complete toolkit and do not require an initial Git clone. Use
 `--no-version-check` to skip the check. If no release is published yet, the check
 uses the fork's `main` branch.
+ZIP updates retain the old program files until replacement succeeds and restore
+them if a replacement fails. If old files cannot be removed after a successful
+update, the toolkit remains usable and reports the retained backup directory.
+If rollback itself fails, keep the reported `.legacy-ios-kit-update.*` folder;
+its `old` directory holds the displaced original files for recovery.
 
 - (formerly iOS-OTA-Downgrader)
 - **An all-in-one tool to [restore/downgrade](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Restore-Downgrade), [save SHSH blobs](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Saving-SHSH-blobs), [jailbreak](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Jailbreaking) legacy iOS devices, and more**
