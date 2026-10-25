@@ -365,6 +365,13 @@ temporary connection failures are still retried while the RAM service starts.
 Known-hosts paths are quoted for OpenSSH itself, so Kit folders containing spaces
 (such as `Legacy-iOS-Kit-main 2`) retain strict host-key verification. Saved RAM
 SSH arguments receive the same quoting correction when loaded.
+Private client keys are checked before use. If the Kit volume cannot apply Unix
+permissions (for example an NTFS/exFAT mount reporting mode `0777`), SSH uses a
+temporary copy of the same key in a verified `0700` directory with file mode
+`0600`. An unsuitable `TMPDIR` falls back to `/tmp`; startup checks that a private
+directory is available before preparation or erasure. Runtime copies are removed
+on normal process exit. Saved SSH vectors keep the original key paths so later
+runs can recreate the copies, and strict host-key verification remains enabled.
 RAM, bootstrap and target identity checks retain Apple's mixed-case board names
 (`K93aAP` on iPad2,4 and `J2aAP` on iPad3,3). Older system preparations are rebuilt
 to update the on-device guards and bootstrap helpers. A RAM identity rejection

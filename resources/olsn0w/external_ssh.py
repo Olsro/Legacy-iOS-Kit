@@ -16,6 +16,7 @@ import uuid
 
 from common import MODELS, STATE, hardware_model, integer, tools
 from restore_run import target_prefix
+from ssh_client import runtime_prefix
 
 CONFIGS = ('/etc/ssh/sshd_config', '/usr/local/share/olsn0w/sshd_config')
 MASTER = '/etc/master.passwd'
@@ -116,7 +117,7 @@ def candidates(info, bundle=None, state=STATE):
 
 class Connection:
     def __init__(self, prefix):
-        self.prefix = prefix
+        self.prefix = runtime_prefix(prefix)
 
     def check_password_client(self):
         # Parse the real password-verification command without connecting. In

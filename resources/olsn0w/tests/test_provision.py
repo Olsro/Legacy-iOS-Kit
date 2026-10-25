@@ -28,6 +28,7 @@ class RestoreLogging(unittest.TestCase):
                 session=Path(temporary);bundle=session/'provision';bundle.mkdir()
                 identity=dict(product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2,ecid=123)
                 (session/'device.json').write_text(json.dumps(dict(identity=identity)))
+                (session/'ssh-prefix.json').write_text(json.dumps(['ssh']))
                 keys=session/'keys.json'
                 keys.write_text(json.dumps(dict(identifier='iPhone5,2',buildid='12H321')))
                 report=dict(kind='signed-base-restore-handoff',identity=identity,product='iPhone5,2',multipatch=False,

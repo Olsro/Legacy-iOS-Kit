@@ -11,7 +11,7 @@ from common import hardware_model, profile, tools, version
 from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
-from ssh_client import RSA_OPTIONS, known_hosts_option
+from ssh_client import RSA_OPTIONS, known_hosts_option, runtime_prefix
 
 PANGU_READONLY_RETRY_POLLS = 12
 
@@ -156,6 +156,7 @@ def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
 
 def qualify(bundle, prefix, udid, timeout=360, progress=print,
             verify_writable_root=False):
+    prefix=runtime_prefix(prefix)
     report=checked_manifest(bundle)
     from system import selected_untether
     untether = selected_untether(report['version'], report.get('product'))
@@ -370,6 +371,8 @@ def run(session, bundle, *, erase=False, ram_ready=False, progress=print):
         raise ValueError('Explicit erase and matching selected device are required')
     if (bundle/'installation.json').exists():raise ValueError('Inspect the previous installation before retrying')
     prefix=json.loads((session/'ssh-prefix.json').read_text());port=int(prefix[prefix.index('-p')+1])
+    runtime_prefix(prefix)
+    runtime_prefix(target_prefix(bundle,port))
     udid=record['ram_udid']
     if not re.fullmatch(r'[a-fA-F0-9]{40}',udid):raise ValueError('Invalid selected USB identity')
     proxy=None;log=None

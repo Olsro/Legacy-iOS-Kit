@@ -26,7 +26,8 @@ class SSHCompatibility(unittest.TestCase):
         original = ['ssh', '-i', '/saved/private-key', '-o', 'StrictHostKeyChecking=yes',
                     '-o', 'UserKnownHostsFile=/saved/known-hosts',
                     '-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa', 'root@127.0.0.1']
-        ram = Rescue(original, IDENTITY, rescue_build='10B329')
+        with patch.object(ssh_client, 'private_identity', side_effect=str):
+            ram = Rescue(original, IDENTITY, rescue_build='10B329')
         expected = original.copy()
         expected[-2] = 'PubkeyAcceptedKeyTypes=+ssh-rsa'
         expected[6] = 'UserKnownHostsFile="/saved/known-hosts"'
@@ -87,6 +88,109 @@ exit 0
             with self.assertRaisesRegex(RuntimeError, 'Bad configuration option: testoption'):
                 ssh_client.check()
         self.assertIn('-G', command.call_args.args[0])
+
+
+class SSHPrivateIdentities(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'requires OpenSSH key reader')
+    def test_openssh_accepts_staged_key_from_a_permissionless_volume(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary)/'key'
+            subprocess.run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048',
+                            '-N', '', '-f', str(key)], check=True, capture_output=True)
+            expected = (Path(str(key)+'.pub').read_text().split())[:2]
+            key.chmod(0o777)
+            rejected = subprocess.run(['ssh-keygen', '-y', '-f', str(key)], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(b'bad permissions', rejected.stderr)
+            chmod = Path.chmod
+            def volume_chmod(path, mode):
+                if path != key:
+                    chmod(path, mode)
+            with patch.object(Path, 'chmod', volume_chmod):
+                staged = ssh_client.private_identity(key)
+            accepted = subprocess.run(['ssh-keygen', '-y', '-f', staged], capture_output=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(accepted.stdout.decode().split()[:2], expected)
+
+    def test_permissive_key_is_repaired_on_a_unix_filesystem(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary)/'key'
+            key.write_bytes(b'fixture private key')
+            key.chmod(0o777)
+            self.assertEqual(ssh_client.private_identity(key), str(key))
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+
+    def test_saved_ram_prefix_stages_key_when_chmod_has_no_effect(self):
+        with tempfile.TemporaryDirectory(prefix='Kit with spaces ') as temporary:
+            key = Path(temporary)/'ssh_client_rsa'
+            key.write_bytes(b'original RAM key')
+            key.chmod(0o777)
+            prefix = ['ssh', '-i', str(key), '-o', 'StrictHostKeyChecking=yes',
+                      '-o', 'UserKnownHostsFile='+temporary+'/known-hosts',
+                      'root@127.0.0.1']
+            chmod = Path.chmod
+            def volume_chmod(path, mode):
+                if path != key:
+                    chmod(path, mode)
+            with patch.object(Path, 'chmod', volume_chmod):
+                ram = Rescue(prefix, IDENTITY, rescue_build='10B329')
+                staged = Path(ram.prefix[2])
+                self.assertNotEqual(staged, key)
+                self.assertEqual(staged.read_bytes(), key.read_bytes())
+                self.assertTrue(ssh_client.private_file(staged, 0o600))
+                self.assertTrue(ssh_client.private_file(staged.parent, 0o700))
+                self.assertEqual(ssh_client.runtime_prefix(prefix), ram.prefix)
+                key.write_bytes(b'new RAM key')
+                updated = ssh_client.runtime_prefix(prefix)
+                self.assertNotEqual(updated[2], str(staged))
+                self.assertEqual(Path(updated[2]).read_bytes(), b'new RAM key')
+            self.assertEqual(prefix[2], str(key))
+            self.assertEqual(key.stat().st_mode & 0o777, 0o777)
+            self.assertIn('StrictHostKeyChecking=yes', ram.prefix)
+            self.assertIn(ssh_client.known_hosts_option(Path(temporary)/'known-hosts'), ram.prefix)
+
+    def test_unsafe_tmpdir_is_rejected_before_key_is_written(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            unsafe = Path(temporary)/'unsafe'
+            unsafe.mkdir()
+            unsafe.chmod(0o777)
+            rejected = Mock(name=str(unsafe))
+            rejected.name = str(unsafe)
+            with patch.object(ssh_client.tempfile, 'TemporaryDirectory', return_value=rejected), \
+                 patch.object(Path, 'chmod'):
+                with self.assertRaisesRegex(RuntimeError, 'Unix permissions'):
+                    ssh_client.private_directory()
+            self.assertEqual(rejected.cleanup.call_count, 2)
+            self.assertEqual(list(unsafe.iterdir()), [])
+
+    def test_unsafe_tmpdir_falls_back_to_system_tmp(self):
+        create = tempfile.TemporaryDirectory
+        with tempfile.TemporaryDirectory() as temporary:
+            unsafe = Path(temporary)/'unsafe'
+            unsafe.mkdir()
+            unsafe.chmod(0o777)
+            rejected = Mock()
+            rejected.name = str(unsafe)
+            def directory(**kwargs):
+                return rejected if kwargs['dir'] is None else create(**kwargs)
+            chmod = Path.chmod
+            def volume_chmod(path, mode):
+                if path != unsafe:
+                    chmod(path, mode)
+            with patch.object(ssh_client.tempfile, 'TemporaryDirectory', side_effect=directory), \
+                 patch.object(Path, 'chmod', volume_chmod):
+                accepted = ssh_client.private_directory()
+            try:
+                self.assertTrue(ssh_client.private_file(accepted.name, 0o700))
+                rejected.cleanup.assert_called_once()
+            finally:
+                accepted.cleanup()
+
+    def test_preflight_rejects_unusable_private_storage(self):
+        with patch.object(ssh_client.subprocess, 'run', return_value=Mock(returncode=0)), \
+             patch.object(ssh_client, 'private_directory', side_effect=RuntimeError('Unix permissions')):
+            with self.assertRaisesRegex(RuntimeError, 'Unix permissions'):
+                ssh_client.check()
 
 
 @unittest.skipUnless(shutil.which('ssh') and shutil.which('ssh-keygen') and

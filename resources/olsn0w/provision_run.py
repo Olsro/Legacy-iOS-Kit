@@ -166,6 +166,8 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
     argv=restore_arguments(record['identity'],bundle/'base8.ipsw',ticket,baseband,baseband_manifest)
     env=tool_environment()
     check_restore_runtime(argv[0],env,bundle/'restore-loader.log')
+    from ssh_client import runtime_prefix
+    runtime_prefix(json.loads((session/'ssh-prefix.json').read_text()))
     try:
         prepare_dfu(session,pwned=pwned,progress=progress)
     except (RuntimeError, subprocess.TimeoutExpired) as error:

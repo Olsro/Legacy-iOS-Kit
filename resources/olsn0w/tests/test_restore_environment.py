@@ -101,6 +101,7 @@ class RestoreEnvironment(unittest.TestCase):
             root=Path(folder);bundle=root/'provision';bundle.mkdir()
             identity=dict(product='iPod5,1',board='n78ap',chip=0x8942,board_id=0,ecid=123)
             (root/'device.json').write_text(json.dumps(dict(identity=identity)))
+            (root/'ssh-prefix.json').write_text(json.dumps(['ssh']))
             metadata=dict(identifier='iPod5,1',buildid='12H321')
             (root/'keys.json').write_text(json.dumps(metadata))
             (bundle/'futurerestore-keys.json').write_text(json.dumps(metadata))
@@ -113,19 +114,28 @@ class RestoreEnvironment(unittest.TestCase):
                         multipatch_restore_component_encoding='encrypted-donor-for-libipatcher',
                         restore_key_policy='signed-base-with-10B329-restore-components',
                         restore_filesystem_build='12H321')
-            for rescue_build,loader_error in (('12H321',False),('10B329',False),('10B329',True)):
+            for rescue_build,loader_error in (('12H321',False),('10B329',False),
+                                             ('10B329',True),('10B329','identity')):
                 with self.subTest(rescue_build=rescue_build,loader_error=loader_error), \
                      patch.object(provision_run,'checked_manifest',return_value=report), \
                      patch.object(provision_run,'session_build',return_value=rescue_build), \
                      patch.object(provision_run,'restore_arguments',return_value=['restore']), \
                      patch.object(provision_run,'check_restore_runtime',
-                                  side_effect=RuntimeError('missing library') if loader_error else None) as loader, \
+                                  side_effect=RuntimeError('missing library') if loader_error is True else None) as loader, \
+                     patch('ssh_client.runtime_prefix',
+                           side_effect=RuntimeError('private SSH identity unavailable')
+                           if loader_error=='identity' else None), \
                      patch.object(provision_run,'prepare_dfu',side_effect=RuntimeError('stop before USB')) as dfu:
                     if rescue_build=='12H321':
                         with self.assertRaisesRegex(ValueError,'environments differ'):
                             provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
                         dfu.assert_not_called()
                         loader.assert_not_called()
+                    elif loader_error=='identity':
+                        with self.assertRaisesRegex(RuntimeError,'private SSH identity unavailable'):
+                            provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
+                        dfu.assert_not_called()
+                        loader.assert_called_once()
                     elif loader_error:
                         with self.assertRaisesRegex(RuntimeError,'missing library'):
                             provision_run.run(root,bundle,root/'ticket',root/'keys.json',erase=True)
