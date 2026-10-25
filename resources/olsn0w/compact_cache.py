@@ -11,6 +11,7 @@ import struct
 import tempfile
 
 from common import digest
+from integrity import require_bytes
 
 # The compact bootstrap was qualified from this exact stock cache.  The
 # resulting cache is deliberately shared by the armv7s bootstrap: it was also
@@ -45,7 +46,7 @@ def qualified_source(architecture='armv7s'):
     raise ValueError('No qualified bootstrap cache architecture')
 
 
-def materialize(source, recipe):
+def materialize(source, recipe, diagnostics=None):
     if recipe['format'] != 1 or len(source) != recipe['source_bytes'] or hashlib.sha256(source).hexdigest() != recipe['source_sha256']:
         raise ValueError('Stock cache does not match the qualified recipe')
     size = recipe['output_bytes']
@@ -67,8 +68,9 @@ def materialize(source, recipe):
             raise ValueError('Cache metadata edit precondition failed')
         output[offset:offset+len(after)] = after
         end = offset+len(after)
-    if hashlib.sha256(output).hexdigest() != recipe['output_sha256']:
-        raise ValueError('Reproduced cache checksum mismatch')
+    require_bytes(output, recipe['output_sha256'], 'Reproduced cache checksum mismatch',
+                  diagnostics, source_sha256=recipe['source_sha256'],
+                  recipe_sha256=hashlib.sha256(json.dumps(recipe, sort_keys=True).encode()).hexdigest())
     return output
 
 
@@ -184,7 +186,7 @@ def prepare(source, destination, architecture='armv7s'):
         raise ValueError('No unique qualified recipe for this stock cache')
     recipe = matches[0]
     stock = source.read_bytes()
-    output = materialize(stock, recipe)
+    output = materialize(stock, recipe, destination.with_name(destination.name+'.integrity.json'))
     retained = verify_mappings(stock, output, recipe)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='olsn0w-cache-', dir=destination.parent) as temporary:

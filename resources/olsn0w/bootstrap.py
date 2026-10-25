@@ -14,6 +14,7 @@ from compact_cache import write_sparse
 from common import KIT, MODELS, digest, hardware_model, profile, run, tools
 from hfs import HFS
 from img3 import img3
+from integrity import require_bytes
 from signing import resign, verify
 from system import entry, add_parents, jetsam_properties_path
 
@@ -224,8 +225,9 @@ UsePrivilegeSeparation no
         from compact_cache import qualified_source
         source=qualified_source(architecture)
         expected=source['prepared_sha256'];region=source['registry']
-    if hashlib.sha256(cache).hexdigest() != expected:
-        raise ValueError('Bootstrap cache differs from qualified output')
+    require_bytes(cache, expected, 'Bootstrap cache differs from qualified output',
+                  destination/'cache-integrity.json', architecture=architecture,
+                  actual_path=str(Path(compact_cache).resolve()))
     configured = configure(cache,region['address'],region['bytes'],launch_jobs)
     cache_path=destination/'bootstrap.cache';write_sparse(configured,cache_path)
     for name,target in {'etc':'private/etc','var':'private/var','tmp':'private/var/tmp','bin/sh':'bash',

@@ -10865,6 +10865,7 @@ menu_miscutilities() {
                 menu_items+=("hactiv8" "Activation Records")
                 if olsn0w_supported; then
                     menu_items+=("Configure olsn0w restored device for SSH external access")
+                    menu_items+=("Restore saved activation records on olsn0w device")
                 fi
             fi
             if [[ $device_proc != 1 ]] && (( device_proc < 7 )); then
@@ -10920,6 +10921,7 @@ menu_miscutilities() {
             "Dump Baseband" ) mode="baseband";;
             "hactiv8" ) device_hacktiv8;;
             "Configure olsn0w restored device for SSH external access" ) device_olsn0w_external_ssh;;
+            "Restore saved activation records on olsn0w device" ) device_olsn0w_restore_activation;;
             "Activation Records" ) mode="actrec";;
             "Enable Flags" ) menu_flags;;
             "(Re-)Install Dependencies" ) install_depends;;
@@ -11096,6 +11098,13 @@ device_pair() {
     else
         warn "Unable to pair with device."
     fi
+}
+
+device_olsn0w_restore_activation() {
+    print "* Reapplies this device's saved official activation record over USB."
+    print "* Requires the original Kit folder with the activation backup and olsn0w keys."
+    sh ../resources/olsn0w/run.sh restore-activation --product "$device_type" \
+        --udid "$device_udid" --ecid "$device_ecid" || warn "Saved activation recovery failed; see the reported reason."
 }
 
 device_olsn0w_external_ssh() {

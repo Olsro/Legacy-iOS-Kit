@@ -14,6 +14,7 @@ from common import KIT, MODELS, baseband_strategy, digest, integer, profile, run
 from firmware import acquire, extract
 from hfs import HFS
 from img3 import img3
+from integrity import require_same_file
 from rescue_prepare import RAM_VOLUME_BYTES, RECIPE_VERSION
 from restore_environment import report_build
 from restore import checkpoint
@@ -382,8 +383,10 @@ def prepare(session, destination, ipsw=None, keys=None):
         verified=destination/'system.verify.hfs'
         run([tools()/'dmg','extract',rebuilt,verified],
             destination/'system-verify.log',timeout=600)
-        if digest(verified)!=digest(base_firmware/'rootfs.hfs'):
-            raise ValueError('Rebuilt multipatch ASR image differs from signed base')
+        require_same_file(base_firmware/'rootfs.hfs', verified,
+                          'Rebuilt multipatch ASR image differs from signed base',
+                          destination/'system-integrity.json',
+                          inputs=dict(source_image=rebuilt, dmg_tool=tools()/'dmg'))
         verified.unlink()
         replacements[target_os_member]=rebuilt
         asr_source='rebuilt-udif-from-signed-base-hfs'
@@ -399,8 +402,10 @@ def prepare(session, destination, ipsw=None, keys=None):
                            plaintext,os_keys[0]['key'])
         verified = destination/'system.verify.hfs'
         run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=600)
-        if digest(verified) != digest(base_firmware/'rootfs.hfs'):
-            raise ValueError('Plaintext ASR image differs from the original filesystem')
+        require_same_file(base_firmware/'rootfs.hfs', verified,
+                          'Plaintext ASR image differs from the original filesystem',
+                          destination/'system-integrity.json',
+                          inputs=dict(source_image=plaintext, dmg_tool=tools()/'dmg'))
         verified.unlink()
         replacements[target_os_member] = plaintext
         asr_source='original-udif-without-filevault-envelope'

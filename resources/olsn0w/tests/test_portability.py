@@ -83,6 +83,7 @@ class CatalogIdentity(unittest.TestCase):
             for menu,expected in (
                     ('menu_restore','olsn0w (choose iOS version)'),
                     ('menu_miscutilities','Configure olsn0w restored device for SSH external access'),
+                    ('menu_miscutilities','Restore saved activation records on olsn0w device'),
                     ('menu_restore ipsw',None)):
                 with self.subTest(python=python,menu=menu), tempfile.TemporaryDirectory() as temporary:
                     folder=Path(temporary)

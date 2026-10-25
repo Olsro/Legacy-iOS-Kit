@@ -60,6 +60,18 @@ named operation's measured bytes, not estimated overall time. Opaque filesystem
 operations show activity and elapsed time instead. Redirected output uses periodic
 plain-text updates; the display never reports 100% before the operation succeeds.
 
+On `Reproduced cache checksum mismatch`, `Bootstrap cache differs from qualified
+output`, or an ASR filesystem comparison failure, preparation stops before
+erasing and prints the expected and actual SHA-256 and the location of an
+integrity report. Within the selected session,
+these reports are `compact-cache.integrity.json`, `bootstrap/cache-integrity.json`
+or `provision/system-integrity.json`. They record the host/Python/OpenSSL and Kit
+versions, hashes and sizes; the ASR report also records the first differing byte
+offset and the image/tool fingerprints. Include the report and the relevant
+`system-verify.log` when reporting a preparation failure. Preserve the failed
+session and firmware cache for diagnosis; a mismatch alone does not identify
+which input, tool or host caused it.
+
 Follow the computer's phase messages: the device can display stationary progress
 bars, black screens and successive Apple logos during transitions. Success is
 reported only after target verification and the activation policy selected in
@@ -73,6 +85,36 @@ logs and the small device-bound technical collection while pruning reconstructib
 restore archives and working images. A failure at any earlier stage preserves its
 complete session for diagnosis. Mutable HFS working images use filesystem
 copy-on-write clones where the host supports them, with an ordinary copy fallback.
+
+## Restore saved activation records after restoration
+
+If the restored device remains at activation, keep it booted and connected by
+USB. In the original Kit folder, select **Misc Utilities → Restore saved
+activation records on olsn0w device**. This reapplies the signed record from
+`saved/<ProductType>/activation-<ECID>.tar` using the saved olsn0w SSH keys,
+without repeating the installation or erasing Data. The archive's device UDID
+must match, and the installed system and Data generation are checked before
+writing. Success requires iOS itself to report `Activated`; restoring a file
+alone does not prove activation. Continue Setup Assistant on the device.
+
+The equivalent command is:
+
+```sh
+./restore.sh --olsn0w restore-activation --product iPhone5,2 --udid "$UDID"
+```
+
+Use the connected device's actual product (`iPhone5,1` or `iPhone5,2` for an
+iPhone 5). Append `--bundle "$BUNDLE"` if its target bundle is saved elsewhere.
+Keep the activation archive and the `saved/olsn0w/sessions/` directory from the
+original restoration. This operation preserves the original signed record and
+does not import old `data_ark.plist` state. A record accepted on iOS 8.4.1 is not
+proof that the target iOS will accept it. If validation fails, report the Kit
+version, product, target iOS, complete error and restoration `activation.log`;
+keep activation archives and private SSH keys private.
+
+The normal restoration already attempts to restore an existing saved record
+after target boot when official activation is selected. Hacktiv8 and the
+Setup.app-removal option skip that official activation path.
 
 ## Enable network SSH after restoration
 
