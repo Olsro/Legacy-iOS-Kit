@@ -840,6 +840,11 @@ backups stop with an error. Setup-removal/Hacktiv8 modes skip official activatio
 With Setup.app preserved, Hacktiv8 must still reach `ActivationState=Activated`
 over the selected USB connection before restoration is reported as complete.
 Its activation handshake is acknowledged after that state is observed.
+Temporary USB handshake, read or write failures are retried within the startup
+verification timeout, without repeating activation. Native error codes are kept
+in `activation-acknowledgement.log`. An `Activated` device is not reported as
+fully verified until acknowledgement and the startup service checks also pass;
+a persistent acknowledgement failure ends with that specific diagnostic.
 
 On cellular iOS 8 devices, the upstream jailbroken Hacktiv8 recipe also disables
 CommCenter. The menu warns before selection that calls, SMS and cellular data

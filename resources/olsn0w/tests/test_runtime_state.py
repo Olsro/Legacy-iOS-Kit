@@ -14,9 +14,45 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import common
 import firmware
 import restore_run
-from activation import ActivationPending, SavedActivationRestored, ActivationRequiresInput
+from activation import (ActivationPending, SavedActivationRestored, ActivationRequiresInput,
+                        ActivationAcknowledgementPending)
 
 class DistributedState(unittest.TestCase):
+    def test_activation_acknowledgement_retries_without_reactivating_or_finishing_early(self):
+        report=dict(product='iPod5,1',version='6.1.3',build='10B329',generation='selected',
+                    identity={'board':'n78ap','product':'iPod5,1','ecid':123},
+                    activation_mode='skipped-hacktiv8',setup_app_removed=False,
+                    hacktiv8={'method':'lockdownd'})
+        jobs=(b'N78AP\n10B329\nselected\nCYDIA_READY:selected\nBOOT_SUCCESS:selected\n'
+              b'10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n')
+        values=plistlib.dumps(dict(ProductType='iPod5,1',ProductVersion='6.1.3',
+                                  BuildVersion='10B329',ActivationState='Activated'))
+        ready=[subprocess.CompletedProcess([],0,jobs,b''),
+               subprocess.CompletedProcess([],0,values,b'')]
+        for mode in ('skipped-hacktiv8','official-on-target'):
+            for succeeds in (True,False):
+                with self.subTest(mode=mode,succeeds=succeeds),tempfile.TemporaryDirectory() as work:
+                    report['activation_mode']=mode
+                    if mode=='official-on-target':report.pop('hacktiv8',None)
+                    folder=Path(work)
+                    pending=ActivationAcknowledgementPending('Cannot open selected activation handshake (lockdownd error -5)')
+                    replies=[pending,{'acknowledged':True}] if succeeds else [pending]
+                    with patch.object(restore_run,'checked_manifest',return_value=report), \
+                         patch.object(restore_run.subprocess,'run',side_effect=ready*2), \
+                         patch.object(restore_run.time,'sleep'), \
+                         patch('activation.activate') as activate, \
+                         patch('activation.acknowledge',side_effect=replies) as acknowledge:
+                        if succeeds:
+                            result=restore_run.qualify(folder,['ssh'], 'a'*40,progress=lambda _:None)
+                            self.assertEqual(result['activation_acknowledgement'],{'acknowledged':True})
+                            self.assertEqual(acknowledge.call_count,2)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError,'device reports Activated.*lockdownd error -5'):
+                                restore_run.qualify(folder,['ssh'],'a'*40,timeout=0,progress=lambda _:None)
+                        activate.assert_not_called()
+                    self.assertEqual((folder/'qualification.json').exists(),succeeds)
+                    self.assertIn('lockdownd error -5',(folder/'activation-acknowledgement.log').read_text())
+
     def test_hacktiv8_preserving_setup_requires_activated_usb_state(self):
         report=dict(product='iPhone5,2',version='8.3',build='12F70',generation='selected',
                     identity={'board':'n42ap','product':'iPhone5,2','ecid':123},

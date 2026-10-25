@@ -300,15 +300,23 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                         values['ActivationState']='Activated'
                 if values.get('ActivationState')!='Activated':
                     status='Official activation is not ready; retrying through the connected computer.'
-            if (not report.get('setup_app_removed') and baseband_ready and
+            acknowledgement_required=not report.get('setup_app_removed')
+            if (acknowledgement_required and baseband_ready and
                     values.get('ActivationState')=='Activated' and
                     activation_acknowledgement is None):
-                from activation import acknowledge
-                activation_acknowledgement=acknowledge(udid,report['identity'])
+                from activation import ActivationAcknowledgementPending, acknowledge
+                try:
+                    activation_acknowledgement=acknowledge(udid,report['identity'])
+                except ActivationAcknowledgementPending as pending:
+                    with (bundle/'activation-acknowledgement.log').open('a') as acknowledgement_log:
+                        acknowledgement_log.write(str(pending)+'\n')
+                    status=('The device reports Activated; waiting for USB activation acknowledgement. '
+                            +str(pending)+'. See activation-acknowledgement.log.')
             if (activation_skipped and report.get('hacktiv8') is not None and
                     values.get('ActivationState')!='Activated'):
                 status='Waiting for Hacktiv8 to finish; Setup Assistant still reports an unactivated device.'
             if (services and baseband_ready and
+                    (not acknowledgement_required or activation_acknowledgement is not None) and
                     (report.get('setup_app_removed') or values.get('ActivationState')=='Activated')):
                 break
         elif lockdown_pairing_required(output):

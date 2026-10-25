@@ -18,6 +18,10 @@ class ActivationRequiresInput(RuntimeError):
     """A server challenge requires the owner's intervention, not polling."""
 
 
+class ActivationAcknowledgementPending(RuntimeError):
+    """USB acknowledgement must be retried without repeating activation."""
+
+
 class SavedActivationRestored(ActivationPending):
     """The signed file was restored; the reloaded daemon must still accept it."""
 
@@ -101,7 +105,10 @@ def acknowledge(udid, identity):
     device,client=ptr(),ptr()
     def get(key):
         node=ptr();code=mobile.lockdownd_get_value(client,None,key.encode(),C.byref(node))
-        if code or not node:raise RuntimeError('Cannot read activation handshake value: '+key)
+        if code or not node:
+            if node:plist.plist_free(node)
+            raise ActivationAcknowledgementPending(
+                'Cannot read activation handshake value: '+key+' (lockdownd error '+str(code)+')')
         xml=ptr();size=C.c_uint32()
         try:
             plist.plist_to_xml(node,C.byref(xml),C.byref(size))
@@ -111,19 +118,25 @@ def acknowledge(udid, identity):
             if xml:allocator.free(xml)
             plist.plist_free(node)
     try:
-        if mobile.idevice_new_with_options(C.byref(device),udid.encode(),2):raise RuntimeError('Selected USB device unavailable')
-        if mobile.lockdownd_client_new_with_handshake(device,C.byref(client),b'olsn0w'):
-            raise RuntimeError('Cannot open selected activation handshake')
+        code=mobile.idevice_new_with_options(C.byref(device),udid.encode(),2)
+        if code:
+            raise ActivationAcknowledgementPending('Selected USB device unavailable (idevice error '+str(code)+')')
+        code=mobile.lockdownd_client_new_with_handshake(device,C.byref(client),b'olsn0w')
+        if code:
+            raise ActivationAcknowledgementPending('Cannot open selected activation handshake (lockdownd error '+str(code)+')')
         if get('UniqueChipID')!=identity['ecid'] or get('ProductType')!=identity['product']:
             raise ValueError('Activation handshake belongs to another device')
-        if get('ActivationState')!='Activated':raise ValueError('Device activation must complete first')
+        if get('ActivationState')!='Activated':
+            raise ActivationAcknowledgementPending('Device activation must complete first')
         value=plist.plist_new_bool(1)
         if not value:raise RuntimeError('Cannot allocate activation acknowledgement')
         # lockdownd_set_value transfers this node into its request dictionary
         # and frees the dictionary, including the value. Do not free it twice.
-        if mobile.lockdownd_set_value(client,None,b'ActivationStateAcknowledged',value):
-            raise RuntimeError('Cannot acknowledge device activation')
-        if get('ActivationStateAcknowledged') is not True:raise RuntimeError('Activation acknowledgement readback failed')
+        code=mobile.lockdownd_set_value(client,None,b'ActivationStateAcknowledged',value)
+        if code:
+            raise ActivationAcknowledgementPending('Cannot acknowledge device activation (lockdownd error '+str(code)+')')
+        if get('ActivationStateAcknowledged') is not True:
+            raise ActivationAcknowledgementPending('Activation acknowledgement readback failed')
         return dict(activation_state='Activated',acknowledged=True)
     finally:
         if client:mobile.lockdownd_client_free(client)
