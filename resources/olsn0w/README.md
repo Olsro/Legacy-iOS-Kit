@@ -26,10 +26,22 @@ manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate 
 The signed 8.4.1 restore, RAM handoff, compact installation,
 target boot and, in normal mode, official activation verification then run automatically. Only
 one manual DFU entry is used by the integrated A5 and A6 workflow; recovery after a failure
-can require another. A5 devices require external pwnDFU, such as A5Mate's
-model-appropriate `PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
+can require another. For jailbroken A5 devices, **enter kDFU yourself**:
+open Cydia, add **Olsro.fr Repo** (`http://cydia.olsro.fr/personal/`), and install
+**kDFU App** from that repo. Open the app and enter kDFU, then continue at the
+DFU prompt. The Kit's **Enter kDFU Mode** utility is also available.
+olsn0w does not trigger kDFU automatically. It checks the selected hardware and
+accepts its running pwned iBSS directly,
+without requiring a checkm8 marker or sending the initial iBSS again.
+For devices without a working jailbroken system, use external pwnDFU, such as
+A5Mate's model-appropriate `PWND:[checkm8]` state. Every failed DFU attempt can be retried without repeating
 the completed firmware preparation. The current pipeline still restores the full signed base
 before reducing it to the 30 MiB + 2 MiB bootstrap.
+
+The kDFU restore route was verified on 2026-10-25 with an iPad mini Wi-Fi
+(`iPad2,5`), starting from jailbroken iOS 7.1.2 and restoring to iOS 6.1.3
+(`10B329`) on an Apple Silicon Mac. Normal boot, SpringBoard, the installed
+Data generation and official Apple activation passed the completion checks.
 
 The menu follows releases published for the connected product across the
 32-bit 8.4.1 OTA family. iOS 5, 6, 7 and 8 have installation recipes; iOS 9/10

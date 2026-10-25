@@ -75,6 +75,20 @@ def has_checkm8_marker(output):
     return bool(re.search(r'^PWND:\s*\[?checkm8\]?\s*$', output, re.MULTILINE))
 
 
+def has_pwned_ibss(output, product):
+    """kloader runs patched iBSS, whose USB identity has no boot-ROM SRTG."""
+    fields = {}
+    for line in output.splitlines():
+        if ':' not in line:
+            continue
+        key, value = (part.strip() for part in line.split(':', 1))
+        if key in fields:
+            return False
+        fields[key] = value
+    return (fields.get('SRTG') == 'N/A' and
+            (profile(product)['soc'].startswith('a5') or fields.get('IBFL') == '0x1b'))
+
+
 def unique_usb_target(ecid):
     # libusb works on Linux and macOS; no system_profiler/ioreg dependency.
     import usb.core
@@ -135,14 +149,17 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
     if pwned:
         progress('Checking software-entered pwned iBSS')
     elif selected_profile.get('external_pwndfu'):
-        progress('Checking the external A5 pwnDFU marker')
+        progress('Checking A5 kDFU or external pwnDFU')
         query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'a5-pwndfu-ready')
-        if not has_checkm8_marker(query):
-            raise RuntimeError('A5 requires PWND:[checkm8] from A5Mate before the host can send iBSS')
-        # Match Legacy iOS Kit's device_send_unpacked_ibss path for A5.  The
-        # raw RSA-patched 8.4.1 iBSS is sent only after the external exploit
-        # marker and remains a retryable, pre-erase transition.
-        run([tools()/'primepwn',session/'pwnediBSS'],'a5-ibss-upload',60)
+        if has_pwned_ibss(query, identity['product']):
+            progress('Selected device is already running pwned iBSS (kDFU)')
+        elif has_checkm8_marker(query):
+            # External boot-ROM pwnDFU needs the raw RSA-patched base iBSS.
+            # kDFU already runs that stage and must not receive it a second time.
+            run([tools()/'primepwn',session/'pwnediBSS'],'a5-ibss-upload',60)
+        else:
+            raise RuntimeError('A5 requires manually entered kDFU from a jailbroken system, '
+                               'or PWND:[checkm8] from A5Mate before the host can send iBSS')
     elif platform.system()=='Darwin' and platform.machine()=='arm64':
         # The native arm64 ipwnder can exit without leaving A6/A6X in the
         # required pwned-iBSS state. The qualified Apple Silicon sequence is
@@ -155,11 +172,10 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
              '--ecid='+str(identity['ecid']),'--no-version-check','--no-internet-check','--no-color'],
             'kit-pwn',180)
     time.sleep(2)
-    recheck_recovery(session)
+    if recheck_recovery(session)['mode'] != 'DFU':
+        raise RuntimeError('The selected device left DFU before iBSS verification')
     query=run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'ibss-ready')
-    ready=('SRTG: N/A' in query and
-           (selected_profile['soc'].startswith('a5') or 'IBFL: 0x1b' in query))
-    if not ready:
+    if not has_pwned_ibss(query, identity['product']):
         raise RuntimeError('The Kit did not return the required pwned iBSS state')
 
 

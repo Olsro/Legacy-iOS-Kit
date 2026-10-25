@@ -309,6 +309,28 @@ class GuidedTest(unittest.TestCase):
         with patch.object(guided,'query_recovery',return_value=dict(IDENTITY,mode='DFU')):
             guided.enter_dfu(IDENTITY,read=lambda _:self.fail('DFU asked twice'))
 
+    def test_a5_kdfu_and_checkm8_are_accepted_without_prompt(self):
+        identity=dict(IDENTITY,product='iPad2,5')
+        for query in ('SRTG: N/A\n', 'SRTG: iBoot-1\nPWND: [checkm8]\n'):
+            with self.subTest(query=query), \
+                 patch.object(guided,'query_recovery',return_value=dict(identity,mode='DFU')), \
+                 patch.object(guided.subprocess,'run',return_value=type('Result',(),{
+                     'returncode':0,'stdout':query.encode(),'stderr':b''})()):
+                guided.enter_dfu(identity,read=lambda _:self.fail('Ready device asked twice'))
+
+    def test_a5_kdfu_entry_is_manual_and_only_runs_identity_queries(self):
+        identity=dict(IDENTITY,product='iPad2,5')
+        prompts=[];messages=[]
+        with patch.object(guided,'query_recovery',side_effect=[
+                RuntimeError('normal mode'),dict(identity,mode='DFU')]), \
+             patch.object(guided.subprocess,'run',return_value=type('Result',(),{
+                 'returncode':0,'stdout':b'SRTG: N/A\n','stderr':b''})()) as run:
+            guided.enter_dfu(identity,read=lambda prompt:prompts.append(prompt),show=messages.append)
+        self.assertEqual(len(prompts),1)
+        self.assertTrue(any('Enter kDFU yourself' in line for line in messages))
+        run.assert_called_once_with([str(guided.tools()/'irecovery'),'-i','0x7b','-q'],
+                                    capture_output=True,timeout=15)
+
     def test_manual_dfu_detection_can_retry_without_returning(self):
         states=[dict(IDENTITY,mode='Normal'),dict(IDENTITY,mode='Normal'),
                 dict(IDENTITY,mode='Normal'),dict(IDENTITY,mode='DFU')]

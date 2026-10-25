@@ -84,6 +84,50 @@ class PrepareDFU(unittest.TestCase):
                 rescue.prepare_dfu(self.session(root), pwned=True, run=run)
             self.assertEqual(calls, ['ibss-ready'])
 
+    def test_a5_kdfu_skips_initial_ibss_but_external_checkm8_uploads_it(self):
+        for product in ('iPad2,5', 'iPad3,1', 'iPhone4,1', 'iPod5,1'):
+            for query, upload in [('SRTG: N/A\n', False),
+                                  ('SRTG: iBoot-1704.10\nPWND: [checkm8]\n', True)]:
+                with self.subTest(product=product, upload=upload), tempfile.TemporaryDirectory() as root:
+                    session=self.session(root)
+                    (session/'device.json').write_text(json.dumps({
+                        'identity': {'ecid':123, 'product':product}}))
+                    calls=[]
+                    def run(argv,label,timeout=45):
+                        calls.append((list(map(str,argv)),label))
+                        return query if label=='a5-pwndfu-ready' else 'SRTG: N/A\n'
+                    with patch.object(rescue,'unique_usb_target') as unique, \
+                         patch.object(rescue,'recheck_recovery',return_value={'mode':'DFU'}), \
+                         patch.object(rescue.time,'sleep'):
+                        rescue.prepare_dfu(session,run=run)
+                    self.assertEqual([label for _,label in calls],
+                        ['a5-pwndfu-ready']+(['a5-ibss-upload'] if upload else [])+['ibss-ready'])
+                    unique.assert_called_once_with(123)
+                    self.assertTrue(all('-i' in argv for argv,label in calls if 'ready' in label))
+
+    def test_a5_stock_dfu_or_forged_ready_text_cannot_bypass_exploit(self):
+        queries=('SRTG: iBoot-1704.10\n', '', 'note SRTG: N/A\n',
+                 'SRTG: N/A-extra\n', 'SRTG: N/A\nSRTG: iBoot-1704.10\n')
+        for query in queries:
+            with self.subTest(query=query), tempfile.TemporaryDirectory() as root:
+                session=self.session(root)
+                (session/'device.json').write_text(json.dumps({
+                    'identity': {'ecid':123, 'product':'iPad2,5'}}))
+                run=Mock(return_value=query)
+                with patch.object(rescue,'unique_usb_target'), \
+                     patch.object(rescue,'recheck_recovery',return_value={'mode':'DFU'}), \
+                     self.assertRaisesRegex(RuntimeError,'requires manually entered kDFU'):
+                    rescue.prepare_dfu(session,run=run)
+                self.assertEqual(run.call_count,1)
+
+    def test_explicit_pwned_flag_still_requires_valid_ibss(self):
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(rescue,'unique_usb_target'), \
+             patch.object(rescue,'recheck_recovery',return_value={'mode':'DFU'}), \
+             patch.object(rescue.time,'sleep'), \
+             self.assertRaisesRegex(RuntimeError,'required pwned iBSS'):
+            rescue.prepare_dfu(self.session(root),pwned=True,run=Mock(return_value='SRTG: iBoot-1\n'))
+
 
 class InteractiveRescue(unittest.TestCase):
     def test_boots_guards_opens_shell_and_stops_owned_tunnel(self):

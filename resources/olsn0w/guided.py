@@ -14,7 +14,7 @@ from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, integer, profile, run, s
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
-from rescue import has_checkm8_marker
+from rescue import has_checkm8_marker, has_pwned_ibss
 
 
 def connected(product, ecid, udid=None):
@@ -250,13 +250,17 @@ def enter_dfu(identity, read=input, show=print):
             result=subprocess.run([str(tools()/'irecovery'),'-i',hex(identity['ecid']),'-q'],
                                   capture_output=True,timeout=15)
             text=(result.stdout+result.stderr).decode(errors='replace')
-            return result.returncode==0 and has_checkm8_marker(text)
+            return result.returncode==0 and (has_checkm8_marker(text) or
+                                            has_pwned_ibss(text, identity['product']))
         return True
     while not ready():
         show('Keep the selected device connected by USB. Prepared files are retained across every DFU attempt.')
         if profile(identity['product']).get('external_pwndfu'):
-            show('Put the device in DFU, run the matching A5/A5X A5Mate profile, eject it cleanly with A, then reconnect it to this computer. The host requires PWND:[checkm8].')
-            prompt='Press Enter once the externally pwned DFU device is reconnected (Ctrl+C to cancel): '
+            show('Enter kDFU yourself on the jailbroken device using kDFU App or the Kit utility.')
+            show('In Cydia, add Olsro.fr Repo: http://cydia.olsro.fr/personal/')
+            show('Install kDFU App from this repo, then open the app and enter kDFU.')
+            show('Alternatively, put the device in DFU, run the matching A5/A5X A5Mate profile, eject it cleanly with A, then reconnect it to this computer with PWND:[checkm8].')
+            prompt='Press Enter once the kDFU or externally pwned DFU device is reconnected (Ctrl+C to cancel): '
         else:
             show('Hold Power + Home for 10 seconds, then release Power while continuing to hold Home for about 10 seconds. The screen must remain black.')
             prompt='Press Enter once the device is in DFU (Ctrl+C to cancel): '
@@ -344,8 +348,8 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             show('DFU exploit failed before any erase: '+str(error))
             show('All preparation is retained. Force-restart the device and re-enter DFU.')
             if profile(product).get('external_pwndfu'):
-                show('Run the matching A5/A5X A5Mate profile before retrying.')
-                prompt='Press Enter once the freshly pwned DFU device is reconnected (Ctrl+C to cancel): '
+                show('Re-enter kDFU from the jailbroken system, or run the matching A5/A5X A5Mate profile before retrying.')
+                prompt='Press Enter to retry with freshly pwned kDFU/A5Mate (Ctrl+C to cancel): '
             else:
                 show('The Kit will retry the DFU exploit automatically on this computer.')
                 prompt='Press Enter once the device is back in DFU (Ctrl+C to cancel): '
