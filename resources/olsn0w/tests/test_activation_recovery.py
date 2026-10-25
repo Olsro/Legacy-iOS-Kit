@@ -25,7 +25,8 @@ class ActivationRecovery(unittest.TestCase):
         self.folder = Path(temporary.name)
         self.archive = self.folder/'activation.tar'
         self.record = plistlib.dumps(dict(
-            AccountToken=plistlib.dumps(dict(UniqueDeviceID=self.udid, ProductType=self.product)),
+            AccountToken=('{ "UniqueDeviceID" = "'+self.udid+'"; "ProductType" = "'+
+                          self.product+'"; "WildcardTicket" = "TICKET\\nDATA=="; }').encode(),
             AccountTokenCertificate=b'certificate', AccountTokenSignature=b'signature',
             DeviceCertificate=b'device', FairPlayKeyData=b'fairplay'))
         with tarfile.open(self.archive, 'w') as archive:

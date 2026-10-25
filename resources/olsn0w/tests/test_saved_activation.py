@@ -123,6 +123,38 @@ class SavedActivation(unittest.TestCase):
         for token in (b'{ "a" = "b"; "a" = "c"; }', b'{ "a" = "b"; garbage }', b'[]'):
             with self.assertRaises(ValueError):token_identity(token)
 
+    def test_cellular_ticket_with_escaped_newline_keeps_original_signed_bytes(self):
+        identity = dict(product='iPhone5,2', ecid=123)
+        token = (b'{ "UniqueDeviceID" = "'+self.udid.encode()+b'"; '
+                 b'"ProductType" = "iPhone5,2"; "WildcardTicket" = "TICKET\\nDATA=="; }')
+        self.assertEqual(token_identity(token)['WildcardTicket'], 'TICKET\nDATA==')
+        record = plistlib.loads(self.record())
+        record['AccountToken'] = token
+        signed = plistlib.dumps(record)
+        with tempfile.TemporaryDirectory() as d:
+            archive = self.archive(d, [(self.name, signed)])
+            restored, _ = load(archive, identity, self.udid)
+            self.assertEqual(restored, signed)
+            self.assertEqual(plistlib.loads(restored)['AccountToken'], token)
+            with self.assertRaisesRegex(ValueError, 'UDID differs'):
+                load(archive, identity, 'b'*40)
+
+    def test_openstep_string_escapes_do_not_create_dictionary_entries(self):
+        token = br'''{ "Note" = "quoted \"; \"UniqueDeviceID\" = \"foreign\"; \\ slash\t\r\n";
+                       "UniqueDeviceID" = "selected"; }'''
+        parsed = token_identity(token)
+        self.assertEqual(parsed['UniqueDeviceID'], 'selected')
+        self.assertEqual(parsed['Note'], 'quoted "; "UniqueDeviceID" = "foreign"; \\ slash\t\r\n')
+
+    def test_decoded_duplicate_keys_and_bad_escapes_remain_rejected(self):
+        tokens = [br'{ "UniqueDeviceID" = "one"; "\U0055niqueDeviceID" = "two"; }',
+                  br'{ "a" = "one"; "\141" = "two"; }',
+                  br'{ "a" = "bad\q"; }', br'{ "a" = "trailing\"; }',
+                  br'{ "a" = "valid\n"; garbage }']
+        for token in tokens:
+            with self.subTest(token=token), self.assertRaises(ValueError):
+                token_identity(token)
+
     def test_installer_writes_only_signed_record_and_reloads_daemon(self):
         for cellular, name in ((True, 'activation_record.plist'), (False, 'pod_record.plist')):
             with self.subTest(cellular=cellular), patch('saved_activation.subprocess.run',

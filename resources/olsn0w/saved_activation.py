@@ -22,6 +22,22 @@ def backup_path(identity):
     return KIT/'saved'/product/('activation-'+str(ecid)+'.tar')
 
 
+def _openstep_string(text):
+    """Decode a quoted OpenStep string for identity inspection only."""
+    escapes = {'a': '\a', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r',
+               't': '\t', 'v': '\v', '"': '"', '\\': '\\'}
+    def replace(match):
+        value = match[1]
+        if value.startswith('U') and len(value) == 5:
+            return chr(int(value[1:], 16))
+        if value[0] in '01234567':
+            return chr(int(value, 8))
+        if value not in escapes:
+            raise ValueError('Unsupported escape in saved activation token')
+        return escapes[value]
+    return re.sub(r'\\(U[0-9a-fA-F]{4}|[0-7]{1,3}|.)', replace, text, flags=re.S)
+
+
 def token_identity(data):
     """Apple's older AccountToken uses an OpenStep string dictionary."""
     try:
@@ -34,13 +50,19 @@ def token_identity(data):
             if not text.strip().startswith('{') or not text.strip().endswith('}'):
                 raise ValueError('Unrecognized saved activation token')
             text = text.strip()[1:-1]
-            pattern = re.compile(r'\s*"([^"\\]+)"\s*=\s*"([^"\\]*)"\s*;')
+            # A cellular WildcardTicket can contain escaped newlines. Parse
+            # string boundaries before decoding escapes so ticket contents
+            # cannot be confused with dictionary delimiters or identity keys.
+            pattern = re.compile(r'\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', re.S)
             value = {}
             while text.strip():
                 match = pattern.match(text)
-                if not match or match[1] in value:
+                if not match:
                     raise ValueError('Ambiguous saved activation token')
-                value[match[1]] = match[2]
+                key = _openstep_string(match[1])
+                if key in value:
+                    raise ValueError('Ambiguous saved activation token')
+                value[key] = _openstep_string(match[2])
                 text = text[match.end():]
     if not isinstance(value, dict):
         raise ValueError('Expected saved activation token dictionary')
