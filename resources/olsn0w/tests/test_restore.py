@@ -11,6 +11,51 @@ from restore import (install,Rescue,preview_matches,copy_image,refresh_layout,
 from layout import encode,editor_commands
 from test_layout import fixture
 
+
+class RescueDiskDiagnostics(unittest.TestCase):
+    def setUp(self):
+        self.ram=Rescue(['ssh','-o','StrictHostKeyChecking=yes','root@127.0.0.1'],
+                        dict(product='iPad2,2',board='k94ap',chip=0x8940,board_id=6),
+                        rescue_build='10B329')
+
+    def test_binary_read_keeps_dd_statistics_out_of_partition_bytes(self):
+        data=bytes(range(256))*96
+        result=Mock(returncode=0,stdout=data,stderr=b'6+0 records in\n6+0 records out\n')
+        with patch('restore.subprocess.run',return_value=result) as command:
+            self.assertEqual(self.ram.read('/dev/rdisk0s1',0,6),data)
+        self.assertEqual(command.call_args.args[0][-1],
+                         '/olsn0w-maintenance/dd if=/dev/rdisk0s1 bs=4096 skip=0 count=6')
+        self.assertTrue(command.call_args.kwargs['capture_output'])
+
+    def test_failed_table_read_reports_stderr_and_exit_code_without_retry(self):
+        for code,diagnostic in ((1,b'dd: /dev/rdisk0s1: No such file or directory\n'),
+                                (139,b'Segmentation fault\n'),
+                                (255,b'ssh: Connection closed\n')):
+            with self.subTest(code=code), \
+                 patch('restore.subprocess.run',return_value=Mock(
+                     returncode=code,stdout=b'',stderr=diagnostic)) as command:
+                with self.assertRaises(RuntimeError) as error:
+                    self.ram.table()
+                self.assertIn('exit code '+str(code),str(error.exception))
+                self.assertIn(diagnostic.decode().strip(),str(error.exception))
+                command.assert_called_once()
+
+    def test_short_read_reports_device_and_observed_size(self):
+        with patch('restore.subprocess.run',return_value=Mock(
+                returncode=0,stdout=b'x'*4096,stderr=b'1+0 records out\n')):
+            with self.assertRaisesRegex(RuntimeError,
+                    'Short partition read from /dev/rdisk0s1: expected 24576 bytes, received 4096'):
+                self.ram.table()
+
+    def test_failed_write_retains_dd_error_and_does_not_start_readback(self):
+        with patch('restore.subprocess.run',return_value=Mock(
+                returncode=1,stdout=b'',stderr=b'dd: Input/output error\n')) as command:
+            with self.assertRaisesRegex(RuntimeError,'Input/output error'):
+                self.ram.write('/dev/rdisk0s1s3',0,bytes(4096))
+        command.assert_called_once()
+        self.assertNotIn('2>/dev/null',command.call_args.args[0][-1])
+
+
 class RestoreGuards(unittest.TestCase):
     def test_a5_ios6_requires_native6_for_every_minor_release(self):
         for product in ('iPod5,1','iPhone4,1','iPad2,5','iPad3,1'):

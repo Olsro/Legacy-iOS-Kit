@@ -67,6 +67,23 @@ class ProvisionSequence(unittest.TestCase):
                     pipeline.run(*args,erase=True,pwned=True)
             self.assertTrue(restore.call_args.kwargs['pwned'])
 
+    def test_failed_partition_collection_records_error_without_installing_or_rebooting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args,reports=self.fixture(Path(tmp));ram=Mock()
+            error='RAM command failed: dd (exit code 1)\ndd: Input/output error'
+            with patch.object(pipeline,'checked_manifest',side_effect=reports), \
+                 patch.object(pipeline,'provision',return_value=ram), \
+                 patch.object(pipeline,'collect',side_effect=RuntimeError(error)), \
+                 patch.object(pipeline,'bind') as bind, \
+                 patch.object(pipeline,'install') as install:
+                with self.assertRaisesRegex(RuntimeError,'Input/output error'):
+                    pipeline.run(*args,erase=True,progress=lambda _:None)
+            bind.assert_not_called();install.assert_not_called();ram.run.assert_not_called()
+            state=json.loads((args[1]/'pipeline.json').read_text())
+            self.assertEqual(state['stage'],'collecting-signed-artifacts')
+            self.assertEqual(state['error'],error)
+            self.assertFalse(state['complete'])
+
     def test_dfu_failure_removes_only_retryable_pipeline_marker(self):
         from provision_run import DfuPreparationError
         with tempfile.TemporaryDirectory() as tmp:

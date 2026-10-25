@@ -341,6 +341,12 @@ prints the absolute log path when the file is created and repeats it with the
 exit code if the restore tool fails or exits without reporting `DONE`.
 Failed restores retain the session directory, including `provision/run.json`
 and any available RAM diagnostics.
+After the signed base is verified, subsequent collection and installation
+failures are recorded in `provision/pipeline.json`; `provision/run.json` only
+describes the signed-base restore and RAM handoff. When reporting a failure,
+include both journals, the full `provision/restore.log` and the final terminal
+error from the same session. RAM disk commands retain their exit code and
+stderr in failure messages, while successful binary reads return only stdout.
 Before firmware preparation, `ssh -G` checks that the host SSH client accepts
 the required options without connecting. RSA compatibility uses
 `PubkeyAcceptedKeyTypes`, accepted by both older High Sierra clients and newer

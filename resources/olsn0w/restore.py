@@ -186,7 +186,8 @@ class Rescue:
     def run(self, command, data=None, timeout=180):
         result=subprocess.run(self.prefix+[command],input=data,capture_output=True,timeout=timeout)
         if result.returncode:
-            raise RuntimeError('RAM command failed: '+command+'\n'+(result.stdout+result.stderr).decode(errors='replace')[-1800:])
+            raise RuntimeError('RAM command failed: '+command+' (exit code '+str(result.returncode)+
+                               ')\n'+(result.stdout+result.stderr).decode(errors='replace')[-1800:])
         return result.stdout
     def tool(self,name):return self.maintenance+'/'+name
     def guard(self, mounted=()):
@@ -202,13 +203,17 @@ class Rescue:
     def read(self,device,first,count):
         if not re.fullmatch(r'/dev/rdisk0s1(?:s[1-4])?',device) or first<0 or count<=0:
             raise ValueError('Invalid partition read')
-        blob=self.run(f'{self.tool("dd")} if={device} bs={BLOCK} skip={first} count={count} 2>/dev/null')
-        if len(blob)!=count*BLOCK:raise RuntimeError('Short partition read')
+        # run() captures stderr separately, so dd diagnostics cannot corrupt
+        # the binary read and remain available if the command fails.
+        blob=self.run(f'{self.tool("dd")} if={device} bs={BLOCK} skip={first} count={count}')
+        if len(blob)!=count*BLOCK:
+            raise RuntimeError('Short partition read from '+device+': expected '+str(count*BLOCK)+
+                               ' bytes, received '+str(len(blob)))
         return blob
     def write(self,device,first,blob):
         if not re.fullmatch(r'/dev/rdisk0s1s[1-4]',device) or first<0 or not blob or len(blob)%BLOCK:
             raise ValueError('Invalid partition write')
-        self.run(f'{self.tool("dd")} of={device} bs={BLOCK} seek={first} count={len(blob)//BLOCK} iflag=fullblock conv=notrunc,fsync 2>/dev/null',blob)
+        self.run(f'{self.tool("dd")} of={device} bs={BLOCK} seek={first} count={len(blob)//BLOCK} iflag=fullblock conv=notrunc,fsync',blob)
         if self.read(device,first,len(blob)//BLOCK)!=blob:raise RuntimeError('Partition readback mismatch')
     def table(self):
         first=self.read('/dev/rdisk0s1',0,6)
