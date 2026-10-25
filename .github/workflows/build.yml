@@ -27,6 +27,15 @@ jobs:
           git rev-parse HEAD > resources/git_hash
           zip "$archive" resources/git_hash
 
+      - name: Prepare release notes
+        run: |
+          updated_at=$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z (UTC%z)')
+          {
+            printf '**Version:** %s\n\n' "$VERSION_CURRENT"
+            printf '**Updated:** %s\n\n' "$updated_at"
+            printf '%s\n' "Latest build of Olsro's Legacy iOS Kit."
+          } > "$RUNNER_TEMP/latest-release-notes.md"
+
       - name: Ensure latest release exists
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,7 +43,7 @@ jobs:
           gh release view latest -R ${{ github.repository }} >/dev/null 2>&1 || \
             gh release create latest -R ${{ github.repository }} \
               --title "Latest-${{ env.VERSION_CURRENT }}" \
-              --target ${{ github.sha }} --notes "Latest build of Olsro's Legacy iOS Kit."
+              --target ${{ github.sha }} --notes-file "$RUNNER_TEMP/latest-release-notes.md"
 
       - name: Remove all assets from latest release
         env:
@@ -62,4 +71,5 @@ jobs:
 
           gh release edit latest \
             --title "Latest-${{ env.VERSION_CURRENT }}" \
+            --notes-file "$RUNNER_TEMP/latest-release-notes.md" \
             --target ${{ github.sha }} -R ${{ github.repository }}
