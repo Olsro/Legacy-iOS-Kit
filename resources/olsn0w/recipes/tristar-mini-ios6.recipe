@@ -1,0 +1,653 @@
+{
+  "format": 1,
+  "purpose": "Offline kernel qualification evidence; runtime patches remain explicitly hash-pinned",
+  "scope": "All released cellular iPad mini iOS 6 kernels",
+  "checker": "resources/olsn0w/kernelcache_audit.py",
+  "reference": "iPad2,7 / 6.1.3 / 10B329",
+  "pairwise_identical_raw_kernels": true,
+  "runtime_policy": "Exact product/version/build, complete input hash, two patch bytes and complete output hash",
+  "entries": [
+    {
+      "source": {
+        "product": "iPad2,6",
+        "version": "6.0.1",
+        "build": "10A8426",
+        "board": "p106ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6/041-5484.20121109.ALets/iPad2,6_6.0.1_10A8426_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p106",
+        "encrypted_sha256": "cdc9b090fa36640b36728cdddd26f058bba6b96f1cb80574789a83c4a1a4ab94",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,6/10A8426/index.html",
+        "build_manifest_sha256": "53ebf31a6385d951aec435e955122b613ca86ea6f08b71730fba16eda6ebdbad",
+        "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+        "container_sha256": "596aeb6fc938335ba94734b2ad3adf5f43bf8d8a46ba54083f20baaf3d06d313"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10626210,
+          "virtual_address": 2158376098,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+          "patched_sha256": "33f959c8ca4188b23daec9ab7b03447936abb9b4a7d51c6ceed6e9e176441557",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10626072,
+        "function_virtual_address": 2158375960,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.0-member-dc",
+        "unchanged_member_load": 220,
+        "normalized_code_sha256": "52e6221263932bcc92c5f018750559c00e4d817591c93192873cf7abc5df62d0",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149832584,
+        "iolog_call_targets": [
+          2158377924,
+          2158377924
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10626210,
+        "virtual_address": 2158376098,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+        "patched_sha256": "33f959c8ca4188b23daec9ab7b03447936abb9b4a7d51c6ceed6e9e176441557",
+        "container_sha256": "fd4b1f026565b39a32980bfa5454bd3ad6063a503141c457029d6c4ba1b63e2d"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,6",
+        "version": "6.0.2",
+        "build": "10A8500",
+        "board": "p106ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6/041-9158.20121217.d65tr/iPad2,6_6.0.2_10A8500_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p106",
+        "encrypted_sha256": "f810da9eb9174526176934c8d68fb067589aba6b083c8d1a0887b35614492eb9",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,6/10A8500/index.html",
+        "build_manifest_sha256": "342ccebcabd33659c7f2da79f07f96a731909ef60a7800817cd621ed4ec294a9",
+        "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+        "container_sha256": "112cc9b215df61bccb0b758e252f60f7c08824c9c2e3f2ad6bc4980a7788a9a7"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10626210,
+          "virtual_address": 2158376098,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+          "patched_sha256": "f0b888136ff929752adb65f09a3c05b05f6aebd995798368c0bef1df354aca9c",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10626072,
+        "function_virtual_address": 2158375960,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.0-member-dc",
+        "unchanged_member_load": 220,
+        "normalized_code_sha256": "52e6221263932bcc92c5f018750559c00e4d817591c93192873cf7abc5df62d0",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149832584,
+        "iolog_call_targets": [
+          2158377924,
+          2158377924
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10626210,
+        "virtual_address": 2158376098,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+        "patched_sha256": "f0b888136ff929752adb65f09a3c05b05f6aebd995798368c0bef1df354aca9c",
+        "container_sha256": "a9a223769f562bd3f88378fc8d23c99976448bd477d2c55acc8558865213f42c"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,6",
+        "version": "6.1",
+        "build": "10B141",
+        "board": "p106ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/041-6613.20130128.Pre3r/iPad2,6_6.1_10B141_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p106",
+        "encrypted_sha256": "2a18c5eaad9515147400adf990a159c6faad9f39320ec955375c5dda7aaa10e7",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,6/10B141/index.html",
+        "build_manifest_sha256": "4e2118439a654892c5aa4fa1910fbe3b254d230f7fc6f776df1104d066db20b9",
+        "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+        "container_sha256": "573305838af08d8a8d07c33c1feaf0b624ff25a49912d3c724b20ead926284c3"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10600718,
+          "virtual_address": 2158350606,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+          "patched_sha256": "f18931b51389daf21845929dfc3f9048b4ad72d2857b8c7775d2571dcb3a1570",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10600580,
+        "function_virtual_address": 2158350468,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149833416,
+        "iolog_call_targets": [
+          2158353196,
+          2158353196
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10600718,
+        "virtual_address": 2158350606,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+        "patched_sha256": "f18931b51389daf21845929dfc3f9048b4ad72d2857b8c7775d2571dcb3a1570",
+        "container_sha256": "ed373bb228864d14fbe47f5ad04b114947787dcf89ad29b4d331084bdec77783"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,6",
+        "version": "6.1.2",
+        "build": "10B147",
+        "board": "p106ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/091-0749.20130215.96TgY/iPad2,6_6.1.2_10B147_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p106",
+        "encrypted_sha256": "f9a31c71e033b6ce534a9772dfa8d5da75a6882b691d09456a91e255898fdf46",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,6/10B147/index.html",
+        "build_manifest_sha256": "6188941675c1b67e59ca19f90985a7878f6704f6bba4138347c77ad3fc7f4cd6",
+        "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+        "container_sha256": "8b678f2aef5baf2b66b8817ae6b65f10d24d13c6d33da7520ec27ad6f9bc6438"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10596622,
+          "virtual_address": 2158346510,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+          "patched_sha256": "22da143afc1e011df531bd15cd6a4c99a69446c6126513e566eae64cfbfbdf22",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10596484,
+        "function_virtual_address": 2158346372,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149833416,
+        "iolog_call_targets": [
+          2158349100,
+          2158349100
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10596622,
+        "virtual_address": 2158346510,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+        "patched_sha256": "22da143afc1e011df531bd15cd6a4c99a69446c6126513e566eae64cfbfbdf22",
+        "container_sha256": "6dea76342534db4f0aeae9029e68b4aa1c3bce89bc66554e88987309214ee19f"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,6",
+        "version": "6.1.3",
+        "build": "10B329",
+        "board": "p106ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/091-2461.20130319.Hgt54/iPad2,6_6.1.3_10B329_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p106",
+        "encrypted_sha256": "5d17a81fac6d0424d2d2d31e0a8239e8217421afb33a0377130b854f8b4b99df",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,6/10B329/index.html",
+        "build_manifest_sha256": "575f7ded5d18986661d5f4822db63a35c254942b25918465b025266ec52e1ce6",
+        "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+        "container_sha256": "8a1e08441ea4b0145480fc562aa2225abcd3ca3c2a54712af194277c875fad82"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10604814,
+          "virtual_address": 2158354702,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+          "patched_sha256": "e5f9decc9b7e0619c7f0e8aae1d235f1e3d0525813d0091bc274db3063ce1211",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10604676,
+        "function_virtual_address": 2158354564,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149837512,
+        "iolog_call_targets": [
+          2158357292,
+          2158357292
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10604814,
+        "virtual_address": 2158354702,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+        "patched_sha256": "e5f9decc9b7e0619c7f0e8aae1d235f1e3d0525813d0091bc274db3063ce1211",
+        "container_sha256": "8107829389697ba8cd22bafae32dca293e20038f8d383486c77a913dbdebc56f"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,7",
+        "version": "6.0.1",
+        "build": "10A8426",
+        "board": "p107ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6/041-5485.20121109.Zp6Ki/iPad2,7_6.0.1_10A8426_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p107",
+        "encrypted_sha256": "88ad5f0c75d03f5a958618c43a3ad87df19527e7d950352d689eb804e1d61609",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,7/10A8426/index.html",
+        "build_manifest_sha256": "d58bce0d4feeaa8be42b8f8a393a2bc7fe9f9121eb636c3229ef50d35a79efdc",
+        "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+        "container_sha256": "ed3a30678caa08b55bfc1d28f8aefc5836d1fc66bdd5ed507857a73f76657dfb"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10626210,
+          "virtual_address": 2158376098,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+          "patched_sha256": "33f959c8ca4188b23daec9ab7b03447936abb9b4a7d51c6ceed6e9e176441557",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10626072,
+        "function_virtual_address": 2158375960,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.0-member-dc",
+        "unchanged_member_load": 220,
+        "normalized_code_sha256": "52e6221263932bcc92c5f018750559c00e4d817591c93192873cf7abc5df62d0",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149832584,
+        "iolog_call_targets": [
+          2158377924,
+          2158377924
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10626210,
+        "virtual_address": 2158376098,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db",
+        "patched_sha256": "33f959c8ca4188b23daec9ab7b03447936abb9b4a7d51c6ceed6e9e176441557",
+        "container_sha256": "60c721536a20a67594cfeee45f19febba51690cf416fc24657479df43a30a009"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,7",
+        "version": "6.0.2",
+        "build": "10A8500",
+        "board": "p107ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6/041-9154.20121217.Nestg/iPad2,7_6.0.2_10A8500_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p107",
+        "encrypted_sha256": "03358dfc3128fb76aa680df992976cac934dc0c734654bc0931afef503003da6",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,7/10A8500/index.html",
+        "build_manifest_sha256": "42cd06231e209e09e754181263055b40470a7936b464264954bce7ed221023dc",
+        "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+        "container_sha256": "b9c209643e5a77f4451310a14e864133ec2e229c3d994da3502f2c9874219ce3"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10626210,
+          "virtual_address": 2158376098,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+          "patched_sha256": "f0b888136ff929752adb65f09a3c05b05f6aebd995798368c0bef1df354aca9c",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10626072,
+        "function_virtual_address": 2158375960,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.0-member-dc",
+        "unchanged_member_load": 220,
+        "normalized_code_sha256": "52e6221263932bcc92c5f018750559c00e4d817591c93192873cf7abc5df62d0",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149832584,
+        "iolog_call_targets": [
+          2158377924,
+          2158377924
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10626210,
+        "virtual_address": 2158376098,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a",
+        "patched_sha256": "f0b888136ff929752adb65f09a3c05b05f6aebd995798368c0bef1df354aca9c",
+        "container_sha256": "293c2cda1f12007f5ca1e3ac3a155470ae66c68e2cbab2dab7d62bf0551b4138"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,7",
+        "version": "6.1",
+        "build": "10B141",
+        "board": "p107ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/041-6615.20130128.i5rft/iPad2,7_6.1_10B141_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p107",
+        "encrypted_sha256": "52c6412b3d10e6b59535b325ed51c696ccb9849988729f7683ff5559048c49ac",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,7/10B141/index.html",
+        "build_manifest_sha256": "c6e420a1c796a24b3cd6ae938922469a9e0408e72223a07064ff14b333925769",
+        "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+        "container_sha256": "94f0f1a85a9d3a91b971735de63f9453d53c54fbdcaac55206a3e917047591dc"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10600718,
+          "virtual_address": 2158350606,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+          "patched_sha256": "f18931b51389daf21845929dfc3f9048b4ad72d2857b8c7775d2571dcb3a1570",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10600580,
+        "function_virtual_address": 2158350468,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149833416,
+        "iolog_call_targets": [
+          2158353196,
+          2158353196
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10600718,
+        "virtual_address": 2158350606,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d",
+        "patched_sha256": "f18931b51389daf21845929dfc3f9048b4ad72d2857b8c7775d2571dcb3a1570",
+        "container_sha256": "4040b27b5b151d163cb5bf408c107e44def8d2d99fa400a8da343469fecf13bd"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,7",
+        "version": "6.1.2",
+        "build": "10B147",
+        "board": "p107ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/091-0730.20130215.Acsit/iPad2,7_6.1.2_10B147_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p107",
+        "encrypted_sha256": "b922d3012e250ca291950bd008f39cdd87da5a27c31e33b317e64eb95d9236c1",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,7/10B147/index.html",
+        "build_manifest_sha256": "0895911abfaafd607fe56b8247fbf62f37e0da0dd74888358500570788b84024",
+        "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+        "container_sha256": "6e82ca4fd68981e7764cf69b4266d4b3f5f9137c6b60e849c37b9ffb485dca4f"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10596622,
+          "virtual_address": 2158346510,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+          "patched_sha256": "22da143afc1e011df531bd15cd6a4c99a69446c6126513e566eae64cfbfbdf22",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10596484,
+        "function_virtual_address": 2158346372,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149833416,
+        "iolog_call_targets": [
+          2158349100,
+          2158349100
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10596622,
+        "virtual_address": 2158346510,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "exact-structural-match",
+        "raw_sha256": "d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b",
+        "patched_sha256": "22da143afc1e011df531bd15cd6a4c99a69446c6126513e566eae64cfbfbdf22",
+        "container_sha256": "c406590cc40162f375cf7d464fae3ec7b0c9505cec33fc36fb88b39e86602513"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "structural-only",
+        "physical_boot_verified": false
+      }
+    },
+    {
+      "source": {
+        "product": "iPad2,7",
+        "version": "6.1.3",
+        "build": "10B329",
+        "board": "p107ap",
+        "ipsw_url": "https://secure-appldnld.apple.com/iOS6.1/091-2356.20130319.54rGB/iPad2,7_6.1.3_10B329_Restore.ipsw",
+        "kernel_member": "kernelcache.release.p107",
+        "encrypted_sha256": "b7c864d60eb00f68d5498a67bf9bce8e3944f2bbe69beaae65fa1141e0fbdc00",
+        "keys_url": "https://raw.githubusercontent.com/LukeZGD/Legacy-iOS-Kit-Keys/af6bf5934dc61ed557a967a3f42ab7fb8ed8c45e/iPad2,7/10B329/index.html",
+        "build_manifest_sha256": "82cca5ef437baf35649254360eef16284712b0aecf12b8e60b6fe53ed4f5bad0",
+        "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+        "container_sha256": "d6c8d9f454a9a59483675f680fda598b6a06a2cb39fe705c0272980b919a5395"
+      },
+      "audit": {
+        "patch": {
+          "name": "tristar-system-id-retry-fallback",
+          "offset": 10604814,
+          "virtual_address": 2158354702,
+          "before": "10e0",
+          "after": "86b1",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+          "patched_sha256": "e5f9decc9b7e0619c7f0e8aae1d235f1e3d0525813d0091bc274db3063ce1211",
+          "validation": "exact-structural-match"
+        },
+        "reference": {
+          "product": "iPad2,7",
+          "build": "10B329",
+          "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30"
+        },
+        "function_offset": 10604676,
+        "function_virtual_address": 2158354564,
+        "executable_bytes": 184,
+        "relocated_call_bytes": 8,
+        "function_template": "ios6.1-member-e8",
+        "unchanged_member_load": 232,
+        "normalized_code_sha256": "72ced32b574854a61ba63489d55ecd38cb4d37f92051e8b7bcdbae60a68b5d5e",
+        "literal_references_verified": 5,
+        "iolog_symbol": 2149837512,
+        "iolog_call_targets": [
+          2158357292,
+          2158357292
+        ],
+        "virtual_method_entry_verified": true,
+        "changed_raw_bytes": 2,
+        "physical_boot_verified": false
+      },
+      "installed_patch": {
+        "name": "tristar-system-id-retry-fallback",
+        "offset": 10604814,
+        "virtual_address": 2158354702,
+        "before": "10e0",
+        "after": "86b1",
+        "validation": "physical-mac-and-charger-cold-boot-lockscreen",
+        "raw_sha256": "6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30",
+        "patched_sha256": "e5f9decc9b7e0619c7f0e8aae1d235f1e3d0525813d0091bc274db3063ce1211",
+        "container_sha256": "5ad5344d246d11ce3ee61a37b8025a36271138d96634d4da3a672a5dc6586858"
+      },
+      "packed_readback_verified": true,
+      "hardware_result": {
+        "evidence": "user-reported",
+        "wired_reboot_lockscreen": true,
+        "mac_cold_boot_lockscreen": true,
+        "wall_charger_cold_boot_lockscreen": true
+      }
+    }
+  ]
+}

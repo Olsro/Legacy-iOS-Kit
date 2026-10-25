@@ -6,7 +6,7 @@ from common import digest, run, tools
 from img3 import img3
 
 
-# These p101 iOS 6 kernels retry the TriStar System-ID IPC after a controller reset,
+# These p101/p106/p107 iOS 6 kernels retry TriStar System-ID IPC after a reset,
 # but this hardware can return kIOReturnBadMessageID a second time. Apple's
 # function already contains a failure fallback which publishes 0xffff and
 # continues. The stock instruction branches over that fallback regardless of
@@ -66,8 +66,43 @@ PATCHES = {
 }
 
 
+# Each released P106/P107 iOS 6 pair has an identical raw kernel. The complete
+# retry/fallback code was audited against P107 10B329, including IOLog targets
+# and literal references. iOS 6.0.x differs only in an unchanged member load.
+# Evidence: recipes/tristar-mini-ios6.recipe; offline checker: kernelcache_audit.
+_CELLULAR_MINI_IOS6 = {
+    ('6.0.1', '10A8426'): dict(
+        raw_sha256='110419bdb7162b9897414cd4095b4e439d813a63a573fd3e7c09cad9fe39c4db',
+        patched_sha256='33f959c8ca4188b23daec9ab7b03447936abb9b4a7d51c6ceed6e9e176441557',
+        offset=0xa224a2, virtual_address=0x80a634a2),
+    ('6.0.2', '10A8500'): dict(
+        raw_sha256='97441fc40dc00d1f45132a0273b440b05633f646a91465f2df3654a546c89a9a',
+        patched_sha256='f0b888136ff929752adb65f09a3c05b05f6aebd995798368c0bef1df354aca9c',
+        offset=0xa224a2, virtual_address=0x80a634a2),
+    ('6.1', '10B141'): dict(
+        raw_sha256='eab6ec1a845b8931fe9df91ea495d25716200af1af7c6e7ae8b46b7699fa5f7d',
+        patched_sha256='f18931b51389daf21845929dfc3f9048b4ad72d2857b8c7775d2571dcb3a1570',
+        offset=0xa1c10e, virtual_address=0x80a5d10e),
+    ('6.1.2', '10B147'): dict(
+        raw_sha256='d5d51cde7a227d2b76bf9ed0a897986bb93fdad1f9d3e776c703d282aeb16e8b',
+        patched_sha256='22da143afc1e011df531bd15cd6a4c99a69446c6126513e566eae64cfbfbdf22',
+        offset=0xa1b10e, virtual_address=0x80a5c10e),
+    ('6.1.3', '10B329'): dict(
+        raw_sha256='6642753b73af33e8490db4183612efc227f4c388fbeb46936355b58a8f369b30',
+        patched_sha256='e5f9decc9b7e0619c7f0e8aae1d235f1e3d0525813d0091bc274db3063ce1211',
+        offset=0xa1d10e, virtual_address=0x80a5e10e),
+}
+for _product in ('iPad2,6', 'iPad2,7'):
+    for (_release, _build), _pin in _CELLULAR_MINI_IOS6.items():
+        PATCHES[_product, _release, _build] = dict(
+            name='tristar-system-id-retry-fallback', before='10e0', after='86b1',
+            validation=('physical-mac-and-charger-cold-boot-lockscreen'
+                        if (_product, _build) == ('iPad2,7', '10B329')
+                        else 'exact-structural-match'), **_pin)
+
+
 def qualified_patch(source):
-    """Return a fix only for the exact firmware identity proven on hardware."""
+    """Return a fix only for an explicitly qualified firmware identity."""
     return PATCHES.get((source['product'], source['version'], source['build']))
 
 

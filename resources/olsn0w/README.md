@@ -588,12 +588,41 @@ also hash-pinned for every released iPad3,4 iOS 6 kernel: 6.0, 6.0.1, 6.1,
 6.0 and 6.0.1 place it at the earlier prelink address, while every 6.1 build
 has byte-identical code at the 6.1.3 address. iOS 6.1.2 is physically qualified
 through normal boot, official activation, SSH and a successful Cydia
-first-start job. Unknown products, releases, builds or kernel hashes retain
-their stock kernel instead of inheriting the workaround. Every patched
-container is read back before being embedded. Every iOS 6 release on the
+first-start job. System recipe 53 also applies this fallback to every released
+cellular mini iOS 6 kernel: P106/P107 (`iPad2,6`/`iPad2,7`), 6.0.1 (`10A8426`),
+6.0.2 (`10A8500`), 6.1 (`10B141`), 6.1.2 (`10B147`) and 6.1.3 (`10B329`).
+The P107 6.1.3 installation booted repeatedly without a cable, but a
+wall-charger startup exposed the same
+`AppleTriStarBuiltin: could not find system ID: bad IPC message ID` panic.
+Changing only the retry-result branch in the installed target kernel then
+reached the lockscreen on a wired reboot and on separate cold starts connected
+to a Mac and a wall charger, as reported by the user. This qualifies those
+P107 6.1.3 startup cases, not activation or charging functionality.
+
+For each of the five builds, P106 and P107 use byte-identical raw kernels.
+All ten model/build combinations were extracted against their Apple
+BuildManifest identities and audited with `kernelcache_audit.py`. The complete
+184-byte function matches the tested P107 reference after resolving two
+relocated calls to the kernel's `_IOLog` symbol. iOS 6.0.x has one explicitly
+accepted object-member displacement (`0xdc` instead of `0xe8`); the error
+checks, retry, fallback, register usage and return code are otherwise unchanged.
+The checker also resolves the `soft-reset` property, both diagnostic strings,
+both `getSystemID` references and the virtual-method entry. Each packed kernel
+was decompressed and read back. Source URLs, input/output hashes, offsets and
+audit results are recorded in `recipes/tristar-mini-ios6.recipe`; run
+`python3 resources/olsn0w/kernelcache_audit.py /path/to/Kernelcache.raw`
+from the Kit directory to repeat the offline structural check. This scanner
+does not run during restoration: only the explicit product/version/build and
+complete input/output hashes in `kernelcache.py` enable the patch. Other audited
+P106/P107 combinations inherit the fix by verified code equivalence, without
+claiming separate physical tests. Existing System images are rebuilt on next
+preparation to include the kernel fix.
+Unlisted products, releases and builds retain their stock kernel; a hash
+mismatch on a listed kernel stops preparation. Every patched container is
+read back before being embedded. Every iOS 6 release on the
 explicit Lightning profiles N41, N42, N78, P101, P102 and P103 receives the TriStar
-DeviceTree reset; this major-version rule includes the phone-only 6.0.2 and
-6.1.4 releases without maintaining an incomplete point-release list. The N78
+DeviceTree reset; this major-version rule includes 6.0.2 and the phone-only
+6.1.4 release without maintaining an incomplete point-release list. The N78
 rule covers every iOS 6 release available for iPod5,1; its 6.1.3 kernel contains
 the same `AppleTriStarBuiltIn` reset-and-retry path and its parsed DeviceTree
 has the same THS7383 TriStar node. A physical N78 restore without the property
@@ -609,9 +638,10 @@ successful package installation through Cydia. The kernel, jailbreak, bootstrap
 and activation policy were unchanged. Other iOS 6 releases use the same
 major-version policy but have not been hardware-tested in this qualification.
 Relay recipe 26 extends that iOS 6 policy to the cellular mini variants P106
-and P107 (`iPad2,6` and `iPad2,7`) by family analogy, not by a separate hardware
-qualification. All three mini variants retain their existing iOS 7/8 policy
-(no forced reset). P105 (`iPad2,5`) was subsequently restored to 7.1.2 in one
+and P107 (`iPad2,6` and `iPad2,7`) by family analogy. The later kernel audit
+covers all their iOS 6 releases as described above; only P107 6.1.3 has the
+physical startup qualification. All three mini variants retain their existing
+iOS 7/8 policy (no forced reset). P105 (`iPad2,5`) was subsequently restored to 7.1.2 in one
 DFU workflow without that reset: normal boot, official activation, writable
 System, Data generation, boot-success and Cydia first-start checks passed.
 The user confirmed end-to-end functionality. This run used the existing Pangu

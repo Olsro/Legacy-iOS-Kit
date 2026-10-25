@@ -157,10 +157,14 @@ policy chosen for each run; a bypass run does not validate official activation.
 | iPhone 4S | 5.1.1 (9B206), 6.1.3, 7.1.2, 8.3 | Multipatch; official activation on 5.1.1/8.3, bypass on 6.1.3/7.1.2. 5.1.1 validated on 2026-09-28 after DRA NVRAM cleanup and modem-path correction: Cydia updates and AppSync installation, with SpringBoard icons intact; see [details](resources/olsn0w/IOS5-COMPATIBILITY.md) |
 | iPod touch 5G | 6.1.3, 7.1.2, 8.3 | Bypass runs; working Cydia/package installation |
 | iPad mini 1 Wi-Fi (`iPad2,5`) | 6.1.3, 7.1.2, 8.3 | Official activation and end-to-end user confirmation |
+| iPad mini 1 Cellular (`iPad2,7`) | 6.1.3 (10B329), boot validation | Repeated cable-free boot, wired reboot and cold starts on both Mac and wall charger reached the lockscreen after the TriStar kernel fallback correction. Activation and full functionality are not qualified by this test |
 
 The mini Wi-Fi iOS 6 path required the TriStar reset fix; its 7.1.2 and 8.3
-tests succeeded without forcing that reset. Related cellular mini profiles are
-covered by preparation policy, not by those physical tests. iPad 2 models,
+tests succeeded without forcing that reset. The cellular `iPad2,7` boot result
+above is separate. Both cellular variants (`iPad2,6`/`iPad2,7`) receive a
+hash-pinned kernel fallback fix for all five released iOS 6 versions
+(6.0.1, 6.0.2, 6.1, 6.1.2 and 6.1.3), based on verified code equivalence;
+`iPad2,6` has no separate physical test. iPad 2 models,
 other iPad 3 variants and unlisted builds still require their own hardware
 validation; the iPad 3 report does not qualify every Wi-Fi/cellular variant.
 
