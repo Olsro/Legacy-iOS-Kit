@@ -339,6 +339,12 @@ The signed-base restore saves its full stdout and stderr in
 (or `<bundle>/restore.log` when using an explicit `--bundle`). The terminal
 prints the absolute log path when the file is created and repeats it with the
 exit code if the restore tool fails or exits without reporting `DONE`.
+The legacy restore tool and its runtime probe inherit Python's ignored
+`SIGPIPE` disposition. A closed transport socket can then return an error to
+the tool instead of terminating the entire process with signal 13 (`-13` in
+`run.json`). This does not repair a disconnected device or authorize a retry:
+exit code zero, `DONE` and this run's authenticated RAM handoff are still
+required before collecting signed-base artifacts.
 Failed restores retain the session directory, including `provision/run.json`
 and any available RAM diagnostics.
 After the signed base is verified, subsequent collection and installation

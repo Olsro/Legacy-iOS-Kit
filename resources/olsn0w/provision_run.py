@@ -29,7 +29,7 @@ def check_restore_runtime(executable, env, log):
     with tempfile.TemporaryDirectory(prefix='restore-loader-', dir=log.parent) as work:
         try:
             result = subprocess.run([str(executable)], cwd=work, env=env,
-                                    capture_output=True, timeout=15)
+                                    capture_output=True, timeout=15, restore_signals=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             log.write_text(str(error)+'\n')
             raise RuntimeError('Cannot start the Kit restore tool; see '+str(log)) from error
@@ -196,7 +196,11 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
         display=RestoreProgress(progress)
         with restore_log.open('wb') as log:
             progress('Restore log: '+str(restore_log))
-            process=subprocess.Popen(argv,cwd=work,env=env,stdout=log,stderr=subprocess.STDOUT)
+            # Keep Python's ignored SIGPIPE in this legacy network client.
+            # Restoring SIG_DFL can kill the whole restore on a closed socket
+            # before its transport code can report EPIPE or finish cleanup.
+            process=subprocess.Popen(argv,cwd=work,env=env,stdout=log,stderr=subprocess.STDOUT,
+                                     restore_signals=False)
             state.update(pid=process.pid,stage='signed-base-restore-started');checkpoint(journal,state)
             with restore_log.open('r',errors='replace') as status:
                 while True:

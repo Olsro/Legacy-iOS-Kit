@@ -19,11 +19,12 @@ from provision_collect import personalized_modem
 
 
 class RestoreLogging(unittest.TestCase):
-    def test_failed_process_retains_both_streams_and_reports_existing_absolute_log(self):
-        # Exercise real subprocess redirection, including an exit without DONE.
+    def test_sigpipe_preserves_process_and_logs_but_does_not_bypass_completion_checks(self):
+        # A native shell inherits the launcher's signal disposition, unlike a
+        # Python child which would ignore SIGPIPE on interpreter startup.
         # All device operations and the firmware-key server stay mocked.
-        for code in (9,0):
-            with self.subTest(code=code), tempfile.TemporaryDirectory(prefix='restore logs ') as temporary:
+        for code,done in ((9,True),(0,False),(0,True)):
+            with self.subTest(code=code,done=done), tempfile.TemporaryDirectory(prefix='restore logs ') as temporary:
                 session=Path(temporary);bundle=session/'provision';bundle.mkdir()
                 identity=dict(product='iPhone5,2',board='n42ap',chip=0x8950,board_id=2,ecid=123)
                 (session/'device.json').write_text(json.dumps(dict(identity=identity)))
@@ -33,9 +34,12 @@ class RestoreLogging(unittest.TestCase):
                             restore_environment_build='12H321',rescue_session=str(session),
                             asr_source='original-udif-without-filevault-envelope',handoff_storage='nvram',
                             asr_patch={'method':'kit-asr-failure-to-success'},
-                            restore_bootchain_policy='futurerestore-stock-rsa')
-                argv=[sys.executable,'-c',
-                      'import sys; print("restore output"); print("modem error", file=sys.stderr); sys.exit('+str(code)+')']
+                            restore_bootchain_policy='futurerestore-stock-rsa',reboot_token='a'*32)
+                argv=['/bin/sh','-c',
+                      'kill -PIPE "$$"; printf "restore output\\n"; '
+                      'printf "modem error\\n" >&2; '
+                      '[ "$2" = yes ] && printf "DONE\\n"; exit "$1"',
+                      'restore-fixture',str(code),'yes' if done else 'no']
                 log=bundle.resolve()/'restore.log'
                 messages=[]
                 def progress(message):
@@ -51,19 +55,31 @@ class RestoreLogging(unittest.TestCase):
                      patch.object(provision_run,'prepare_dfu'), \
                      patch.object(provision_run.http.server,'ThreadingHTTPServer'), \
                      patch.object(provision_run,'record_failed_restore'), \
+                     patch.object(provision_run,'read_handoff',return_value=b'a'*32+b'\n') as marker, \
                      patch.object(provision_run,'connect_handoff') as handoff:
-                    with self.assertRaises(RuntimeError) as error:
-                        provision_run.run(session,bundle,session/'ticket',keys,erase=True,progress=progress)
+                    if code or not done:
+                        with self.assertRaises(RuntimeError) as error:
+                            provision_run.run(session,bundle,session/'ticket',keys,erase=True,progress=progress)
+                        self.assertIn(str(log),str(error.exception))
+                        self.assertIn('exit code '+str(code),str(error.exception))
+                        handoff.assert_not_called();marker.assert_not_called()
+                    else:
+                        ram=provision_run.run(session,bundle,session/'ticket',keys,erase=True,progress=progress)
+                        self.assertIs(ram,handoff.return_value)
+                        handoff.assert_called_once_with(session.resolve())
+                        marker.assert_called_once_with(ram)
                 self.assertIn('Restore log: '+str(log),messages)
-                self.assertIn(str(log),str(error.exception))
-                self.assertIn('exit code '+str(code),str(error.exception))
-                self.assertEqual(set(log.read_text().splitlines()),{'restore output','modem error'})
-                self.assertIn(str(bundle.resolve()),messages[-1])
+                expected={'restore output','modem error'}
+                if done:expected.add('DONE')
+                self.assertEqual(set(log.read_text().splitlines()),expected)
                 state=json.loads((bundle/'run.json').read_text())
                 self.assertEqual(state['returncode'],code)
-                self.assertEqual(state['error'],str(error.exception))
-                self.assertFalse(state['complete'])
-                handoff.assert_not_called()
+                self.assertEqual(state['complete'],code==0 and done)
+                if code or not done:
+                    self.assertIn(str(bundle.resolve()),messages[-1])
+                    self.assertEqual(state['error'],str(error.exception))
+                else:
+                    self.assertEqual(state['stage'],'authenticated-ram-handoff')
 
 
 class ProvisionHandoff(unittest.TestCase):

@@ -70,6 +70,15 @@ class RestoreLoader(unittest.TestCase):
                 provision_run.check_restore_runtime(executable, os.environ.copy(), log)
             self.assertIn('libssl.so.35', log.read_text())
 
+    def test_runtime_probe_also_keeps_sigpipe_ignored(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            executable = self.executable(root,
+                'kill -PIPE "$$"\nprintf "Usage: futurerestore [OPTIONS] IPSW\\n" >&2\nexit 255\n')
+            log = root/'restore-loader.log'
+            provision_run.check_restore_runtime(executable, os.environ.copy(), log)
+            self.assertIn('Usage: futurerestore', log.read_text())
+
     def test_unexpected_success_output_does_not_pass_as_restore_tool(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
