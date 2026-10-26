@@ -7,7 +7,7 @@ Hacktiv8, Olsro Cydia repositories and the hardware-tested improvements below.
 Upstream wiki links describe the original project; fork-specific instructions
 and validation results are documented here and in the linked local guides.
 
-The fork's version is **1.0.0**, maintained in [`VERSION`](VERSION).
+The fork's version is maintained in [`VERSION`](VERSION).
 The toolkit checks for updates from [Olsro/Legacy-iOS-Kit](https://github.com/Olsro/Legacy-iOS-Kit)
 at startup and asks before installing them. Updating is optional: declining
 continues with the installed version.
