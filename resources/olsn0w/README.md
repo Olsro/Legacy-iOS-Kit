@@ -370,8 +370,13 @@ Linux and macOS use the same Python implementation. Supported host architectures
 follow the kit: x86_64 and arm64. Preparation requires Python 3.8 or later, curl,
 and the kit's `iBoot32Patcher`, `xpwntool`, `dmg`, and `hfsplus` binaries. System
 image preparation also uses `ssh-keygen` and the same pinned ldid release used
-by the kit (downloaded into the private working directory). Capstone
-and Unicorn provide binary inspection and instruction emulation. PyCryptodome
+by the kit (downloaded into the private working directory). Capstone provides
+binary inspection. The logo trampoline runs in a bounded Python Thumb
+interpreter that checks all three success/failure paths, call arguments, stack
+and preserved registers without allocating executable host memory. This avoids
+the Unicorn initialization crash reported on OS X El Capitan during relay
+preparation. Unknown instructions and out-of-range accesses are rejected;
+Unicorn remains an independent reference in the host tests. PyCryptodome
 decrypts the firmware envelope identically on either host. PyUSB explicitly loads
 the native library supplied by the pinned `libusb-package==1.0.26.4` dependency
 in the private Python environment. This includes a macOS 10.9+ Intel wheel and
@@ -1024,7 +1029,9 @@ saved/olsn0w/runtime/bin/python -m unittest discover -s resources/olsn0w/tests -
 
 CI runs the host tests on Linux and macOS. Tests cover build selection, rejection
 of mismatched hardware identities, host tool selection, Thumb encoding, and the
-display trampoline's success and failure paths. Firmware-specific comparisons
+display trampoline's success and failure paths. The portable interpreter is
+compared with Unicorn across the A5/A6 loader addresses, signed comparisons and
+corrupted trampolines. Firmware-specific comparisons
 belong in `scratchpad/`; device identifiers and activation records must never be
 added to source, fixtures, comments, or committed reports.
 
