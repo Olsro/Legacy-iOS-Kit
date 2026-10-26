@@ -132,8 +132,15 @@ def hfscompress():
     if digest(archive) != XPWN_ARCHIVE_SHA256:
         raise ValueError('xpwn source archive checksum mismatch')
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='hfscompress-build-', dir=destination.parent) as temporary:
+    # Make interprets colons in source/dependency paths as rule separators.
+    # Keep every build input outside the Kit path, which may contain a colon.
+    # Stage installation beside the cache so the final rename stays atomic
+    # even when the system temporary directory is on another filesystem.
+    with tempfile.TemporaryDirectory(prefix='hfscompress-build-') as temporary, \
+         tempfile.TemporaryDirectory(prefix='hfscompress-install-', dir=destination.parent) as staging:
         temporary = Path(temporary)
+        build_source = temporary / 'source'
+        shutil.copytree(source, build_source)
         xpwn = temporary / 'xpwn'
         prefix = 'powdersn0w_pub-' + XPWN_COMMIT + '/xpwn/'
         for item, data in members(archive):
@@ -150,10 +157,10 @@ def hfscompress():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         build = temporary / 'build'
-        run(['cmake', '-S', source, '-B', build, '-DXPWN_SOURCE=' + str(xpwn),
+        run(['cmake', '-S', build_source, '-B', build, '-DXPWN_SOURCE=' + str(xpwn),
              '-DCMAKE_BUILD_TYPE=Release'], log=temporary / 'configure.log')
         run(['cmake', '--build', build, '--parallel', '2'], log=temporary / 'compile.log', timeout=600)
-        result = temporary / 'result'
+        result = Path(staging) / 'result'
         result.mkdir()
         shutil.copy2(build / 'olsn0w-hfscompress', result / executable.name)
         shutil.copy2(xpwn / 'LICENSE', result / 'XPWN-LICENSE')

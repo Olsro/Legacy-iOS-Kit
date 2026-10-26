@@ -173,5 +173,42 @@ class MacCMake(unittest.TestCase):
         install.assert_not_called()
 
 
+@unittest.skipUnless(shutil.which('cmake') and shutil.which('cc'), 'CMake and C compiler required')
+class HelperBuildPaths(unittest.TestCase):
+    def test_build_and_cache_with_colon_and_spaces_in_kit_path(self):
+        with tempfile.TemporaryDirectory(prefix='olsn0w-path-test-') as temporary:
+            root = Path(temporary)
+            kit = root / 'kit: downloaded copy'
+            source = kit / 'resources/olsn0w/native/hfscompress'
+            source.mkdir(parents=True)
+            (source / 'CMakeLists.txt').write_text(
+                'cmake_minimum_required(VERSION 3.10)\n'
+                'project(path_regression C)\n'
+                'add_executable(olsn0w-hfscompress compress.c)\n')
+            (source / 'compress.c').write_text('int main(void) { return 0; }\n')
+            (source / 'extents_write.c').write_text('/* fingerprint fixture */\n')
+            state = kit / 'saved/olsn0w'
+            archive = state / 'sources' / ('powdersn0w-' + native_tools.XPWN_COMMIT + '.tar.gz')
+            archive.parent.mkdir(parents=True)
+            license_file = root / 'LICENSE'
+            license_file.write_text('fixture license\n')
+            with tarfile.open(archive, 'w:gz') as bundle:
+                bundle.add(license_file, arcname='powdersn0w_pub-' + native_tools.XPWN_COMMIT + '/xpwn/LICENSE')
+            with patch.object(native_tools, 'KIT', kit), \
+                 patch.object(native_tools, 'STATE', state), \
+                 patch.object(native_tools, 'XPWN_ARCHIVE_SHA256', native_tools.digest(archive)), \
+                 patch.object(native_tools, 'ensure_build_dependencies') as prerequisites, \
+                 patch.object(native_tools, 'fetch') as fetch:
+                executable = native_tools.hfscompress()
+                subprocess.run([str(executable)], check=True)
+                self.assertEqual(native_tools.hfscompress(), executable)
+                prerequisites.assert_called_once()
+                fetch.assert_not_called()
+            self.assertTrue((executable.parent / 'build.json').is_file())
+            self.assertEqual((executable.parent / 'XPWN-LICENSE').read_text(), 'fixture license\n')
+            self.assertTrue((executable.parent / 'compile.log').is_file())
+            self.assertEqual(list((state / 'tools').iterdir()), [executable.parent])
+
+
 if __name__ == '__main__':
     unittest.main()
