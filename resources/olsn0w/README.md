@@ -9,6 +9,11 @@ checks its firmware, Apple signing ticket, modem, restore environment and compac
 bootstrap automatically. No developer paths or build tools for the ARM helpers
 are requested. The Python runtime is installed on first use.
 
+The host SSH check also supports OpenSSH versions older than 7.0, including
+clients without `-G` or the `+ssh-rsa` algorithm-list syntax. Restoration and
+saved-session SSH arguments adapt automatically while retaining the pinned
+device host key and the original authentication key.
+
 After selecting the release, the guided menu requires an explicit activation
 choice (`y` or `n`; empty input repeats the question). On a supported build,
 the optional Hacktiv8 policy preserves `/Applications/Setup.app` and skips

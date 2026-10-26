@@ -22,6 +22,12 @@ IDENTITY = dict(product='iPad3,1', board='j1ap', chip=0x8945, board_id=0, ecid=1
 
 
 class SSHCompatibility(unittest.TestCase):
+    def setUp(self):
+        ssh_client._rsa_options.cache_clear()
+
+    def tearDown(self):
+        ssh_client._rsa_options.cache_clear()
+
     def test_saved_prefix_is_migrated_without_changing_keys_or_host_pinning(self):
         original = ['ssh', '-i', '/saved/private-key', '-o', 'StrictHostKeyChecking=yes',
                     '-o', 'UserKnownHostsFile=/saved/known-hosts',
@@ -56,17 +62,20 @@ for argument do
         PubkeyAcceptedAlgorithms=*) echo 'Bad configuration option: pubkeyacceptedalgorithms' >&2; exit 255;;
     esac
 done
-[ "$1" = -G ] || exit 99
-exit 0
+[ "$#" -gt 0 ] || exit 99
+for argument do
+    [ "$argument" != -V ] || exit 0
+done
+exit 99
 ''')
             client.chmod(0o755)
             with patch.dict(os.environ, PATH=temporary):
                 ssh_client.check()
             prefix = ['ssh', '-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa', 'root@127.0.0.1']
-            original = subprocess.run([str(client), '-G', *prefix[1:]], capture_output=True)
+            original = subprocess.run([str(client), *prefix[1:], '-V'], capture_output=True)
             self.assertEqual(original.returncode, 255)
             fixed = ssh_client.compatible_prefix(prefix)
-            result = subprocess.run([str(client), '-G', *fixed[1:]], capture_output=True)
+            result = subprocess.run([str(client), *fixed[1:], '-V'], capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which('ssh'), 'requires a host SSH client')
@@ -87,7 +96,80 @@ exit 0
         with patch.object(ssh_client.subprocess, 'run', return_value=failure) as command:
             with self.assertRaisesRegex(RuntimeError, 'Bad configuration option: testoption'):
                 ssh_client.check()
-        self.assertIn('-G', command.call_args.args[0])
+        self.assertEqual(command.call_args.args[0][-1], '-V')
+
+    def test_pre_7_client_passes_menu_preflight_and_parses_new_and_saved_prefixes(self):
+        # Reproduce issue #18: pre-7 clients reject '+ssh-rsa' and the
+        # PubkeyAcceptedKeyTypes option; pre-6.8 also lacks -G.
+        for product, dump_supported in (('iPhone5,2', 'no'), ('iPad2,1', 'yes')):
+            with self.subTest(product=product, dump_supported=dump_supported), tempfile.TemporaryDirectory() as temporary:
+                folder = Path(temporary)
+                client = folder/'ssh'
+                client.write_text('''#!/bin/sh
+for argument do
+    case "$argument" in
+        HostKeyAlgorithms=+*) echo "command-line line 0: Bad protocol 2 host key algorithms '+ssh-rsa'." >&2; exit 255;;
+        PubkeyAccepted*) echo 'Bad configuration option: pubkeyacceptedkeytypes' >&2; exit 255;;
+        -G) [ "$DUMP_SUPPORTED" = yes ] || exit 255;;
+        -V) echo 'OpenSSH_6.2p2' >&2; exit 0;;
+    esac
+done
+# No test invocation may reach a connection attempt.
+exit 99
+''')
+                client.chmod(0o755)
+                (folder/'ssh_host_rsa_key.pub').write_text('ssh-rsa AAAAFIXTURE comment\n')
+                fresh = target_prefix(folder, 6414)
+                saved = [item.replace('PubkeyAcceptedKeyTypes=', 'PubkeyAcceptedAlgorithms=')
+                         for item in fresh]
+                with patch.dict(os.environ, PATH=temporary, DUMP_SUPPORTED=dump_supported), \
+                     patch('runtime.ensure_runtime'), patch('guided.menu') as menu, \
+                     patch.object(sys, 'argv', ['olsn0w.py', 'menu', '--product', product, '--ecid', '123']), \
+                     patch.object(ssh_client, 'private_identity', side_effect=str):
+                    rejected = subprocess.run([str(client), *fresh[1:], '-V'], capture_output=True)
+                    self.assertIn(b'Bad protocol 2 host key algorithms', rejected.stderr)
+                    olsn0w.main()
+                    menu.assert_called_once_with(product, '123', None, False)
+                    for prefix in (fresh, saved):
+                        fixed = ssh_client.runtime_prefix(prefix)
+                        self.assertIn('HostKeyAlgorithms=ssh-rsa', fixed)
+                        self.assertFalse(any(item.startswith('PubkeyAccepted') for item in fixed))
+                        self.assertIn('StrictHostKeyChecking=yes', fixed)
+                        self.assertIn(ssh_client.known_hosts_option(folder/'target-known-hosts'), fixed)
+                        self.assertEqual(fixed[fixed.index('-i')+1], str(folder/'ssh_client_rsa'))
+                        self.assertEqual(fixed[-1], 'root@127.0.0.1')
+                        for index, item in enumerate(fixed[:-1]):
+                            if item == '-o':
+                                self.assertIn('=', fixed[index+1])
+                        accepted = subprocess.run([str(client), *fixed[1:], '-V'], capture_output=True)
+                        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                    # Runtime adaptation must not rewrite persisted preparation arguments.
+                    self.assertIn('HostKeyAlgorithms=+ssh-rsa', fresh)
+                    self.assertIn('PubkeyAcceptedAlgorithms=+ssh-rsa', saved)
+
+    def test_missing_or_unresponsive_client_stops_preflight(self):
+        for error in (FileNotFoundError('missing ssh'), subprocess.TimeoutExpired('ssh', 15)):
+            with self.subTest(error=error), \
+                 patch.object(ssh_client.subprocess, 'run', side_effect=error):
+                with self.assertRaisesRegex(RuntimeError, 'Cannot check the host SSH client'):
+                    ssh_client.check()
+
+    def test_successful_capability_probe_is_cached_for_the_selected_executable(self):
+        with patch.object(ssh_client.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as command:
+            ssh_client.check()
+            prefix = ['ssh', *ssh_client.RSA_OPTIONS, 'root@127.0.0.1']
+            self.assertEqual(ssh_client.compatible_prefix(prefix), prefix)
+            command.assert_called_once()
+            argv = command.call_args.args[0]
+            self.assertEqual(argv[-1], '-V')
+            self.assertNotIn('-G', argv)
+            self.assertNotIn('root@127.0.0.1', argv)
+
+    def test_runtime_probes_the_client_in_the_prefix_including_a_bundled_client(self):
+        prefix = ['/kit/bin/ssh', *ssh_client.RSA_OPTIONS, 'root@127.0.0.1']
+        with patch.object(ssh_client, '_rsa_options', return_value=tuple(ssh_client.RSA_OPTIONS)) as probe:
+            self.assertEqual(ssh_client.compatible_prefix(prefix), prefix)
+        self.assertTrue(all(call.args == ('/kit/bin/ssh',) for call in probe.call_args_list))
 
 
 class SSHPrivateIdentities(unittest.TestCase):

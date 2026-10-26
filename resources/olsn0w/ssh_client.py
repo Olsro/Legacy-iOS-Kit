@@ -1,7 +1,9 @@
-"""Use SSH options understood by both High Sierra and current OpenSSH clients."""
+"""Adapt restoration SSH options to older and current OpenSSH clients."""
+from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -12,6 +14,29 @@ RSA_OPTIONS = ['-o', 'HostKeyAlgorithms=+ssh-rsa',
 # Keep temporary identities alive until process exit. TemporaryDirectory removes
 # them then; persisted SSH vectors always retain the original session paths.
 _IDENTITIES = {}
+
+
+@lru_cache(maxsize=None)
+def _rsa_options(client):
+    # OpenSSH < 7.0 has neither the '+' list syntax nor the client-side
+    # PubkeyAcceptedKeyTypes option. It already permits RSA user keys.
+    # Put -V LAST: preceding -o arguments are validated before it exits,
+    # without connecting or requiring -G (introduced only in OpenSSH 6.8).
+    for options in (tuple(RSA_OPTIONS), ('-o', 'HostKeyAlgorithms=ssh-rsa')):
+        try:
+            result = subprocess.run([client, '-F', '/dev/null', *options, '-V'],
+                                    capture_output=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError('Cannot check the host SSH client: ' + str(error)) from error
+        if result.returncode == 0:
+            return options
+    raise RuntimeError('The host SSH client cannot parse the required restoration options:\n'
+                       + result.stderr.decode(errors='replace')[-2000:])
+
+
+def rsa_options(client='ssh'):
+    # Key the cache by executable so a different SSH selected in PATH is checked.
+    return _rsa_options(shutil.which(client) or client)
 
 
 def private_file(path, mode):
@@ -93,27 +118,32 @@ def compatible_prefix(prefix):
     # OpenSSH 8.5 renamed this keyword, retaining the old name as an alias.
     # Older saved preparations must remain usable without regenerating keys.
     result = []
-    for argument in prefix:
+    arguments = iter(prefix)
+    for argument in arguments:
+        option = argument == '-o'
+        if option:
+            argument = next(arguments)
         name, separator, value = argument.partition('=')
         if separator and name.lower() == 'pubkeyacceptedalgorithms':
-            argument = 'PubkeyAcceptedKeyTypes=' + value
+            name = 'PubkeyAcceptedKeyTypes'
+            argument = name + '=' + value
+        if (separator and name.lower() in ('hostkeyalgorithms', 'pubkeyacceptedkeytypes')
+                and value in ('ssh-rsa', '+ssh-rsa')):
+            supported = dict(item.split('=', 1) for item in rsa_options(prefix[0]) if item != '-o')
+            keyword = 'HostKeyAlgorithms' if name.lower() == 'hostkeyalgorithms' else 'PubkeyAcceptedKeyTypes'
+            if keyword not in supported:
+                continue
+            argument = keyword + '=' + supported[keyword]
         elif separator and name.lower() == 'userknownhostsfile' and not value.startswith('"'):
             # Saved olsn0w prefixes contain exactly one path, previously raw.
             argument = known_hosts_option(value)
+        if option:
+            result.append('-o')
         result.append(argument)
     return result
 
 
 def check():
-    # -G parses configuration and exits; it neither opens a connection nor
-    # needs a target key. Check before expensive preparation or any erase.
-    argv = ['ssh', '-G', '-F', '/dev/null', *RSA_OPTIONS, 'root@127.0.0.1']
-    try:
-        result = subprocess.run(argv, capture_output=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError('Cannot check the host SSH client: ' + str(error)) from error
-    if result.returncode:
-        raise RuntimeError('The host SSH client cannot parse the required restoration options:\n'
-                           + result.stderr.decode(errors='replace')[-2000:])
+    rsa_options()
     # Qualify a private runtime location before preparation or device erasure.
     private_directory().cleanup()
