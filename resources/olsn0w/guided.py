@@ -4,13 +4,14 @@ import json
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import socket
 import subprocess
 import time
 import uuid
 
-from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, integer, profile, run, save, tools, version
+from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, integer, profile, run, save, tools, version, target_paths
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
@@ -69,19 +70,55 @@ GIB=1024**3
 SESSION_WORKSPACE=8*GIB
 
 
-def preparation_space(product, selected, records_provider=releases, *, remove_setup_app=False):
-    """Estimate the remaining peak from artifacts that are not cached yet."""
-    from firmware import select_release
+def firmware_requests(product, selected):
+    """List each required product/build once, including auxiliary firmware."""
     from compact_cache import qualified_source
     source=qualified_source(profile(product)['cache_arch'])
-    requested={(product,selected['version'],selected['buildid']),
+    requested=[(product,selected['version'],selected['buildid']),
                (product,'8.4.1','12H321'),
-               (source['product'],source['release'],source['build'])}
+               (source['product'],source['release'],source['build'])]
     from restore_environment import selected_build
     if selected_build(product,selected['version'])=='10B329':
-        requested.add((product,'6.1.3','10B329'))
+        requested.append((product,'6.1.3','10B329'))
+    return list(dict.fromkeys(requested))
+
+
+def choose_ipsws(product, selected, read=input, show=print):
+    from firmware import select_release, verify_ipsw
+    show('Firmware files: enter an existing IPSW path for each release, or press Enter to use the cache/download automatically.')
+    show('Paths may be pasted or dragged into the terminal. Ctrl+C cancels.')
+    inputs={}
+    for item_product,item_version,item_build in firmware_requests(product,selected):
+        if item_product!=product:
+            show('The '+item_product+' firmware supplies the shared bootstrap cache; your device keeps its own boot components.')
+        while True:
+            answer=read('IPSW for '+item_product+' / iOS '+item_version+' ('+item_build+'): ').strip()
+            if not answer:break
+            try:
+                # Accept literal paths with spaces as well as shell-quoted or
+                # escaped paths produced by terminal drag and drop.
+                path=Path(answer).expanduser()
+                if not path.is_file():
+                    words=shlex.split(answer)
+                    if len(words)!=1:raise ValueError('Enter one IPSW path')
+                    path=Path(words[0]).expanduser()
+                record=(selected if (item_product,item_build)==(product,selected['buildid']) else
+                        select_release(releases(item_product),item_version,item_build))
+                path,_,_=verify_ipsw(path,item_product,record)
+            except (OSError,ValueError) as error:
+                show('Cannot use this IPSW: '+str(error));continue
+            inputs[item_product+'/'+item_build]=str(path)
+            show('Using verified local IPSW: '+str(path))
+            break
+    return inputs
+
+
+def preparation_space(product, selected, records_provider=releases, *, remove_setup_app=False,
+                      verbose=False, ipsws=None):
+    """Estimate the remaining peak from artifacts that are not cached yet."""
+    from firmware import select_release
     records=[]
-    for item_product,item_version,item_build in requested:
+    for item_product,item_version,item_build in firmware_requests(product,selected):
         if (item_product,item_version,item_build)==(product,selected['version'],selected['buildid']):
             record=selected
         else:
@@ -93,7 +130,8 @@ def preparation_space(product, selected, records_provider=releases, *, remove_se
         size=int(record['filesize'])
         ipsw=STATE/'ipsw'/(item_product+'_'+record['version']+'_'+record['buildid']+'_Restore.ipsw')
         firmware=STATE/'targets'/item_product/record['buildid']/'firmware'
-        if not ipsw.is_file():permanent+=size
+        if not ipsw.is_file() and not (ipsws or {}).get(item_product+'/'+record['buildid']):
+            permanent+=size
         if not (firmware/'manifest.json').is_file():
             # Root HFS images for these releases are at most about 1.3 times
             # their IPSW. The encrypted member also exists transiently while
@@ -102,8 +140,9 @@ def preparation_space(product, selected, records_provider=releases, *, remove_se
             extraction_scratch=max(extraction_scratch,size)
         if (item_product,record['version'],record['buildid'])==(product,selected['version'],selected['buildid']):
             selected_firmware=firmware;selected_record=record
-    system_name='system-hacktiv8-v1' if remove_setup_app else 'system'
-    system=STATE/'targets'/product/selected['buildid']/system_name/'manifest.json'
+    _,system=target_paths(STATE/'targets'/product/selected['buildid'],
+                          verbose=verbose,remove_setup_app=remove_setup_app)
+    system=system/'manifest.json'
     if not system.is_file():
         root=selected_firmware/'rootfs.hfs'
         permanent+=root.stat().st_size if root.is_file() else (int(selected_record['filesize'])*4+2)//3
@@ -138,7 +177,7 @@ def prepare(session, release, show=print):
         return _prepare(session,release,display)
 
 
-def bootstrap_cache_firmware(product, base_firmware, extract_firmware, show=lambda _:None):
+def bootstrap_cache_firmware(product, base_firmware, extract_firmware, show=lambda _:None, *, ipsws=None):
     """Select the exact stock-cache donor used by the qualified recipe."""
     from compact_cache import qualified_source
     architecture=profile(product)['cache_arch']
@@ -147,7 +186,9 @@ def bootstrap_cache_firmware(product, base_firmware, extract_firmware, show=lamb
         return base_firmware
     kind='iPad' if product.startswith('iPad') else 'device'
     show('Obtaining the qualified shared '+architecture+' bootstrap source; all '+kind+' boot components remain model-specific.')
-    firmware,_=extract_firmware(source['product'],source['release'],build=source['build'])
+    local=(ipsws or {}).get(source['product']+'/'+source['build'])
+    kwargs={'ipsw':Path(local)} if local else {}
+    firmware,_=extract_firmware(source['product'],source['release'],build=source['build'],**kwargs)
     return firmware
 
 
@@ -169,25 +210,34 @@ def _prepare(session, release, display):
     remove_setup_app=record.get('remove_setup_app',False)
     if type(remove_setup_app) is not bool:
         raise ValueError('Invalid guided Setup.app policy')
-    required=preparation_space(product,release,remove_setup_app=remove_setup_app)
+    verbose=record.get('verbose_boot',False)
+    if type(verbose) is not bool:
+        raise ValueError('Invalid guided verbose boot policy')
+    ipsws=record.get('ipsws',{})
+    def local(build, item_product=product):
+        value=ipsws.get(item_product+'/'+build)
+        return Path(value) if value else None
+    required=preparation_space(product,release,remove_setup_app=remove_setup_app,
+                               verbose=verbose,ipsws=ipsws)
     show('Disk space needed for the remaining preparation: about '+str((required+GIB-1)//GIB)+' GiB.')
     check_space(required)
     display.phase(1,'obtaining the signed base, selected firmware and Apple ticket. The device is not being erased yet.')
     with activity('obtaining the signed base, selected firmware and Apple ticket. The device is not being erased yet'):
-        base_ipsw,keys,_,_=acquire(product,'8.4.1',build='12H321')
+        base_ipsw,keys,_,_=acquire(product,'8.4.1',local('12H321'),build='12H321')
         base_keys=session/'base-keys.json';save(base_keys,keys)
         ticket_file=ticket(identity,session/'ticket')
         baseband,baseband_manifest=modem(identity,session/'modem')
-        firmware,_=extract(product,release['version'],build=release['buildid'])
+        firmware,_=extract(product,release['version'],local(release['buildid']),build=release['buildid'])
         base_firmware,_=extract(product,'8.4.1',base_ipsw,base_keys,'12H321')
-        cache_firmware=bootstrap_cache_firmware(product,base_firmware,extract,show)
+        cache_firmware=bootstrap_cache_firmware(product,base_firmware,extract,show,ipsws=ipsws)
     display.phase(2,'preparing the selected system and boot relay.')
     with activity('preparing the selected system and boot relay'):
-        relay=firmware.parent/'relay'
-        if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest):
-            relay_prepare(firmware)
+        from bootchain import target_bootargs
+        relay,system=target_paths(firmware.parent,verbose=verbose,remove_setup_app=remove_setup_app)
+        if not reusable_recipe(relay,RELAY_RECIPE,checked_manifest,
+                               dict(bootargs=target_bootargs(verbose=verbose))):
+            relay_prepare(firmware,verbose=verbose)
         relay_report=checked_manifest(relay)
-        system=firmware.parent/('system-hacktiv8-v1' if remove_setup_app else 'system')
         system_inputs=dict(relay_recipe_version=relay_report['recipe_version'],
                            relay_devicetree_sha256=relay_report['files']['devicetree'],
                            relay_binary_sha256=relay_report['files']['relay.bin'],
@@ -205,7 +255,8 @@ def _prepare(session, release, display):
         environment=selected_build(product,release['version'])
         if environment=='10B329' and not profile(product).get('multipatch'):
             show('Preparing the native iOS 6 RAM writer for a single DFU workflow; the signed base remains iOS 8.4.1. This complete restore path still requires hardware validation.')
-        rescue_prepare(session,base_ipsw,base_keys,port,environment_build=environment)
+        rescue_prepare(session,base_ipsw,base_keys,port,environment_build=environment,
+                       ram_ipsw=local('10B329'))
         serial=record.get('ram_udid') or hashlib.sha1(('olsn0w:'+str(identity['ecid'])).encode()).hexdigest()
         native=native_prepare(product,serial,session/'native')
         libraries=session/'libraries';(libraries/'usr/lib').mkdir(parents=True)
@@ -316,12 +367,19 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
             remove_setup_app=answer in ('y','yes')
             break
         show('Please explicitly choose y or n.')
+    while True:
+        answer=read('Enable verbose boot on the restored iOS? [y/N]: ').strip().lower()
+        if answer in ('','y','yes','n','no'):
+            verbose=answer in ('y','yes')
+            break
+        show('Choose y or n, or press Enter to keep verbose boot disabled.')
     from prepared_session import find_plan
-    plan=find_plan(identity,selected,remove_setup_app,show,state=STATE)
+    plan=find_plan(identity,selected,remove_setup_app,show,state=STATE,verbose=verbose)
     if plan is None:
+        ipsws=choose_ipsws(product,selected,read,show)
         session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
         record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
-                    remove_setup_app=remove_setup_app)
+                    remove_setup_app=remove_setup_app,verbose_boot=verbose,ipsws=ipsws)
         if udid:record['ram_udid']=udid
         save(session/'device.json',record)
         show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
@@ -329,7 +387,8 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     setup_note=((' Hacktiv8 will be applied; Setup.app will be kept.' if use_hacktiv8 else
                  ' Setup.app will be removed.')+' Official activation will be skipped.'
                 if remove_setup_app else '')
-    show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.'+setup_note)
+    boot_note=' Verbose boot: '+('enabled.' if verbose else 'disabled.')
+    show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.'+setup_note+boot_note)
     if read('Continue with restoration? [y/N]: ').strip().lower() not in ('y','yes'):
         show('Cancelled. Prepared files retained; no device was erased.');return
     from provision_restore import run as restore

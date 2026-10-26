@@ -39,11 +39,12 @@ class IOS5Preparation(unittest.TestCase):
             # Exercise the real menu/chooser without preparing or modifying a device.
             class Selected(Exception):
                 pass
-            answers = iter(('1', 'n'))
+            answers = iter(('1', 'n', ''))
             with tempfile.TemporaryDirectory() as directory, \
                  patch.object(guided, 'STATE', Path(directory)), \
                  patch.object(guided, 'connected', return_value=(identity, None)), \
                  patch.object(guided, 'releases', return_value=options), \
+                 patch.object(guided, 'choose_ipsws', return_value={}), \
                  patch.object(guided, 'prepare', side_effect=Selected) as prepare:
                 with self.assertRaises(Selected):
                     guided.menu(product, '123', read=lambda _: next(answers), show=messages.append)

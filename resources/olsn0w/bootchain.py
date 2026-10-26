@@ -395,7 +395,8 @@ def prepare(firmware, *, verbose=False):
     for name,value in source['files'].items():
         if digest(firmware/name)!=value:
             raise ValueError('Firmware input changed: '+name)
-    destination=firmware.parent/('relay-verbose' if verbose else 'relay')
+    from common import target_paths
+    destination,_=target_paths(firmware.parent,verbose=verbose)
     if destination.exists():
         raise ValueError('Prepared relay already exists: '+str(destination))
     out=Path(tempfile.mkdtemp(prefix='relay-pending-',dir=firmware.parent))

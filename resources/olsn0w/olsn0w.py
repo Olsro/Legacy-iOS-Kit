@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 
-from common import MODELS, STATE, SUPPORT_MESSAGE, tool_environment
+from common import MODELS, STATE, SUPPORT_MESSAGE, tool_environment, target_paths
 from firmware import releases, extract
 
 
@@ -24,6 +24,8 @@ def main():
     parser.add_argument('--port',type=int,default=6414,help='Local USB SSH port for a prepared rescue')
     parser.add_argument('--build', help='Select an exact build when Apple released several for one version')
     parser.add_argument('--ipsw',type=Path)
+    parser.add_argument('--verbose-boot',action='store_true',
+                        help='Enable verbose target boot during firmware/system preparation (disabled by default)')
     parser.add_argument('--keys',type=Path)
     parser.add_argument('--refresh',action='store_true')
     parser.add_argument('--session',type=Path,help='Selected device provisioning/rescue session')
@@ -39,6 +41,8 @@ def main():
     parser.add_argument('--hacktiv8','--remove-setup-app',dest='remove_setup_app',action='store_true',
                         help='Apply Hacktiv8 keeping Setup.app (iOS 8 cellular service is disabled), or remove Setup.app when unsupported')
     args=parser.parse_args()
+    if args.verbose_boot and args.action not in ('prepare','prepare-system','prepare-restore','provision-restore'):
+        parser.error('--verbose-boot applies to firmware and restoration preparation; the menu offers its own choice')
     if (args.remove_setup_app and
             args.action not in ('prepare-system','prepare-restore','provision-restore')):
         parser.error('--hacktiv8 applies to system and restoration preparation')
@@ -116,22 +120,23 @@ def main():
         menu(args.product,args.ecid,args.udid,args.refresh)
         return
     if not args.version:parser.error('--version is required for preparation')
-    from bootchain import prepare, RECIPE_VERSION
+    from bootchain import prepare, RECIPE_VERSION, target_bootargs
     folder,metadata=extract(args.product,args.version,args.ipsw,args.keys,args.build)
-    relay=folder.parent/'relay'
+    relay,system_folder=target_paths(folder.parent,verbose=args.verbose_boot,remove_setup_app=args.remove_setup_app)
     if relay.exists():
         from common import digest
         report=json.loads((relay/'manifest.json').read_text())
         if report.get('recipe_version') != RECIPE_VERSION:
             raise ValueError('Prepared relay uses an older recipe; preserve or move it before preparing again')
+        if report.get('bootargs') != target_bootargs(verbose=args.verbose_boot):
+            raise ValueError('Prepared relay uses another boot policy')
         if any(digest(relay/n)!=h for n,h in report['files'].items()):
             raise ValueError('Prepared relay changed')
     else:
-        relay,report=prepare(folder)
+        relay,report=prepare(folder,verbose=args.verbose_boot)
     print('Prepared '+metadata['product']+' / iOS '+metadata['version']+': '+str(relay))
     if args.action in ('prepare-system','prepare-restore','provision-restore'):
         from system import prepare as prepare_system
-        system_folder=folder.parent/('system-hacktiv8-v1' if args.remove_setup_app else 'system')
         if system_folder.exists():
             from restore import checked_manifest
             from system import RECIPE_VERSION as SYSTEM_RECIPE_VERSION
@@ -140,6 +145,10 @@ def main():
                 raise ValueError('Prepared system uses an older recipe; preserve it and prepare a new system')
             if system_report.get('setup_customized') is not args.remove_setup_app:
                 raise ValueError('Prepared system uses another Hacktiv8/Setup.app policy')
+            if (system_report.get('relay_recipe_version') != report['recipe_version']
+                    or system_report.get('relay_devicetree_sha256') != report['files']['devicetree']
+                    or system_report.get('relay_binary_sha256') != report['files']['relay.bin']):
+                raise ValueError('Prepared system uses another relay')
         else:
             system_folder, system_report = prepare_system(
                 folder,relay,remove_setup_app=args.remove_setup_app)

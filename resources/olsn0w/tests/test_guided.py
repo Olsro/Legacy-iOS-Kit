@@ -13,6 +13,11 @@ RELEASE=dict(version='7.1.2',buildid='11D257')
 IOS8_RELEASE=dict(version='8.4.1',buildid='12H321')
 
 class GuidedTest(unittest.TestCase):
+    def setUp(self):
+        local=patch.object(guided, "choose_ipsws", return_value={})
+        local.start()
+        self.addCleanup(local.stop)
+
     def test_selected_recovery_can_be_rearmed_without_preparation_or_erase(self):
         calls=[]
         with patch.object(guided,'query_recovery',return_value=RECOVERY):
@@ -131,7 +136,7 @@ class GuidedTest(unittest.TestCase):
 
     def test_prepare_before_confirmation_cancel_before_dfu(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={}) as prepare:
-            answers=iter(['1','n','n'])
+            answers=iter(['1','n','','n'])
             def read(_):
                 answer=next(answers)
                 return answer
@@ -141,7 +146,7 @@ class GuidedTest(unittest.TestCase):
 
     def test_one_guided_entry_runs_complete_pipeline(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare,patch('provision_restore.run',return_value={'success':True}) as restore:
-            answers=iter(['1','n','y'])
+            answers=iter(['1','n','','y'])
             result=guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             self.assertEqual(result,{'success':True});dfu.assert_called_once();restore.assert_called_once()
             self.assertTrue(restore.call_args.kwargs['erase'])
@@ -159,7 +164,7 @@ class GuidedTest(unittest.TestCase):
                      patch.object(guided,'enter_dfu'), \
                      patch.object(guided,'prepare',return_value={'session':'prepared'}), \
                      patch('provision_restore.run',return_value={'success':True}) as restore:
-                    answers=iter(['1',policy,'n' if outcome=='cancel' else 'y'])
+                    answers=iter(['1',policy,'','n' if outcome=='cancel' else 'y'])
                     if outcome=='failure':
                         restore.side_effect=RuntimeError('qualification failed')
                         with self.assertRaisesRegex(RuntimeError,'qualification failed'):
@@ -184,7 +189,7 @@ class GuidedTest(unittest.TestCase):
                  patch.object(guided,'enter_dfu') as dfu, \
                  patch.object(guided,'prepare',return_value={'session':'prepared'}) as prepare, \
                  patch('provision_restore.run',side_effect=[DfuPreparationError('checkm8'),{'success':True}]) as restore:
-                answers=iter(['1','n','y',''])
+                answers=iter(['1','n','','y',''])
                 def read(prompt):
                     prompts.append(prompt)
                     return next(answers)
@@ -211,7 +216,7 @@ class GuidedTest(unittest.TestCase):
                  patch.object(guided,'prepare') as prepare, \
                  patch.object(guided,'enter_dfu') as dfu, \
                  patch('provision_restore.run',return_value={'success':True}) as restore:
-                answers=iter(['1','n',answer])
+                answers=iter(['1','n','',answer])
                 guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
                 prepare.assert_not_called()
                 self.assertFalse((Path(folder)/'sessions').exists())
@@ -231,7 +236,7 @@ class GuidedTest(unittest.TestCase):
              patch.object(guided,'prepare',side_effect=prepare), \
              patch.object(guided,'enter_dfu'), \
              patch('provision_restore.run',return_value={'success':True}):
-            answers=iter(['1','y','y'])
+            answers=iter(['1','y','','y'])
             guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
         self.assertIs(observed['remove_setup_app'],True)
         self.assertTrue(any('activation was intentionally skipped' in line for line in messages))
@@ -248,14 +253,14 @@ class GuidedTest(unittest.TestCase):
              patch.object(guided,'prepare',side_effect=prepare), \
              patch.object(guided,'enter_dfu'), \
              patch('provision_restore.run',return_value={'success':True}):
-            answers=iter(['1','y','y'])
+            answers=iter(['1','y','','y'])
             guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=messages.append)
         self.assertIs(observed['remove_setup_app'],True)
         self.assertTrue(any('Hacktiv8 activation verified; Setup.app preserved' in line for line in messages))
 
     def test_preparation_failure_never_requests_dfu_or_erase(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(guided,'STATE',Path(folder)),patch.object(guided,'connected',return_value=(IDENTITY,None)),patch.object(guided,'releases',return_value=[RELEASE]),patch.object(guided,'enter_dfu') as dfu,patch.object(guided,'prepare',side_effect=RuntimeError('checksum')):
-            answers=iter(['1','n'])
+            answers=iter(['1','n',''])
             with self.assertRaisesRegex(RuntimeError,'checksum'):guided.menu('iPhone5,2','123',read=lambda _:next(answers),show=lambda _:None)
             dfu.assert_not_called()
 
@@ -270,7 +275,7 @@ class GuidedTest(unittest.TestCase):
                      patch('hacktiv8.available',return_value=available), \
                      patch.object(guided,'prepare',return_value={}) as prepare, \
                      patch.object(guided,'enter_dfu') as dfu:
-                    answers=iter(['1','','  ','invalid',answer,'n'])
+                    answers=iter(['1','','  ','invalid',answer,'','n'])
                     prompts=[]
                     def read(prompt):
                         prompts.append(prompt)
@@ -279,7 +284,7 @@ class GuidedTest(unittest.TestCase):
                             self.assertFalse((Path(folder)/'sessions').exists())
                         return next(answers)
                     guided.menu('iPhone5,2','123',read=read,show=lambda _:None)
-                    self.assertEqual(len(prompts),6)
+                    self.assertEqual(len(prompts),7)
                     self.assertEqual(prompts[1:5],[prompts[1]]*4)
                     self.assertIn('[y/n]',prompts[1])
                     prepare.assert_called_once()

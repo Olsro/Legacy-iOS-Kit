@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 import subprocess
 import time
+from xml.parsers.expat import ExpatError
 from progress import activity, display_if_needed, copy_stream, message
 
 from common import KIT, STATE, MODELS, target, version, tools, run, digest, save, integer, minimum_release
@@ -97,6 +98,23 @@ def identity(archive, product, release):
     return manifest, selected
 
 
+def verify_ipsw(ipsw, product, record):
+    """Validate a local archive without fetching firmware or decryption keys."""
+    ipsw = Path(ipsw).expanduser().resolve(strict=True)
+    if not ipsw.is_file():
+        raise ValueError('Expected an IPSW file')
+    try:
+        with zipfile.ZipFile(ipsw) as archive:
+            manifest, selected = identity(archive, product, record['version'])
+        if manifest['ProductBuildVersion'] != record['buildid']:
+            raise ValueError('Requested build does not match the IPSW')
+    except (zipfile.BadZipFile, KeyError, TypeError, plistlib.InvalidFileException, ExpatError) as error:
+        raise ValueError('Invalid IPSW archive or BuildManifest') from error
+    if digest(ipsw, 'sha1') != record['sha1sum'].lower():
+        raise ValueError('IPSW checksum mismatch')
+    return ipsw, manifest, selected
+
+
 def acquire(product, release, ipsw=None, key_file=None, build=None):
     target(product, release)
     # A supplied IPSW identifies the build, including releases reissued by Apple.
@@ -121,13 +139,7 @@ def acquire(product, release, ipsw=None, key_file=None, build=None):
             else:
                 message('Downloading iOS ' + record['version'] + '…')
                 fetch(record['url'], ipsw, total=record.get('filesize'))
-    ipsw = Path(ipsw).resolve(strict=True)
-    if digest(ipsw, 'sha1') != record['sha1sum'].lower():
-        raise ValueError('IPSW checksum mismatch')
-    with zipfile.ZipFile(ipsw) as archive:
-        manifest, selected = identity(archive, product, release)
-    if manifest['ProductBuildVersion'] != record['buildid']:
-        raise ValueError('Catalog/manifest build mismatch')
+    ipsw, manifest, selected = verify_ipsw(ipsw, product, record)
     if key_file is None:
         cached = KIT / 'resources' / 'firmware' / product / record['buildid'] / 'index.html'
         key_file = cached if cached.exists() else STATE / 'keys' / product / (record['buildid'] + '.json')

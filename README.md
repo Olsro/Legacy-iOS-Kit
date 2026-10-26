@@ -89,6 +89,12 @@ must be a release actually published for the selected product; unknown or
 ambiguous patch patterns stop preparation instead of reusing another build's
 offsets. iOS 9/10 catalog entries are not an implemented olsn0w restore path.
 
+The menu accepts existing IPSW files for the target and required auxiliary
+firmware. Paste or drag each file path into the terminal, or press Enter to
+reuse the cache/download automatically. Local files are checked against the
+selected model, build and checksum. **Verbose boot is optional and disabled by
+default**; answer `y` to its menu question to enable it on the restored iOS.
+
 iOS 5 is available without an experimental opt-in on all compatible iPhone 4S,
 iPad 2 and iPad 3 variants, including those not yet physically tested. Only
 firmwares actually published for each model are offered.

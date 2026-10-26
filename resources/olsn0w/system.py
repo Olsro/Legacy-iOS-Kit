@@ -640,7 +640,9 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     # The physically qualified iOS 8 path keeps Apple's early keybagd in place.
     # iOS 7 still needs the wrapper because launchd starts keybagd before Aquila.
     early_keybag = wraps_early_keybag(source['version'], stock.read('/sbin/launchd'))
-    destination = firmware.parent/('system-hacktiv8-v1' if remove_setup_app else 'system')
+    from common import target_paths
+    _,destination = target_paths(firmware.parent,verbose='-v' in chain.get('bootargs','').split(),
+                                remove_setup_app=remove_setup_app)
     if destination.exists():
         raise ValueError('Prepared target filesystem already exists: '+str(destination))
     out = Path(tempfile.mkdtemp(prefix='system-pending-', dir=firmware.parent))

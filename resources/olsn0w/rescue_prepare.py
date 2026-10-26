@@ -78,7 +78,7 @@ def decrypt_restore_ramdisk(source, metadata, identity, output, stem):
     return output/(stem+'.hfs')
 
 
-def prepare(session, ipsw=None, keys=None, port=6414, *, environment_build=None):
+def prepare(session, ipsw=None, keys=None, port=6414, *, environment_build=None, ram_ipsw=None):
     session = Path(session).resolve()
     record = json.loads((session/'device.json').read_text())
     selected = record['identity']
@@ -101,7 +101,7 @@ def prepare(session, ipsw=None, keys=None, port=6414, *, environment_build=None)
         # for A5 iOS 6 Data without claiming those models need multipatch.
         # Keep the signed base and ticket at 8.4.1 in both cases.
         ram_inputs, ram_metadata, _, ram_identity = acquire(
-            selected['product'],'6.1.3',build='10B329')
+            selected['product'],'6.1.3',ram_ipsw,build='10B329')
         firmware, _ = extract(selected['product'],'6.1.3',ram_inputs,
                               build='10B329')
     else:

@@ -34,6 +34,14 @@ MODELS = {
 }
 
 
+def target_paths(target, *, verbose=False, remove_setup_app=False):
+    """Keep graphical/verbose relays and their embedded system images separate."""
+    target = Path(target)
+    suffix = '-verbose' if verbose else ''
+    return (target/('relay'+suffix),
+            target/(('system-hacktiv8-v1' if remove_setup_app else 'system')+suffix))
+
+
 def hardware_model(board):
     """Return Apple's case-sensitive hw.model for a firmware board identity."""
     if board not in {model[0] for model in MODELS.values()}:

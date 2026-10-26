@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import prepared_session
-from common import digest
-from bootchain import RECIPE_VERSION as RELAY_RECIPE
+from common import digest, target_paths
+from bootchain import RECIPE_VERSION as RELAY_RECIPE, target_bootargs
 from system import RECIPE_VERSION as SYSTEM_RECIPE
 from rescue_prepare import RECIPE_VERSION as RESCUE_RECIPE
 
@@ -32,7 +32,7 @@ class PreparedSession(unittest.TestCase):
             self.plan[key].write_bytes(b'fixture')
         self.write(self.session/'device.json', dict(identity=IDENTITY, device_modified=False, remove_setup_app=False))
         relay = self.manifest(self.plan['relay'], dict(product='iPad3,1', version='5.1.1', build='9B206',
-                              recipe_version=RELAY_RECIPE), ['relay.bin', 'devicetree'])
+                              recipe_version=RELAY_RECIPE, bootargs=target_bootargs()), ['relay.bin', 'devicetree'])
         self.manifest(self.plan['system'], dict(product='iPad3,1', version='5.1.1', build='9B206',
                       recipe_version=SYSTEM_RECIPE, setup_customized=False, relay_recipe_version=RELAY_RECIPE,
                       relay_devicetree_sha256=relay['files']['devicetree'], relay_binary_sha256=relay['files']['relay.bin']), ['system.hfs'])
@@ -61,8 +61,28 @@ class PreparedSession(unittest.TestCase):
         self.write(folder/name, report)
         return report
 
-    def find(self, identity=IDENTITY, release=RELEASE, policy=False):
-        return prepared_session.find_plan(identity, release, policy, lambda _:None, state=self.state)
+    def find(self, identity=IDENTITY, release=RELEASE, policy=False, verbose=False):
+        return prepared_session.find_plan(identity, release, policy, lambda _:None,
+                                          state=self.state, verbose=verbose)
+
+    def test_graphical_and_verbose_preparations_cannot_be_mixed(self):
+        self.assertIsNone(self.find(verbose=True))
+        relay,system=target_paths(self.plan['relay'].parent,verbose=True)
+        for key,new_path in (('relay',relay),('system',system)):
+            self.plan[key].rename(new_path)
+            self.plan[key]=new_path
+        record=json.loads((self.session/'device.json').read_text())
+        record['verbose_boot']=True
+        self.write(self.session/'device.json',record)
+        self.write(self.path,{k:str(v) if v is not None else None for k,v in self.plan.items()})
+        # Correct directory names alone cannot override the relay's boot policy.
+        self.assertIsNone(self.find(verbose=True))
+        manifest=relay/'manifest.json'
+        report=json.loads(manifest.read_text())
+        report['bootargs']=target_bootargs(verbose=True)
+        self.write(manifest,report)
+        self.assertEqual(self.find(verbose=True),self.plan)
+        self.assertIsNone(self.find())
 
     def test_complete_preparation_is_reused_and_ticket_is_rechecked(self):
         self.assertEqual(self.find(), self.plan)

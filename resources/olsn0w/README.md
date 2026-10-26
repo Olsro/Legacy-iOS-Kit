@@ -23,9 +23,28 @@ system cache. Neither bypass policy performs official activation or an
 activation acknowledgement; the ordinary choice retains the official
 activation and Setup Assistant flow. See the [Hacktiv8 guide](../hacktiv8/README.md).
 
+The next question offers **verbose boot**, disabled by default (`[y/N]`).
+Press Enter or answer `n` for the graphical Apple logo, or `y` for diagnostic
+output on subsequent boots of the restored iOS. Graphical and verbose relays
+and system images use separate caches, and saved preparation is reused only
+when its boot and activation policies match. For standalone `prepare`,
+`prepare-system`, `prepare-restore` and `provision-restore` commands, add
+`--verbose-boot` to enable the same target boot policy.
+
+When no matching completed preparation can be reused, the menu offers a local
+IPSW path for each required release: the target, the signed 8.4.1 base, and any
+additional bootstrap or iOS 6 restore-environment donor. Paste or drag the file
+into the terminal; paths with spaces, shell quotes and escaped spaces are
+accepted. Press Enter to use the existing automatic cache/download behavior.
+Each supplied archive must match the requested product, board, version, build
+and catalog checksum. Invalid files repeat the prompt before preparation;
+local archives are used in place without an extra copy or firmware download.
+The same product/build is requested only once when it serves several roles.
+
 Preparation calculates the remaining disk requirement from firmware and system
 images that are not already cached, and reports it before creating large files.
-An Internet connection is needed for firmware that is not already available.
+An Internet connection is still needed for uncached metadata, keys, signing
+tickets and firmware that is not already available.
 After preparation, confirm the erase and follow the instructions for the initial
 manual DFU entry. Existing verified IPSW archives are reused to avoid duplicate downloads.
 The signed 8.4.1 restore, RAM handoff, compact installation,

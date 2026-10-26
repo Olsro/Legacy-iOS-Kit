@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from common import STATE, hardware_model
+from common import STATE, hardware_model, target_paths
 from device import same_hardware
 from restore import checked_manifest
 
@@ -10,7 +10,7 @@ PLAN_FIELDS = {'session', 'bundle', 'bootstrap', 'system', 'relay', 'ticket',
                'keys', 'baseband', 'baseband_manifest'}
 
 
-def load_plan(path, identity, release, remove_setup_app, *, state=None):
+def load_plan(path, identity, release, remove_setup_app, *, state=None, verbose=False):
     from bootchain import RECIPE_VERSION as RELAY_RECIPE
     from system import RECIPE_VERSION as SYSTEM_RECIPE
     from rescue_prepare import RECIPE_VERSION as RESCUE_RECIPE
@@ -28,8 +28,9 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
         raise ValueError('Saved preparation path escaped the private working directory')
     session = path.parent.resolve()
     target = root / 'targets' / identity['product'] / release['buildid']
+    relay_path,system_path=target_paths(target,verbose=verbose,remove_setup_app=remove_setup_app)
     expected = dict(session=session, bundle=session/'provision', bootstrap=session/'bootstrap',
-                    relay=target/'relay', system=target/('system-hacktiv8-v1' if remove_setup_app else 'system'))
+                    relay=relay_path, system=system_path)
     if any(plan[key] != value for key, value in expected.items()):
         raise ValueError('Saved preparation belongs to another target or session')
     for key in ('ticket', 'keys', 'baseband', 'baseband_manifest'):
@@ -40,8 +41,9 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
             raise ValueError('Missing or misplaced saved ' + key)
     record = json.loads((session/'device.json').read_text())
     if (not same_hardware(record['identity'], identity) or record.get('device_modified') is not False
-            or record.get('remove_setup_app', False) is not remove_setup_app):
-        raise ValueError('Saved preparation identity or activation policy differs')
+            or record.get('remove_setup_app', False) is not remove_setup_app
+            or record.get('verbose_boot', False) is not verbose):
+        raise ValueError('Saved preparation identity, activation or boot policy differs')
     bundle = plan['bundle']
     # work and run.json are created before the restore process can start.
     # Never retry a session that may already have changed internal storage.
@@ -66,6 +68,9 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
     for report in (relay, system):
         if (report.get('version'), report.get('build')) != (release['version'], release['buildid']):
             raise ValueError('Saved target version differs')
+    from bootchain import target_bootargs
+    if relay.get('bootargs') != target_bootargs(verbose=verbose):
+        raise ValueError('Saved relay uses another boot policy')
     if (system.get('setup_customized') is not remove_setup_app
             or system.get('relay_recipe_version') != RELAY_RECIPE
             or system.get('relay_devicetree_sha256') != relay['files']['devicetree']
@@ -90,7 +95,7 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None):
     return plan
 
 
-def find_plan(identity, release, remove_setup_app, show=print, *, state=None):
+def find_plan(identity, release, remove_setup_app, show=print, *, state=None, verbose=False):
     state = Path(STATE if state is None else state)
     candidates = sorted((state/'sessions').glob('*/guided-plan.json'),
                         key=lambda path: path.stat().st_mtime_ns, reverse=True)
@@ -99,14 +104,15 @@ def find_plan(identity, release, remove_setup_app, show=print, *, state=None):
             # Filter unrelated sessions before reading any large images.
             record = json.loads((path.parent/'device.json').read_text())
             if (not same_hardware(record['identity'], identity)
-                    or record.get('remove_setup_app', False) is not remove_setup_app):
+                    or record.get('remove_setup_app', False) is not remove_setup_app
+                    or record.get('verbose_boot', False) is not verbose):
                 continue
             raw = json.loads(path.read_text())
             system = json.loads((Path(raw['system'])/'manifest.json').read_text())
             if (system.get('version'), system.get('build')) != (release['version'], release['buildid']):
                 continue
             show('Checking saved preparation: ' + str(path.parent))
-            plan = load_plan(path, identity, release, remove_setup_app, state=state)
+            plan = load_plan(path, identity, release, remove_setup_app, state=state,verbose=verbose)
         except (OSError, ValueError, KeyError, TypeError) as error:
             show('Earlier preparation cannot be reused: ' + str(error))
             continue
