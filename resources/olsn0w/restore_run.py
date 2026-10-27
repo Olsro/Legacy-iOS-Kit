@@ -12,6 +12,7 @@ from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
 from ssh_client import RSA_OPTIONS, known_hosts_option, runtime_prefix
+from boot_settings import prepare_normal_boot
 
 PANGU_READONLY_RETRY_POLLS = 12
 
@@ -397,6 +398,7 @@ def run(session, bundle, *, erase=False, ram_ready=False, progress=print):
         install(bundle,ram,erase=True,progress=progress)
         new_prefix=target_prefix(bundle,port)
         checkpoint(bundle/'target-ssh-prefix.json',new_prefix)
+        prepare_normal_boot(ram,bundle,progress=progress)
         progress('All volumes verified. Starting normal boot.')
         ram.run('/sbin/reboot')
         result=qualify_installed_target(bundle,new_prefix,udid,report['version'],

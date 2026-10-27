@@ -11,6 +11,7 @@ from provisioned_base import prepare as bind
 from restore import checked_manifest, checkpoint, prepare, install
 from restore_run import target_prefix, qualify_installed_target
 from common import version
+from boot_settings import prepare_normal_boot
 
 
 def cleanup_completed(session, bundle, bootstrap):
@@ -90,8 +91,9 @@ def run(session, bundle, bootstrap, system, relay, ticket, keys, *,
         install(target,ram,erase=True,progress=progress)
         next_prefix=target_prefix(target,port)
         checkpoint(target/'target-ssh-prefix.json',next_prefix)
+        stage('preparing-normal-boot')
+        prepare_normal_boot(ram,target,progress=progress)
         ram.run('/usr/sbin/nvram -d olsn0w-restore-handoff')
-        ram.run('/usr/sbin/nvram auto-boot=true')
         stage('normal-boot')
         progress('All volumes verified. Starting the selected target.')
         try:ram.run('/sbin/reboot_olsn0w',timeout=20)

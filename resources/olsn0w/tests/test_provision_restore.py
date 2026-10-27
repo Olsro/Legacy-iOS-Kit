@@ -15,6 +15,8 @@ class ProvisionSequence(unittest.TestCase):
             session=Path(tmp)/'session';bundle=session/'provision';bootstrap=session/'bootstrap'
             (bundle/'target').mkdir(parents=True);(bundle/'base8').mkdir();bootstrap.mkdir()
             (bundle/'restore.log').write_text('diagnostic')
+            (bundle/'target/nvram-before-test.plist').write_bytes(b'private backup')
+            (bundle/'target/boot-settings.json').write_text('{"complete": true}')
             for path in (bundle/'base8.ipsw',bundle/'system.asr.dmg',bundle/'restore-ram.hfs',
                          bundle/'Ramdisk.img3',bundle/'target/system.hfs',bundle/'target/data-native.hfs',
                          bundle/'base8/system.dmg',bootstrap/'bootstrap.cache'):
@@ -30,6 +32,8 @@ class ProvisionSequence(unittest.TestCase):
             self.assertFalse((bundle/'base8.ipsw').exists())
             self.assertFalse((bundle/'target/system.hfs').exists())
             self.assertTrue((session/'cleanup.json').is_file())
+            self.assertEqual((bundle/'target/nvram-before-test.plist').read_bytes(), b'private backup')
+            self.assertTrue((bundle/'target/boot-settings.json').is_file())
 
     def fixture(self, root):
         session=root/'session';bundle=root/'bundle'
@@ -126,6 +130,7 @@ class ProvisionSequence(unittest.TestCase):
                  patch.object(pipeline,'prepare',side_effect=prepare_target), \
                  patch.object(pipeline,'install'), \
                  patch.object(pipeline,'target_prefix',return_value=['ssh']) as target_prefix, \
+                 patch.object(pipeline,'prepare_normal_boot'), \
                  patch.object(pipeline,'qualify_installed_target',return_value=qualified) as qualify, \
                  patch.object(pipeline,'cleanup_completed',return_value=cleanup):
                 result=pipeline.run(*args,erase=True,progress=lambda _:None)

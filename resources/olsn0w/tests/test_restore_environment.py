@@ -188,6 +188,7 @@ class RestoreEnvironment(unittest.TestCase):
                  patch.object(pipeline,'prepare',side_effect=lambda *args:target.mkdir()), \
                  patch.object(pipeline,'install') as install, \
                  patch.object(pipeline,'target_prefix',return_value=['ssh']), \
+                 patch.object(pipeline,'prepare_normal_boot'), \
                  patch.object(pipeline,'qualify_installed_target',return_value={'ok':True}), \
                  patch.object(pipeline,'cleanup_completed',return_value={'bytes_reclaimed':0}), \
                  patch('rescue.boot') as second_boot,patch('usb_tunnel.stop'):

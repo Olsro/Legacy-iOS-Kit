@@ -791,6 +791,36 @@ being inherited by unrelated products or SoCs. Existing prepared relay and
 target-system images are rebuilt automatically by the guided flow to acquire
 recipe changes.
 
+After the compact installation passes its volume checks, the held RAM rescue
+prepares normal boot using its native `nvram` tool. It saves a private, mode-0600
+backup of the complete NVRAM, removes only `boot-ramdisk`, `boot-partition` and
+`boot-args`, sets `auto-boot=true`, and verifies the result before rebooting.
+These overrides can survive an earlier downgrade and direct stock iBoot to a
+missing ramdisk or the wrong partition. On iPhone5,2 / 12H321, stock iBoot's USB
+`setenv` whitelist prevents removing `boot-ramdisk` and `boot-partition` from
+Recovery; enabling `auto-boot` alone does not repair them. All other NVRAM
+settings, including activation and calibration state, are retained.
+
+Both the guided signed-base pipeline and the developer `restore` path perform
+this check after installation. It also applies to existing prepared bundles;
+no firmware-cache rebuild is required. A backup, deletion or readback failure
+stops before reboot. The target bundle retains `boot-settings.json` and its
+`nvram-before-*.plist` backup. If the Kit's filesystem cannot enforce private
+permissions, the backup instead remains in a private `/tmp/olsn0w-boot-settings-*`
+directory whose absolute path is recorded in the journal. Keep the complete
+NVRAM backup private. Completed-session pruning preserves these diagnostics.
+
+The standalone v2 repair using the same three native deletions was
+[reported successful](https://github.com/Olsro/Legacy-iOS-Kit/issues/12#issuecomment-6428296378)
+on iPhone 5 Global (`iPhone5,2` / `n42ap`), iOS 6.1.4 (`10B350`), with CachyOS:
+the user confirmed boot without a cable. Activation was already reported with
+activation-record stitching enabled; this repair does not establish a new
+activation result. The original reporter subsequently
+[confirmed normal restarts and cold boots](https://github.com/Olsro/Legacy-iOS-Kit/issues/12#issuecomment-6433294409)
+after the same repair on the Debian iPhone5,2 / 6.1.4 installation.
+The automatic pre-boot integration has host regression
+coverage and still requires its own physical restore validation.
+
 Every selected target also installs a late boot-success job. It waits for
 GraphicsServices and a stable SpringBoard, reruns Apple's `CrashHousekeeping`
 executable (the preserved original where its launch path hosts the untether)
