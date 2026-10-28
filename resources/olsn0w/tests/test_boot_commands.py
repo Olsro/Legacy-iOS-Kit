@@ -56,7 +56,8 @@ class BootCommand(unittest.TestCase):
                  patch.object(rescue,'recheck_recovery',return_value={'mode':'DFU'}), \
                  patch.object(rescue.time,'sleep'):
                 rescue.prepare_dfu(session,run=run)
-            argv,label,timeout=calls[0]
+            self.assertEqual(calls[0][1],'kdfu-ready')
+            argv,label,timeout=calls[1]
             self.assertEqual((label,timeout),('kit-pwn',180))
             self.assertIn('--olsn0w-pwn',argv)
             self.assertIn('--device=iPhone5,2',argv)

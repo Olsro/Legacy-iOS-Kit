@@ -291,6 +291,11 @@ def _prepare(session, release, display):
         return plan
 
 
+KDFU_ALTERNATIVE=('If the DFU exploit keeps failing on this computer and the device is jailbroken with OpenSSH, '
+                  'enter kDFU instead: in Cydia, add Olsro.fr Repo (http://cydia.olsro.fr/personal/), install kDFU App, '
+                  'then open it and enter kDFU. The DFU exploit is then skipped.')
+
+
 def enter_dfu(identity, read=input, show=print):
     def ready():
         try:actual=query_recovery(identity['ecid'])
@@ -314,7 +319,8 @@ def enter_dfu(identity, read=input, show=print):
             prompt='Press Enter once the kDFU or externally pwned DFU device is reconnected (Ctrl+C to cancel): '
         else:
             show('Hold Power + Home for 10 seconds, then release Power while continuing to hold Home for about 10 seconds. The screen must remain black.')
-            prompt='Press Enter once the device is in DFU (Ctrl+C to cancel): '
+            show(KDFU_ALTERNATIVE)
+            prompt='Press Enter once the device is in DFU or kDFU (Ctrl+C to cancel): '
         read(prompt)
         deadline=time.monotonic()+30
         detected=ready()
@@ -411,7 +417,8 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
                 prompt='Press Enter to retry with freshly pwned kDFU/A5Mate (Ctrl+C to cancel): '
             else:
                 show('The Kit will retry the DFU exploit automatically on this computer.')
-                prompt='Press Enter once the device is back in DFU (Ctrl+C to cancel): '
+                show(KDFU_ALTERNATIVE)
+                prompt='Press Enter once the device is back in DFU or kDFU (Ctrl+C to cancel): '
             read(prompt)
     if remove_setup_app:
         show('Restoration verified: iOS '+selected['version']+

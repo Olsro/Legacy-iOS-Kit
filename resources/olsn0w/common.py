@@ -66,7 +66,7 @@ MODEL_PROFILES = {
     'iPad2,4': dict(soc='a5r2', cache_arch='armv7', has_baseband=False,
                     external_pwndfu=True),
     'iPad2,5': dict(soc='a5r2', cache_arch='armv7', has_baseband=False,
-                    external_pwndfu=True, tristar_soft_reset_majors=(6,)),
+                    external_pwndfu=True, tristar_soft_reset_majors=(6, 7, 8)),
     'iPad2,6': dict(soc='a5r2', cache_arch='armv7', has_baseband=True,
                     baseband_family='Mav5', external_pwndfu=True,
                     tristar_soft_reset_majors=(6,),

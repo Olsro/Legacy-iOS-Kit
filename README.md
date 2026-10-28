@@ -171,7 +171,13 @@ policy chosen for each run; a bypass run does not validate official activation.
 | iPad mini 1 Cellular (`iPad2,7`) | 6.1.3 (10B329), boot validation | Repeated cable-free boot, wired reboot and cold starts on both Mac and wall charger reached the lockscreen after the TriStar kernel fallback correction. Activation and full functionality are not qualified by this test |
 
 The mini Wi-Fi iOS 6 path required the TriStar reset fix; its 7.1.2 and 8.3
-tests succeeded without forcing that reset. The cellular `iPad2,7` boot result
+tests succeeded without forcing that reset. A 2014 `iPad2,5` then panicked
+before launchd on iOS 6 and 7
+([issue 20](https://github.com/Olsro/Legacy-iOS-Kit/issues/20)), so `iPad2,5`
+now also receives the TriStar reset on iOS 7 and 8, plus a hash-pinned kernel
+fallback fix for all six released iOS 6 versions (6.0, 6.0.1, 6.0.2, 6.1,
+6.1.2 and 6.1.3). Both changes await physical validation on that device.
+The cellular `iPad2,7` boot result
 above is separate. Both cellular variants (`iPad2,6`/`iPad2,7`) receive a
 hash-pinned kernel fallback fix for all five released iOS 6 versions
 (6.0.1, 6.0.2, 6.1, 6.1.2 and 6.1.3), based on verified code equivalence;

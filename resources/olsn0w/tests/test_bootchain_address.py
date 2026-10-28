@@ -93,18 +93,18 @@ class TriStarPolicyTests(unittest.TestCase):
                                 (product, release))
         ios7_releases = ('7.0', '7.0.2', '7.0.3', '7.0.4', '7.0.6',
                          '7.1', '7.1.1', '7.1.2')
-        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
+        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6', 'iPad2,5'):
             for release in ios7_releases:
                 self.assertTrue(uses_tristar_soft_reset(product, release),
                                 (product, release))
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,5', 'iPad2,6', 'iPad2,7'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,6', 'iPad2,7'):
             self.assertFalse(uses_tristar_soft_reset(product, '7.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '7.1.2'))
-        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6'):
+        for product in ('iPad3,4', 'iPad3,5', 'iPad3,6', 'iPad2,5'):
             self.assertTrue(uses_tristar_soft_reset(product, '8.0'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.1.3'))
             self.assertTrue(uses_tristar_soft_reset(product, '8.4.1'))
-        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,5', 'iPad2,6', 'iPad2,7'):
+        for product in ('iPhone5,1', 'iPhone5,2', 'iPod5,1', 'iPad2,6', 'iPad2,7'):
             self.assertFalse(uses_tristar_soft_reset(product, '8.0'))
             self.assertFalse(uses_tristar_soft_reset(product, '8.4.1'))
 
@@ -116,8 +116,13 @@ class TriStarPolicyTests(unittest.TestCase):
                     self.assertFalse(uses_tristar_soft_reset(product, release))
 
     def test_ipad_variants_keep_the_same_family_policy(self):
-        for family in (('iPad2,5', 'iPad2,6', 'iPad2,7'),
-                       ('iPad3,4', 'iPad3,5', 'iPad3,6')):
-            for release in ('6.0', '6.0.2', '6.1.3', '7.0', '7.1.2', '8.0', '8.3', '8.4.1'):
+        # P105 alone adds the iOS 7/8 reset (issue 20); its iOS 6 policy still
+        # matches the cellular minis.
+        for family, releases in (
+                (('iPad2,5', 'iPad2,6', 'iPad2,7'), ('6.0', '6.0.2', '6.1.3')),
+                (('iPad2,6', 'iPad2,7'), ('7.0', '7.1.2', '8.0', '8.3', '8.4.1')),
+                (('iPad3,4', 'iPad3,5', 'iPad3,6'),
+                 ('6.0', '6.0.2', '6.1.3', '7.0', '7.1.2', '8.0', '8.3', '8.4.1'))):
+            for release in releases:
                 with self.subTest(family=family, release=release):
                     self.assertEqual(len({uses_tristar_soft_reset(p, release) for p in family}), 1)

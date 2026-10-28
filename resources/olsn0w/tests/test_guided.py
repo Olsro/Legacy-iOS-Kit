@@ -336,6 +336,14 @@ class GuidedTest(unittest.TestCase):
         run.assert_called_once_with([str(guided.tools()/'irecovery'),'-i','0x7b','-q'],
                                     capture_output=True,timeout=15)
 
+    def test_a6_dfu_prompt_offers_kdfu_alternative(self):
+        prompts=[];messages=[]
+        with patch.object(guided,'query_recovery',side_effect=[
+                RuntimeError('normal mode'),dict(IDENTITY,mode='DFU')]):
+            guided.enter_dfu(IDENTITY,read=lambda prompt:prompts.append(prompt),show=messages.append)
+        self.assertIn('DFU or kDFU',prompts[0])
+        self.assertIn(guided.KDFU_ALTERNATIVE,messages)
+
     def test_manual_dfu_detection_can_retry_without_returning(self):
         states=[dict(IDENTITY,mode='Normal'),dict(IDENTITY,mode='Normal'),
                 dict(IDENTITY,mode='Normal'),dict(IDENTITY,mode='DFU')]

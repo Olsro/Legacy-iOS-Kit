@@ -29,8 +29,8 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-# Rebuild cached target kernels with the qualified P106/P107 TriStar fallback.
-RECIPE_VERSION = 53
+# Rebuild cached target kernels with the qualified P105 TriStar fallback.
+RECIPE_VERSION = 54
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'

@@ -189,6 +189,11 @@ def prepare_dfu(session, *, pwned=False, progress=print, run=None):
         else:
             raise RuntimeError('A5 requires manually entered kDFU from a jailbroken system, '
                                'or PWND:[checkm8] from A5Mate before the host can send iBSS')
+    elif has_pwned_ibss(run([tools()/'irecovery','-i',hex(identity['ecid']),'-q'],'kdfu-ready'),
+                        identity['product']):
+        # A jailbroken A6/A6X entered kDFU: kloader already runs the Kit's
+        # pwned iBSS, so the host DFU exploit must not be sent to it.
+        progress('Selected device is already running pwned iBSS (kDFU)')
     elif platform.system()=='Darwin' and platform.machine()=='arm64':
         # The native arm64 ipwnder can exit without leaving A6/A6X in the
         # required pwned-iBSS state. The qualified Apple Silicon sequence is

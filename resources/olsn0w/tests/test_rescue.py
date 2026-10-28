@@ -66,11 +66,31 @@ class PrepareDFU(unittest.TestCase):
                  patch.object(rescue, 'recheck_recovery', return_value={'mode':'DFU'}), \
                  patch.object(rescue.time, 'sleep'):
                 rescue.prepare_dfu(self.session(root), run=run)
-            self.assertEqual(calls[0],
-                (['arch','-x86_64',str(rescue.KIT/'bin/macos/ipwnder'),'-pv'],'pwn',60))
+            self.assertEqual(calls[0][1], 'kdfu-ready')
             self.assertEqual(calls[1],
+                (['arch','-x86_64',str(rescue.KIT/'bin/macos/ipwnder'),'-pv'],'pwn',60))
+            self.assertEqual(calls[2],
                 (['arch','-x86_64',str(rescue.KIT/'bin/macos/gaster'),'reset'],'pwn-reset',60))
-            self.assertEqual(calls[2][1], 'ibss-ready')
+            self.assertEqual(calls[3][1], 'ibss-ready')
+
+    def test_a6_kdfu_skips_host_exploit_on_every_platform(self):
+        for system in ('Linux', 'Darwin'):
+            with self.subTest(system=system), tempfile.TemporaryDirectory() as root:
+                calls=[]
+                def run(argv, label, timeout=45):
+                    calls.append(label)
+                    return 'SRTG: N/A\nIBFL: 0x1b\n'
+                with patch.object(rescue.platform, 'system', return_value=system), \
+                     patch.object(rescue.platform, 'machine', return_value='x86_64'), \
+                     patch.object(rescue, 'unique_usb_target'), \
+                     patch.object(rescue, 'recheck_recovery', return_value={'mode':'DFU'}), \
+                     patch.object(rescue.time, 'sleep'):
+                    rescue.prepare_dfu(self.session(root), run=run)
+                self.assertEqual(calls, ['kdfu-ready', 'ibss-ready'])
+
+    def test_a6_boot_rom_dfu_is_not_mistaken_for_kdfu(self):
+        self.assertFalse(rescue.has_pwned_ibss('SRTG: iBoot-1145.3\n', 'iPhone5,2'))
+        self.assertFalse(rescue.has_pwned_ibss('SRTG: N/A\nIBFL: 0x1a\n', 'iPhone5,2'))
 
     def test_already_pwned_skips_host_exploit(self):
         with tempfile.TemporaryDirectory() as root:

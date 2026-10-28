@@ -233,6 +233,13 @@ Linux uses the Kit's existing pwn-tool selection; Apple Silicon uses its bundled
 iOS device before unscoped exploit tools run. Physical qualification of the Linux
 USB path remains separate from host tests.
 
+A6/A6X devices can also use kDFU when the host exploit (for example a6meowing on
+Linux) keeps failing. On a jailbroken device with OpenSSH, enter kDFU with
+**kDFU App** from Olsro.fr Repo at the DFU prompt. olsn0w then detects the
+running pwned iBSS (`SRTG: N/A`, `IBFL: 0x1b`) and skips the host exploit. The
+same pwned-iBSS check runs before any erase. The A6 kDFU route is
+host-tested only and awaits physical qualification.
+
 ## Prepare a RAM rescue
 
 `select --product TYPE --ecid ECID` creates a private session for the connected
@@ -732,6 +739,20 @@ complete input/output hashes in `kernelcache.py` enable the patch. Other audited
 P106/P107 combinations inherit the fix by verified code equivalence, without
 claiming separate physical tests. Existing System images are rebuilt on next
 preparation to include the kernel fix.
+
+System recipe 54 extends the same fallback to every released iPad mini Wi-Fi
+P105 (`iPad2,5`) iOS 6 kernel: 6.0 (`10A406`), 6.0.1 (`10A523`), 6.0.2
+(`10A550`), 6.1 (`10B141`), 6.1.2 (`10B146`) and 6.1.3 (`10B329`). P105
+kernels are not byte-identical to P106/P107, so each was extracted against its
+own BuildManifest identity and audited separately: 6.0.x matches the `0xdc`
+template and 6.1.x the `0xe8` template, with both IOLog calls, all five
+references and the virtual-method entry resolved. Each packed kernel was read
+back. This followed a report
+([issue 20](https://github.com/Olsro/Legacy-iOS-Kit/issues/20)) of a 2014 P105
+panicking in `kernel_task` before launchd on 6.0, 6.1, 6.1.3, 7.0, 7.0.6 and
+7.1.2, although the iOS 6 DeviceTree already had `soft-reset`; the panic string
+itself was not readable. These P105 pins are structural only and await
+physical validation.
 Unlisted products, releases and builds retain their stock kernel; a hash
 mismatch on a listed kernel stops preparation. Every patched container is
 read back before being embedded. Every iOS 6 release on the
@@ -756,7 +777,8 @@ Relay recipe 26 extends that iOS 6 policy to the cellular mini variants P106
 and P107 (`iPad2,6` and `iPad2,7`) by family analogy. The later kernel audit
 covers all their iOS 6 releases as described above; only P107 6.1.3 has the
 physical startup qualification. All three mini variants retain their existing
-iOS 7/8 policy (no forced reset). P105 (`iPad2,5`) was subsequently restored to 7.1.2 in one
+iOS 7/8 policy (no forced reset); relay recipe 27 later changes this for P105,
+see below. P105 (`iPad2,5`) was subsequently restored to 7.1.2 in one
 DFU workflow without that reset: normal boot, official activation, writable
 System, Data generation, boot-success and Cydia first-start checks passed.
 The user confirmed end-to-end functionality. This run used the existing Pangu
@@ -765,7 +787,16 @@ profile, without an untether retry reboot. P105 was also restored to 8.3
 without Hacktiv8 or a forced TriStar reset. Normal boot, Data generation,
 SpringBoard, boot-success and Cydia first-start checks passed; the user
 confirmed full functionality. Neither run qualifies forced resets or the
-cellular variants. All three iPad 4 variants already receive it on iOS 6/7/8;
+cellular variants. Relay recipe 27 nevertheless adds `soft-reset` to every P105
+iOS 7 and 8 DeviceTree, as on the iPad 4: the issue 20 unit, manufactured in
+2014, panicked before launchd on 7.x without it, with the same symptoms as
+iPad3,4 on 7.1.2. All 19 P105 iOS 7/8 DeviceTrees (7.0 to 8.4.1) were extracted
+and parsed: each has exactly one `/device-tree/arm-io/i2c0/tristar` node,
+compatible with `tristar,ths7383` and `tristar,cbtl1608`, without an existing
+`soft-reset`, and every matching kernel references `soft-reset`. The iPad 4
+family boots with this property on iOS 7/8; on P105 it awaits physical
+qualification on both the 2014 unit and the earlier tested one. The
+cellular minis keep the iOS 6-only rule. All three iPad 4 variants already receive it on iOS 6/7/8;
 the iPad 2/3 and iPhone 4S profiles remain excluded. Preparation still requires
 exactly one TriStar node and verifies the packed DeviceTree by readback; a
 missing or ambiguous node is an error, not a silently skipped patch. Stale

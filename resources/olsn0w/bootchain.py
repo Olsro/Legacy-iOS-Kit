@@ -12,7 +12,8 @@ import logo
 from validation import display
 
 WINDOW = 1048576
-RECIPE_VERSION = 26
+# Add the TriStar soft-reset to P105 iOS 7/8 DeviceTrees.
+RECIPE_VERSION = 27
 
 
 def memory_layout(product):

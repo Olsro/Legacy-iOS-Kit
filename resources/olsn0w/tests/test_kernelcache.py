@@ -39,7 +39,7 @@ class TargetKernelTests(unittest.TestCase):
                              if build == '10B329' else 'exact-structural-match')
         source = dict(product='iPad2,7', version='6.1.3', build='10B329')
         for changed in (
-                dict(source, product='iPad2,5'),
+                dict(source, product='iPad2,4'),
                 dict(source, version='6.0', build='10A403'),
                 dict(source, version='6.1.2', build='10B146'),
                 dict(source, product='iPad2,6', version='6.1.2', build='10B146'),
@@ -48,7 +48,29 @@ class TargetKernelTests(unittest.TestCase):
             with self.subTest(source=changed):
                 self.assertIsNone(kernelcache.qualified_patch(changed))
 
-    def test_cellular_mini_runtime_pins_match_the_recorded_kernel_audits(self):
+    def test_wifi_mini_covers_all_released_ios6_builds_with_its_own_kernels(self):
+        builds = (('6.0', '10A406'), ('6.0.1', '10A523'), ('6.0.2', '10A550'),
+                  ('6.1', '10B141'), ('6.1.2', '10B146'), ('6.1.3', '10B329'))
+        for release, build in builds:
+            with self.subTest(release=release):
+                p105 = kernelcache.qualified_patch(dict(product='iPad2,5', version=release, build=build))
+                self.assertEqual(p105['name'], 'tristar-system-id-retry-fallback')
+                self.assertEqual((p105['before'], p105['after']), ('10e0', '86b1'))
+                self.assertEqual(p105['validation'], 'exact-structural-match')
+        # P105 6.1.3 is a different kernel from the qualified P107 6.1.3 one.
+        self.assertNotEqual(
+            kernelcache.qualified_patch(dict(product='iPad2,5', version='6.1.3', build='10B329'))['raw_sha256'],
+            kernelcache.qualified_patch(dict(product='iPad2,7', version='6.1.3', build='10B329'))['raw_sha256'])
+        for changed in (
+                dict(product='iPad2,5', version='6.0.1', build='10A8426'),
+                dict(product='iPad2,5', version='6.1.2', build='10B147'),
+                dict(product='iPad2,5', version='6.1.3', build='unexpected'),
+                dict(product='iPad2,5', version='7.1.2', build='11D257'),
+                dict(product='iPad2,5', version='8.3', build='12F69')):
+            with self.subTest(source=changed):
+                self.assertIsNone(kernelcache.qualified_patch(changed))
+
+    def test_mini_runtime_pins_match_the_recorded_kernel_audits(self):
         evidence = json.loads((Path(kernelcache.__file__).parent/'recipes/tristar-mini-ios6.recipe').read_text())
         identities = set()
         for entry in evidence['entries']:
@@ -66,9 +88,9 @@ class TargetKernelTests(unittest.TestCase):
             self.assertTrue(entry['packed_readback_verified'])
             self.assertEqual(entry['installed_patch']['validation'], runtime['validation'])
             self.assertTrue(source['ipsw_url'].startswith('https://secure-appldnld.apple.com/'))
-        qualified = {key for key in kernelcache.PATCHES if key[0] in ('iPad2,6', 'iPad2,7')}
+        qualified = {key for key in kernelcache.PATCHES if key[0] in ('iPad2,5', 'iPad2,6', 'iPad2,7')}
         self.assertEqual(identities, qualified)
-        self.assertEqual(len(identities), 10)
+        self.assertEqual(len(identities), 16)
 
     def test_apply_changes_only_the_retry_result_branch(self):
         original = b'prefix' + bytes.fromhex('10e0') + b'suffix'
