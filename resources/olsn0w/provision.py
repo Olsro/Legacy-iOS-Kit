@@ -10,7 +10,7 @@ import uuid
 import zipfile
 
 from archives import members
-from common import KIT, MODELS, baseband_strategy, digest, integer, profile, run, tools
+from common import IMAGE_TIMEOUT, KIT, MODELS, baseband_strategy, digest, integer, profile, run, tools
 from firmware import acquire, extract
 from hfs import HFS
 from img3 import img3
@@ -379,10 +379,10 @@ def prepare(session, destination, ipsw=None, keys=None):
         # by iOS 6 ASR and fails source validation with Authentication error.
         rebuilt=destination/'system.asr.dmg'
         run([tools()/'dmg','build',base_firmware/'rootfs.hfs',rebuilt],
-            destination/'system-build.log',timeout=600)
+            destination/'system-build.log',timeout=IMAGE_TIMEOUT)
         verified=destination/'system.verify.hfs'
         run([tools()/'dmg','extract',rebuilt,verified],
-            destination/'system-verify.log',timeout=600)
+            destination/'system-verify.log',timeout=IMAGE_TIMEOUT)
         require_same_file(base_firmware/'rootfs.hfs', verified,
                           'Rebuilt multipatch ASR image differs from signed base',
                           destination/'system-integrity.json',
@@ -401,7 +401,7 @@ def prepare(session, destination, ipsw=None, keys=None):
             decrypt_stream(incoming,archive.getinfo(target_os_member).file_size,
                            plaintext,os_keys[0]['key'])
         verified = destination/'system.verify.hfs'
-        run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=600)
+        run([tools()/'dmg', 'extract', plaintext, verified], destination/'system-verify.log', timeout=IMAGE_TIMEOUT)
         require_same_file(base_firmware/'rootfs.hfs', verified,
                           'Plaintext ASR image differs from the original filesystem',
                           destination/'system-integrity.json',

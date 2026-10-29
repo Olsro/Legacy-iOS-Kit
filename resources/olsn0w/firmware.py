@@ -11,7 +11,7 @@ import time
 from xml.parsers.expat import ExpatError
 from progress import activity, display_if_needed, copy_stream, message
 
-from common import KIT, STATE, MODELS, target, version, tools, run, digest, save, integer, minimum_release
+from common import KIT, STATE, MODELS, target, version, tools, run, digest, save, integer, minimum_release, IMAGE_TIMEOUT
 
 
 def content_length(headers):
@@ -183,7 +183,7 @@ def extract(product, release, ipsw=None, key_file=None, build=None):
                 with archive.open(member) as source, original.open('wb') as output_stream:
                     copy_stream(source,output_stream,archive.getinfo(member).file_size,'Extracting '+name)
                 if name == 'RootFS':
-                    run([tools()/'dmg', 'extract', original, out/'rootfs.hfs', '-k', key['key']], out/'rootfs.log', timeout=600)
+                    run([tools()/'dmg', 'extract', original, out/'rootfs.hfs', '-k', key['key']], out/'rootfs.log', timeout=IMAGE_TIMEOUT)
                     original.unlink()
                 else:
                     run([tools()/'xpwntool', original, out/(name+'.raw'), '-iv',key['iv'],'-k',key['key']], out/(name+'.log'))

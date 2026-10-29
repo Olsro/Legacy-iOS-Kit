@@ -41,6 +41,54 @@ def check_restore_runtime(executable, env, log):
                            output.decode(errors='replace')[-2000:])
 
 
+def start_logged(argv, cwd, env, log):
+    """Start a tool whose stdout reaches the log as it is written.
+
+    A file descriptor makes C stdio buffer stdout in blocks, while stderr is
+    unbuffered: futurerestore's recovery steps then reach the log only at exit,
+    after its later errors. A pseudo-terminal keeps stdout line-buffered and
+    both streams in their original order. Returns the process and a finisher
+    that waits until all output has been copied.
+    """
+    import os, pty, termios
+    try:
+        master,slave=pty.openpty()
+    except OSError:
+        process=subprocess.Popen(argv,cwd=cwd,env=env,stdout=log,stderr=subprocess.STDOUT,
+                                 restore_signals=False)
+        return process,lambda:None
+    try:
+        # Keep newlines byte-for-byte; the terminal would otherwise add CR.
+        attributes=termios.tcgetattr(slave)
+        attributes[1]&=~termios.OPOST
+        termios.tcsetattr(slave,termios.TCSANOW,attributes)
+        process=subprocess.Popen(argv,cwd=cwd,env=env,stdout=slave,stderr=slave,
+                                 restore_signals=False)
+    except BaseException:
+        os.close(master);raise
+    finally:
+        os.close(slave)
+    def pump():
+        try:
+            while True:
+                try:
+                    data=os.read(master,65536)
+                except OSError:
+                    break  # Linux reports EIO once every writer has closed.
+                if not data:break
+                try:
+                    log.write(data);log.flush()
+                except ValueError:
+                    break  # The caller closed the log while unwinding.
+        finally:
+            os.close(master)
+    worker=threading.Thread(target=pump,daemon=True);worker.start()
+    def finish():
+        # A descendant still holding the terminal must not block failure handling.
+        worker.join(timeout=10)
+    return process,finish
+
+
 def restore_arguments(identity, ipsw, ticket, baseband=None, baseband_manifest=None):
     binding(Path(ticket).read_bytes(), identity['product'], identity['ecid'])
     executable=tools()/'futurerestore_old'
@@ -201,14 +249,14 @@ def run(session, bundle, ticket, keys, *, baseband=None, baseband_manifest=None,
             # Keep Python's ignored SIGPIPE in this legacy network client.
             # Restoring SIG_DFL can kill the whole restore on a closed socket
             # before its transport code can report EPIPE or finish cleanup.
-            process=subprocess.Popen(argv,cwd=work,env=env,stdout=log,stderr=subprocess.STDOUT,
-                                     restore_signals=False)
+            process,finish=start_logged(argv,work,env,log)
             state.update(pid=process.pid,stage='signed-base-restore-started');checkpoint(journal,state)
             with restore_log.open('r',errors='replace') as status:
                 while True:
                     chunk=status.read();display.feed(chunk);display.tick()
                     try:
                         code=process.wait(timeout=2)
+                        finish()
                         display.feed(status.read())
                         break
                     except subprocess.TimeoutExpired:

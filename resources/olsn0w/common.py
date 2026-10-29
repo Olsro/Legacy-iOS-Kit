@@ -13,6 +13,9 @@ from progress import activity
 KIT = Path(__file__).resolve().parents[2]
 SUPPORT_MESSAGE = 'Visit https://olsro.fr for cool stuff and to support Olsro with a donation.'
 STATE = KIT / 'saved' / 'olsn0w'
+# Full system images on slow hosts (Live USB overlays, USB 2 disks) can take
+# well over ten minutes to extract or rebuild.
+IMAGE_TIMEOUT = 3600
 MODELS = {
     'iPad2,1': ('k93ap', 0x8940, 4),
     'iPad2,2': ('k94ap', 0x8940, 6),
