@@ -24,6 +24,11 @@ class LegacyServices(unittest.TestCase):
             b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-start-aquila.sh\n'), 1)
         self.assertNotIn(b'bsexec .. /private/var/aquila/aquila\n', result)
 
+    def test_launchd_socket_is_saved_after_launchd_conf(self):
+        result = ios6_launchd_conf(b'bsexec .. /private/var/aquila/aquila\n')
+        self.assertTrue(result.endswith(
+            b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios5-launchd-socket.sh save\n'))
+
     def test_unknown_or_duplicate_configuration_is_rejected(self):
         token = b'bsexec .. /private/var/aquila/aquila\n'
         for content in (b'', b'bsexec .. /some-other-program\n', token * 2):

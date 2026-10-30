@@ -176,5 +176,6 @@ Cydia preflight now requires the named `installd` query on the iOS 5 route;
 an all-jobs query alone cannot qualify this transport. Host regression tests
 exercise real Unix socket hard links across temporary-directory cleanup,
 repeated boots, optional native dirhelper delegation, and failure of the new
-preflight on missing or malformed service responses. iOS 6–8 boot configuration
-does not acquire this socket workaround.
+preflight on missing or malformed service responses. Recipe 55 extends the
+workaround to iOS 6 (see IOS6-COMPATIBILITY.md); iOS 7–8 boot configuration
+does not acquire it.

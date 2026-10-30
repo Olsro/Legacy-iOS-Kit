@@ -188,3 +188,29 @@ been reproduced under observation, and no stock iOS 6 control has been
 tested. Do not label this a confirmed stock-iOS bug, restrict it to that
 single trigger, or infer a content-protection failure from the first incident.
 No speculative language workaround was added to the restoration code.
+
+## Launchd socket lifetime (recipe 55, 2026-10-30)
+
+A user reported that f.lux (`org.herf.flux` 0.9988) never worked on iPhone 5
+and iPad 4 restored to 6.1.3. The Olsro mirror serves the same bytes as the
+official `justgetflux.com/cydia` package (SHA256 `e8a73c0e…`), so the
+repository was not the cause. On the test iPhone5,2 / 6.1.4 (10B350), its
+installation script logged `launch_msg(): Socket is not connected`: the daemon
+only started after a reboot, and Cydia requests only a respring.
+`/var/tmp/launchd/sock` was absent and the named `com.apple.mobile.installd`
+query failed while the all-jobs `launchctl list` still worked. This is the
+iOS 5 defect described in IOS5-COMPATIBILITY.md: launchctl empties `/var/tmp`
+after `launchd.conf`. It affects any package that loads or reloads a daemon,
+including AppSync's `installd` reload. 10B350 has no stock `dirhelper`.
+
+The iOS 5 save/restore handoff was installed on that device without restoring
+or erasing Data: the `save` line was appended to `launchd.conf`, and the
+wrapper was installed as `/usr/libexec/dirhelper`. After a reboot the socket
+existed, the named `installd` query worked, and f.lux could be unloaded and
+loaded again. After `dpkg -r` and a reinstall, its daemon was running
+immediately without a reboot. With 3400 K forced, the user confirmed a warm
+screen tint. Recipe 55 applies this handoff to iOS 6 images and extends the
+Cydia `installd` preflight to them. Only iPhone5,2 / 10B350 was tested;
+other iOS 6 products and builds inherit the change without separate physical
+validation.
+

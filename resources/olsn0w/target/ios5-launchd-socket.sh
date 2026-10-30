@@ -1,5 +1,5 @@
 #!/bin/sh
-# iOS 5 launchctl empties /var/tmp AFTER launchd.conf has opened this socket.
+# iOS 5/6 launchctl empties /var/tmp AFTER launchd.conf has opened this socket.
 # Keep its inode alive across that cleanup (as in the Kit's g1lbertJB path).
 set -eu
 live=/private/var/tmp/launchd/sock

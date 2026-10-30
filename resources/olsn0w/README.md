@@ -753,6 +753,11 @@ panicking in `kernel_task` before launchd on 6.0, 6.1, 6.1.3, 7.0, 7.0.6 and
 7.1.2, although the iOS 6 DeviceTree already had `soft-reset`; the panic string
 itself was not readable. These P105 pins are structural only and await
 physical validation.
+
+System recipe 55 extends the iOS 5 launchd socket preservation to iOS 6: the
+same `launchd.conf` handoff and `dirhelper` restore keep `/var/tmp/launchd/sock`
+alive, so package scripts can load daemons and Cydia preflight requires the
+named `installd` query. See [IOS6-COMPATIBILITY.md](IOS6-COMPATIBILITY.md).
 Unlisted products, releases and builds retain their stock kernel; a hash
 mismatch on a listed kernel stops preparation. Every patched container is
 read back before being embedded. Every iOS 6 release on the

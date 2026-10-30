@@ -25,14 +25,14 @@ if [ -x /olsn0w/lctl ]; then
     done
 fi
 /usr/local/libexec/olsn0w/wait-graphics.sh
-# iOS 5's late /var/tmp cleanup must not leave a working SpringBoard but a
+# iOS 5/6's late /var/tmp cleanup must not leave a working SpringBoard but a
 # dead launchd endpoint. A generic `launchctl list` uses a different transport
 # and succeeds even when package scripts cannot load their daemons.
 if [ -x /usr/local/libexec/olsn0w/ios5-launchd-socket.sh ]; then
     job=$(/bin/launchctl list com.apple.mobile.installd) || exit 1
     case "$job" in
         *'"Label" = "com.apple.mobile.installd";'*) ;;
-        *) echo 'olsn0w: iOS 5 installd service control is unavailable' >&2; exit 1 ;;
+        *) echo 'olsn0w: installd service control is unavailable' >&2; exit 1 ;;
     esac
 fi
 [ -s /private/var/keybags/systembag.kb ]

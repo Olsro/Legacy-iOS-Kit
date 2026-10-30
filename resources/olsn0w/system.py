@@ -30,7 +30,7 @@ from signing import resign, verify
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
 # Rebuild cached target kernels with the qualified P105 TriStar fallback.
-RECIPE_VERSION = 54
+RECIPE_VERSION = 55
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -358,9 +358,9 @@ def ios6_launchd_conf(content, major=6):
     # prevents Aquila from running against an incomplete protected Data seed.
     guarded = b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios6-start-aquila.sh\n'
     configured = initializer + content.replace(token, guarded)
-    if major == 5:
-        configured += (b'bsexec .. /bin/sh '
-                       b'/usr/local/libexec/olsn0w/ios5-launchd-socket.sh save\n')
+    # launchctl empties /var/tmp after launchd.conf on both iOS 5 and 6.
+    configured += (b'bsexec .. /bin/sh '
+                   b'/usr/local/libexec/olsn0w/ios5-launchd-socket.sh save\n')
     return configured
 
 
@@ -693,19 +693,19 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
     if major in (5, 6):
         item, conf = payload['private/etc/launchd.conf']
         payload['private/etc/launchd.conf'] = entry(item.name, ios6_launchd_conf(conf, major), item.mode)
+        # Native iOS 5 and 6 clear /var/tmp after launchd.conf. Preserve the
+        # already-open launchd socket or later package loads cannot work.
+        if any(r['name'] == 'dirhelper' for r in stock.ls('/usr/libexec')):
+            payload['usr/local/libexec/olsn0w/dirhelper.stock'] = entry(
+                'usr/local/libexec/olsn0w/dirhelper.stock',
+                stock.read('/usr/libexec/dirhelper'), 0o755)
+        for name in ('ios5-launchd-socket.sh', 'ios5-dirhelper.sh'):
+            path = ('usr/libexec/dirhelper' if name == 'ios5-dirhelper.sh'
+                    else 'usr/local/libexec/olsn0w/'+name)
+            payload[path] = entry(path, (TARGET_SCRIPTS/name).read_bytes(), 0o755)
         if major == 5:
             from ios5_helpers import payloads
             helpers = payloads()
-            # Native iOS 5 clears /var/tmp after launchd.conf. Preserve the
-            # already-open launchd socket or later package loads cannot work.
-            if any(r['name'] == 'dirhelper' for r in stock.ls('/usr/libexec')):
-                payload['usr/local/libexec/olsn0w/dirhelper.stock'] = entry(
-                    'usr/local/libexec/olsn0w/dirhelper.stock',
-                    stock.read('/usr/libexec/dirhelper'), 0o755)
-            for name in ('ios5-launchd-socket.sh', 'ios5-dirhelper.sh'):
-                path = ('usr/libexec/dirhelper' if name == 'ios5-dirhelper.sh'
-                        else 'usr/local/libexec/olsn0w/'+name)
-                payload[path] = entry(path, (TARGET_SCRIPTS/name).read_bytes(), 0o755)
         else:
             helpers = {'keybag-init': ios6_keybag_payload(),
                        'protection-probe': ios6_protection_probe_payload()}

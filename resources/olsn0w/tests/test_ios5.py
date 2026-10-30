@@ -76,8 +76,8 @@ class IOS5Preparation(unittest.TestCase):
         self.assertTrue(conf.startswith(b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios5-firstboot.sh\n'))
         self.assertIn(b'ios6-start-aquila.sh',conf)
         self.assertTrue(conf.endswith(b'ios5-launchd-socket.sh save\n'))
-        self.assertNotIn(b'ios5-launchd-socket.sh',
-                         ios6_launchd_conf(entries['private/etc/launchd.conf'][1],6))
+        self.assertTrue(ios6_launchd_conf(entries['private/etc/launchd.conf'][1],6)
+                        .endswith(b'ios5-launchd-socket.sh save\n'))
         self.assertTrue(uses_protected_data('5.1.1'))
 
     def test_helpers_have_legacy_entry_and_checked_provenance(self):
