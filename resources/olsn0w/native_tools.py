@@ -65,6 +65,10 @@ def prepare_macos_cmake():
     os.environ['PATH'] = str((destination / relative).parent) + os.pathsep + os.environ.get('PATH', '')
 
 
+# Configuring and compiling can be very slow on Live USB systems.
+BUILD_TIMEOUT = 1800
+
+
 def build_dependencies_problem():
     if not shutil.which('cmake'):
         return 'CMake is not installed.'
@@ -82,7 +86,7 @@ def build_dependencies_problem():
         try:
             for argv in (['cmake', '-S', str(source), '-B', str(source / 'build')],
                          ['cmake', '--build', str(source / 'build')]):
-                result = subprocess.run(argv, capture_output=True, timeout=120)
+                result = subprocess.run(argv, capture_output=True, timeout=BUILD_TIMEOUT)
                 if result.returncode:
                     return (result.stdout + result.stderr).decode(errors='replace')[-2000:]
         except (OSError, subprocess.TimeoutExpired) as error:
@@ -158,8 +162,8 @@ def hfscompress():
             path.write_bytes(data)
         build = temporary / 'build'
         run(['cmake', '-S', build_source, '-B', build, '-DXPWN_SOURCE=' + str(xpwn),
-             '-DCMAKE_BUILD_TYPE=Release'], log=temporary / 'configure.log')
-        run(['cmake', '--build', build, '--parallel', '2'], log=temporary / 'compile.log', timeout=600)
+             '-DCMAKE_BUILD_TYPE=Release'], log=temporary / 'configure.log', timeout=BUILD_TIMEOUT)
+        run(['cmake', '--build', build, '--parallel', '2'], log=temporary / 'compile.log', timeout=BUILD_TIMEOUT)
         result = Path(staging) / 'result'
         result.mkdir()
         shutil.copy2(build / 'olsn0w-hfscompress', result / executable.name)

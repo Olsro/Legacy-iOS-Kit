@@ -89,14 +89,19 @@ class RuntimeRepair(unittest.TestCase):
 
 class HostPrerequisites(unittest.TestCase):
     def test_native_apt_install_does_not_touch_the_python_runtime(self):
-        with tempfile.TemporaryDirectory(prefix='olsn0w native ') as temporary:
+        # A Live USB cdrom source makes apt-get update fail although the
+        # other package lists were refreshed; installation must still run.
+        for update_status in (0, 100):
+          with self.subTest(update_status=update_status), \
+               tempfile.TemporaryDirectory(prefix='olsn0w native ') as temporary:
             root = Path(temporary)
             tools = root / 'tools'
             tools.mkdir()
             log = root / 'packages.log'
             scripts = {
                 'python3': '#!/bin/sh\necho python-was-invoked >> "$PACKAGE_LOG"\nexit 1\n',
-                'apt-get': '#!/bin/sh\necho "$*" >> "$PACKAGE_LOG"\n',
+                'apt-get': '#!/bin/sh\necho "$*" >> "$PACKAGE_LOG"\n'
+                           '[ "$1" != update ] || exit ' + str(update_status) + '\n',
                 'sudo': '#!/bin/sh\nexec "$@"\n',
                 'id': '#!/bin/sh\necho 1000\n',
                 'uname': '#!/bin/sh\necho Linux\n',

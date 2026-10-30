@@ -23,7 +23,9 @@ install_host_python() {
         fi
         brew install python
     elif command -v apt-get >/dev/null 2>&1; then
-        as_root apt-get update
+        # One broken source (such as a Live USB cdrom entry) fails the whole
+        # update although the other package lists were refreshed.
+        as_root apt-get update || echo 'olsn0w: apt-get update reported errors; continuing with the available package lists.' >&2
         as_root apt-get install -y python3 python3-venv
     elif command -v dnf >/dev/null 2>&1; then
         as_root dnf install -y python3 python3-pip
@@ -49,7 +51,9 @@ install_native_dependencies() {
         fi
         brew install cmake
     elif command -v apt-get >/dev/null 2>&1; then
-        as_root apt-get update
+        # One broken source (such as a Live USB cdrom entry) fails the whole
+        # update although the other package lists were refreshed.
+        as_root apt-get update || echo 'olsn0w: apt-get update reported errors; continuing with the available package lists.' >&2
         as_root apt-get install -y build-essential cmake zlib1g-dev
     elif command -v dnf >/dev/null 2>&1; then
         as_root dnf install -y cmake gcc make zlib-devel
