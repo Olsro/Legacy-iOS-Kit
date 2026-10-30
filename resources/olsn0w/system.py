@@ -30,7 +30,7 @@ from signing import resign, verify
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
 # Rebuild cached target kernels with the qualified P105 TriStar fallback.
-RECIPE_VERSION = 55
+RECIPE_VERSION = 56
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'
@@ -439,6 +439,23 @@ def defer_profile_service(image):
         image.command('rm', source)
 
 
+def olsn0w_sshd_job():
+    return plistlib.dumps(dict(
+        Label='org.olsn0w.sshd', ProgramArguments=[
+            '/usr/sbin/sshd','-D','-e','-f','/usr/local/share/olsn0w/sshd_config'],
+        RunAtLoad=True, KeepAlive=True, StandardErrorPath='/var/logs/AppleSupport/olsn0w-sshd.log'))
+
+
+def late_jobs_job():
+    """Run once at system boot to load /Library/LaunchDaemons after Aquila."""
+    log = '/var/logs/AppleSupport/olsn0w-late-jobs.log'
+    return plistlib.dumps(dict(
+        Label='org.olsn0w.late-jobs',
+        ProgramArguments=['/bin/sh', '/usr/local/libexec/olsn0w/late-jobs.sh'],
+        RunAtLoad=True, LaunchOnlyOnce=True, UserName='root',
+        StandardOutPath=log, StandardErrorPath=log))
+
+
 def cydia_startup_job(data):
     """Retry failed first-boot preparation without repeating successful runs."""
     job = plistlib.loads(data)
@@ -652,7 +669,8 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
         aquila_path = 'private/var/aquila/aquila'
         untether_item, original = payload[aquila_path]
         untether = out/'aquila'
-        signature = prepare_ios6_payload(original, root_device, untether)
+        signature = prepare_ios6_payload(original, root_device, untether,
+                                         defer_library_jobs=major == 6)
         prepared = untether.read_bytes()
         payload[aquila_path] = entry(aquila_path, prepared, untether_item.mode)
         data_payload_checks['aquila/aquila'] = hashlib.sha256(prepared).hexdigest()
@@ -703,6 +721,14 @@ def prepare(firmware, relay, root_device='/dev/disk0s1s3', data_device='/dev/dis
             path = ('usr/libexec/dirhelper' if name == 'ios5-dirhelper.sh'
                     else 'usr/local/libexec/olsn0w/'+name)
             payload[path] = entry(path, (TARGET_SCRIPTS/name).read_bytes(), 0o755)
+        if major == 6:
+            # Aquila only loads the Kit's recovery SSH early; package daemons
+            # such as f.lux need notifyd and backboardd, so load them late.
+            for name, data in [('olsn0w/early-jobs/org.olsn0w.sshd.plist', olsn0w_sshd_job()),
+                               ('System/Library/LaunchDaemons/org.olsn0w.late-jobs.plist', late_jobs_job()),
+                               ('usr/local/libexec/olsn0w/late-jobs.sh',
+                                (TARGET_SCRIPTS/'late-jobs.sh').read_bytes())]:
+                payload[name] = entry(name, data, 0o755 if name.endswith('.sh') else 0o644)
         if major == 5:
             from ios5_helpers import payloads
             helpers = payloads()
@@ -932,10 +958,7 @@ Subsystem sftp /usr/libexec/sftp-server
         job['StandardOutPath'] = '/var/logs/AppleSupport/olsn0w-keybag.log'
         job['StandardErrorPath'] = job['StandardOutPath']
         image.add(job_path, plistlib.dumps(job))
-    ssh_job = dict(Label='org.olsn0w.sshd', ProgramArguments=[
-                       '/usr/sbin/sshd','-D','-e','-f','/usr/local/share/olsn0w/sshd_config'],
-                   RunAtLoad=True, KeepAlive=True, StandardErrorPath='/var/logs/AppleSupport/olsn0w-sshd.log')
-    image.add('/Library/LaunchDaemons/org.olsn0w.sshd.plist', plistlib.dumps(ssh_job))
+    image.add('/Library/LaunchDaemons/org.olsn0w.sshd.plist', olsn0w_sshd_job())
     checks = {}
     for name, (item, data) in payload.items():
         if data is not None and name != 'Library/LaunchDaemons/com.saurik.Cydia.Startup.plist':

@@ -214,3 +214,37 @@ Cydia `installd` preflight to them. Only iPhone5,2 / 10B350 was tested;
 other iOS 6 products and builds inherit the change without separate physical
 validation.
 
+## Package daemon start order (recipe 56, 2026-10-30)
+
+After the same iPhone5,2 / 10B350 was restored with recipe 55, f.lux still did
+not tint the screen after a reboot. The launchd socket was intact. The boot
+instance of `/usr/libexec/flux` (PID 39) never wrote `/tmp/.iomfgamma.dat`,
+whereas notifyd (90), locationd (116), backboardd (126) and SpringBoard (195)
+started after it. After `killall flux`, launchd restarted the daemon, which wrote
+the gamma table at once. Aquila runs from `launchd.conf` and loads every
+`/Library/LaunchDaemons` job itself, before launchd starts the system daemons;
+f.lux therefore registered for notifications before notifyd existed and
+kept waiting for the display. The recipe 54 image behaved the same way: the
+earlier warm tint appeared only after a manual daemon restart.
+
+Recipe 56 retargets the two job-directory strings in the iOS 6 Aquila binary
+(`/Library/LaunchDaemons` and `/Library/LaunchDaemons/%s`) to
+`/olsn0w/early-jobs`, which only holds the Kit's recovery SSH job, and re-signs
+it. The `wifid` paths and the stock `/bin/launchctl` stay unchanged.
+`/System/Library/LaunchDaemons/org.olsn0w.late-jobs.plist` runs once at boot,
+waits for GraphicsServices and loads `/Library/LaunchDaemons`.
+
+On the device, the patched binary was installed without restoring Data. Its
+code matches the recipe output byte for byte; only the signature blob differs.
+After a reboot, Aquila reported `kernel patched`. The socket existed.
+Cydia.Startup, boot-success, `com.openssh.sshd` and `ai.akemi.asu_inject` were
+loaded. f.lux (PID 101) started after locationd and backboardd and wrote its
+gamma table right after boot. `org.olsn0w.sshd` was not loaded, as before the
+change: network SSH configuration disables it with `launchctl unload -w`.
+Without Location Services (`LocationServicesEnabled = 0`), f.lux keeps its
+daytime temperature. Once the user enabled them and authorised f.lux, the
+user confirmed the night tint after this boot. iOS 5
+shares the binary but keeps the early loading; it was not tested with this
+change. Other iOS 6 products and builds inherit it without separate physical
+validation.
+

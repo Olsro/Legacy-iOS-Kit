@@ -4,8 +4,10 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import plistlib
 from system import (ios6_keybag_payload, ios6_launchd_conf,
-                    ios6_protection_probe_payload, jailbreak_payload)
+                    ios6_protection_probe_payload, jailbreak_payload,
+                    late_jobs_job, olsn0w_sshd_job)
 
 
 class LegacyServices(unittest.TestCase):
@@ -28,6 +30,18 @@ class LegacyServices(unittest.TestCase):
         result = ios6_launchd_conf(b'bsexec .. /private/var/aquila/aquila\n')
         self.assertTrue(result.endswith(
             b'bsexec .. /bin/sh /usr/local/libexec/olsn0w/ios5-launchd-socket.sh save\n'))
+
+    def test_package_daemons_load_once_after_graphics(self):
+        job = plistlib.loads(late_jobs_job())
+        self.assertEqual(job['Label'], 'org.olsn0w.late-jobs')
+        self.assertEqual(job['ProgramArguments'],
+                         ['/bin/sh', '/usr/local/libexec/olsn0w/late-jobs.sh'])
+        self.assertTrue(job['RunAtLoad'])
+        self.assertTrue(job['LaunchOnlyOnce'])
+        script = (Path(__file__).resolve().parents[1]/'target/late-jobs.sh').read_text()
+        self.assertLess(script.index('wait-graphics.sh'),
+                        script.index('/bin/launchctl load /Library/LaunchDaemons'))
+        self.assertEqual(plistlib.loads(olsn0w_sshd_job())['Label'], 'org.olsn0w.sshd')
 
     def test_unknown_or_duplicate_configuration_is_rejected(self):
         token = b'bsexec .. /private/var/aquila/aquila\n'

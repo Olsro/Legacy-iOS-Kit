@@ -758,6 +758,13 @@ System recipe 55 extends the iOS 5 launchd socket preservation to iOS 6: the
 same `launchd.conf` handoff and `dirhelper` restore keep `/var/tmp/launchd/sock`
 alive, so package scripts can load daemons and Cydia preflight requires the
 named `installd` query. See [IOS6-COMPATIBILITY.md](IOS6-COMPATIBILITY.md).
+
+System recipe 56 defers iOS 6 package daemons. Aquila runs from `launchd.conf`
+and loaded `/Library/LaunchDaemons` before notifyd and backboardd existed, which
+left daemons such as f.lux waiting forever. Its two job-directory strings now
+point to `/olsn0w/early-jobs` (only the Kit's recovery SSH job), and the system
+job `org.olsn0w.late-jobs` loads `/Library/LaunchDaemons` once GraphicsServices
+is ready.
 Unlisted products, releases and builds retain their stock kernel; a hash
 mismatch on a listed kernel stops preparation. Every patched container is
 read back before being embedded. Every iOS 6 release on the

@@ -38,6 +38,23 @@ class ReleasePayload(unittest.TestCase):
         self.assertIn(b'/dev/disk0s1s3\0',patched)
         self.assertIn(b'/bin/launchctl\0',patched)
         self.assertNotIn(b'/olsn0w/lctl\0',patched)
+        self.assertIn(b'/Library/LaunchDaemons\0',patched)
+
+    def test_ios6_defers_library_jobs_to_early_directory(self):
+        import tarfile
+        archive=Path(__file__).resolve().parents[2]/'jailbreak/aquila_6.tar'
+        with tarfile.open(archive) as payload:
+            original=payload.extractfile('./private/var/aquila/aquila').read()
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory)/'aquila'
+            prepare_ios6_payload(original,'/dev/disk0s1s3',output,defer_library_jobs=True)
+            patched=output.read_bytes()
+        self.assertNotIn(b'/Library/LaunchDaemons\0',patched)
+        self.assertNotIn(b'/Library/LaunchDaemons/%s\0',patched)
+        self.assertIn(b'/olsn0w/early-jobs\0',patched)
+        self.assertIn(b'/olsn0w/early-jobs/%s\0',patched)
+        self.assertEqual(patched.count(b'/Library/LaunchDaemons/com.apple.wifid.plist\0'),2)
+        self.assertIn(b'/bin/launchctl\0',patched)
 
     def test_ios8_uses_qualified_batch_loader_and_retains_parent(self):
         original = bytearray(0x6e16)

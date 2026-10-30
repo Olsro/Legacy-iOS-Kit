@@ -71,12 +71,18 @@ def prepare_payload(original, root_device, output):
     return resign(output, signature['entitlements'])
 
 
-def prepare_ios6_payload(original, root_device, output):
-    """Retarget the Kit's native iOS 6 Aquila payload only to the new root.
+EARLY_JOBS = '/olsn0w/early-jobs'
+
+
+def prepare_ios6_payload(original, root_device, output, defer_library_jobs=False):
+    """Retarget the Kit's native iOS 6 Aquila payload to the new root.
 
     The iOS 6 package has its own kernel recipe and deliberately keeps the
     stock /bin/launchctl contract.  Replacing it with the iOS 7 component or
     routing it through the later guarded loader regresses A6/A6X boot.
+    Aquila loads /Library/LaunchDaemons from launchd.conf, before notifyd and
+    backboardd exist. When deferred, it loads only the Kit's early jobs and a
+    late system job loads package daemons after GraphicsServices is ready.
     """
     if hashlib.sha256(original).hexdigest() != IOS6_SHA256:
         raise ValueError('Unqualified iOS 6 Aquila payload')
@@ -88,6 +94,12 @@ def prepare_ios6_payload(original, root_device, output):
     if original.count(b'/bin/launchctl\0') != 1:
         raise ValueError('Unrecognized iOS 6 Aquila launchctl contract')
     data = original.replace(before, after.ljust(len(before), b'\0'))
+    if defer_library_jobs:
+        for before, after in [(b'/Library/LaunchDaemons\0', EARLY_JOBS.encode()+b'\0'),
+                              (b'/Library/LaunchDaemons/%s\0', EARLY_JOBS.encode()+b'/%s\0')]:
+            if data.count(before) != 1 or len(after) > len(before):
+                raise ValueError('Unrecognized iOS 6 Aquila job directory')
+            data = data.replace(before, after.ljust(len(before), b'\0'))
     output = Path(output)
     output.write_bytes(data)
     return resign(output, signature['entitlements'])
