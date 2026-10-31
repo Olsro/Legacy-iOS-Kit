@@ -82,7 +82,48 @@ def library(name):
     return C.CDLL(path)
 
 
+# Linux loads the distribution's libimobiledevice, unlike the bundled tools
+# which use LibreSSL. Releases before upstream a15a31611 (2023), such as
+# 1.3.0 on Ubuntu 24.04 / Linux Mint 22, already force TLS 1.0 at security
+# level 0 but do not set SSL_OP_LEGACY_SERVER_CONNECT. OpenSSL 3 then refuses
+# old lockdownd servers without RFC 5746 ("unsafe legacy renegotiation
+# disabled"), seen as LOCKDOWN_E_SSL_ERROR (-5) although ideviceinfo reports
+# Activated. OpenSSL applies system_default options in SSL_CTX_new and the
+# library only adds options afterwards; OpenSSL reads its configuration once
+# per process, hence the child process.
+LEGACY_TLS_CONF = '''openssl_conf = olsn0w_init
+[olsn0w_init]
+ssl_conf = olsn0w_ssl
+[olsn0w_ssl]
+system_default = olsn0w_tls
+[olsn0w_tls]
+Options = UnsafeLegacyServerConnect
+'''
+
+
+
 def acknowledge(udid, identity):
+    if platform.system()!='Linux':return acknowledge_native(udid,identity)
+    import json, os, sys, tempfile
+    if not re.fullmatch(r'[0-9a-fA-F]{40}',udid):raise ValueError('Invalid USB identity')
+    with tempfile.TemporaryDirectory(prefix='olsn0w-tls-') as folder:
+        conf=Path(folder)/'openssl.cnf';conf.write_text(LEGACY_TLS_CONF)
+        env=dict(os.environ,OPENSSL_CONF=str(conf))
+        try:
+            result=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--acknowledge',udid,
+                                   json.dumps(identity)],capture_output=True,timeout=60,env=env)
+        except subprocess.TimeoutExpired:
+            raise ActivationAcknowledgementPending('Activation handshake timed out') from None
+    try:
+        kind,message=json.loads(result.stdout.decode(errors='replace').strip().splitlines()[-1])
+    except (ValueError,IndexError):
+        raise ActivationAcknowledgementPending('Activation handshake helper failed (exit '+str(result.returncode)+'): '
+                                               +result.stderr.decode(errors='replace')[-500:].strip()) from None
+    if kind=='ok':return message
+    raise {'identity':ValueError,'error':RuntimeError}.get(kind,ActivationAcknowledgementPending)(message)
+
+
+def acknowledge_native(udid, identity):
     """Acknowledge the handshake only after the device reports Activated.
 
     This does not create activation records, alter activation state, or complete
@@ -141,3 +182,17 @@ def acknowledge(udid, identity):
     finally:
         if client:mobile.lockdownd_client_free(client)
         if device:mobile.idevice_free(device)
+
+
+if __name__=='__main__':
+    import json, sys
+    if sys.argv[1:2]!=['--acknowledge'] or len(sys.argv)!=4:sys.exit('usage: activation.py --acknowledge UDID IDENTITY')
+    try:
+        reply=['ok',acknowledge_native(sys.argv[2],json.loads(sys.argv[3]))]
+    except ActivationAcknowledgementPending as error:
+        reply=['pending',str(error)]
+    except ValueError as error:
+        reply=['identity',str(error)]
+    except Exception as error:
+        reply=['error',str(error)]
+    print(json.dumps(reply))

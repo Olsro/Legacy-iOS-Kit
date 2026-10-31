@@ -389,7 +389,24 @@ the native library supplied by the pinned `libusb-package==1.0.26.4` dependency
 in the private Python environment. This includes a macOS 10.9+ Intel wheel and
 does not require Homebrew. Runtime preflight checks the actual libusb backend,
 not just the Python import, before any firmware preparation. Post-boot activation
-acknowledgement uses libimobiledevice and libplist on either host.
+acknowledgement uses libimobiledevice and libplist on either host. On Linux these
+are the distribution's libraries, not the Kit's LibreSSL tools. libimobiledevice
+releases before upstream commit `a15a31611` (2023), such as 1.3.0 on Ubuntu
+24.04 / Linux Mint 22, do not set `SSL_OP_LEGACY_SERVER_CONNECT`; OpenSSL 3 then
+refuses old lockdownd servers without RFC 5746 with "unsafe legacy renegotiation
+disabled", reported as `lockdownd error -5`
+([issue #26](https://github.com/Olsro/Legacy-iOS-Kit/issues/26)). The handshake
+therefore runs in a child process whose private `OPENSSL_CONF` sets only
+`Options = UnsafeLegacyServerConnect`; the library already forces TLS 1.0 at
+security level 0 itself. The rest of the Kit keeps the system defaults. In an
+Ubuntu 24.04 container (OpenSSL 3.0.13), a client reproducing that release's TLS
+setup failed with this error against a TLS 1.0 server without RFC 5746, and
+completed the handshake with this configuration; the same configuration enables
+the option in a Python process that loads the system `libimobiledevice-1.0.so.6`.
+Against a real iPod5,1 on iOS 6.1.3 (10B329), whose lockdownd ServerHello is
+TLS 1.0 / `TLS_RSA_WITH_AES_256_CBC_SHA` without any extension (no RFC 5746
+`renegotiation_info`), that container's `ideviceinfo` failed with `SSL error (-5)`
+and succeeded with this configuration.
 
 Linux tools receive an absolute path to the Kit's bundled shared libraries,
 including LibreSSL, even when launched from a session working directory. Before

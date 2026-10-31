@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from activation import ActivationAcknowledgementPending, acknowledge
+import activation
+from activation import ActivationAcknowledgementPending, acknowledge_native as acknowledge
 
 
 class ActivationAcknowledgement(unittest.TestCase):
@@ -107,3 +108,47 @@ class ActivationAcknowledgement(unittest.TestCase):
         with self.assertRaisesRegex(ActivationAcknowledgementPending, 'complete first'):
             acknowledge(self.udid, self.identity)
         self.mobile.lockdownd_set_value.assert_not_called()
+
+
+class LinuxLegacyTlsHelper(unittest.TestCase):
+    udid = 'a'*40
+    identity = dict(product='iPod5,1', ecid=123)
+
+    def run_helper(self, stdout, returncode=0):
+        seen = {}
+
+        def fake_run(argv, **options):
+            seen['argv'] = argv
+            seen['conf'] = Path(options['env']['OPENSSL_CONF']).read_text()
+            return Mock(stdout=stdout, stderr=b'native trace', returncode=returncode)
+        with patch('activation.platform.system', return_value='Linux'), \
+             patch('activation.subprocess.run', side_effect=fake_run):
+            try:
+                return activation.acknowledge(self.udid, self.identity)
+            finally:
+                self.seen = seen
+
+    def test_linux_handshake_runs_with_legacy_tls_configuration(self):
+        result = self.run_helper(b'["ok", {"activation_state": "Activated", "acknowledged": true}]\n')
+        self.assertEqual(result, dict(activation_state='Activated', acknowledged=True))
+        self.assertEqual(self.seen['argv'][1:4], [str(Path(activation.__file__).resolve()),
+                                                  '--acknowledge', self.udid])
+        self.assertIn('Options = UnsafeLegacyServerConnect', self.seen['conf'])
+
+    def test_linux_helper_keeps_failure_kinds(self):
+        with self.assertRaisesRegex(ActivationAcknowledgementPending, 'handshake.*-5'):
+            self.run_helper(b'["pending", "Cannot open selected activation handshake (lockdownd error -5)"]')
+        with self.assertRaisesRegex(ValueError, 'another device'):
+            self.run_helper(b'["identity", "Activation handshake belongs to another device"]')
+
+    def test_linux_helper_crash_is_retryable_with_its_output(self):
+        with self.assertRaisesRegex(ActivationAcknowledgementPending, 'exit -11.*native trace'):
+            self.run_helper(b'', returncode=-11)
+
+    def test_other_hosts_use_the_native_libraries_directly(self):
+        with patch('activation.platform.system', return_value='Darwin'), \
+             patch('activation.acknowledge_native', return_value='native') as native, \
+             patch('activation.subprocess.run') as run:
+            self.assertEqual(activation.acknowledge(self.udid, self.identity), 'native')
+        native.assert_called_once_with(self.udid, self.identity)
+        run.assert_not_called()
