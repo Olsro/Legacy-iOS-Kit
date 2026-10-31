@@ -765,6 +765,17 @@ left daemons such as f.lux waiting forever. Its two job-directory strings now
 point to `/olsn0w/early-jobs` (only the Kit's recovery SSH job), and the system
 job `org.olsn0w.late-jobs` loads `/Library/LaunchDaemons` once GraphicsServices
 is ready.
+
+Rescue recipe 8 extends the iOS 6 TriStar reset to the native 6.1.3 RAM writer
+on A5 models whose profile selects it for iOS 6 (N78, P105, P106, P107). An
+iPod5,1 entering kDFU from a running iOS 8.4.1 panicked in the stock 10B329
+restore kernel with `AppleTriStarBuiltin: could not find system ID: bad IPC
+message ID` ([issue 27](https://github.com/Olsro/Legacy-iOS-Kit/issues/27)).
+Without `soft-reset`, `getSystemID` returns that error instead of resetting or
+publishing Apple's `0xffff` fallback. The RAM rescue DeviceTree and the
+futurerestore `Downgrade/RestoreDeviceTree` now both carry the property; the
+latter is re-encrypted with the donor key and KBAG and read back before use.
+This awaits physical validation.
 Unlisted products, releases and builds retain their stock kernel; a hash
 mismatch on a listed kernel stops preparation. Every patched container is
 read back before being embedded. Every iOS 6 release on the

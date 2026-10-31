@@ -469,10 +469,7 @@ def prepare(firmware, *, verbose=False):
         value=next(p['value'] for p in root['properties'] if p['name']=='firmware-min-capacity')
     raw,_=devicetree.add_property(raw,'/device-tree/defaults','no-effaceable-storage',value)
     if uses_tristar_soft_reset(source['product'], source['version']):
-        paths=[n['path'] for n in nodes if n['path'].endswith('/tristar')]
-        if len(paths)!=1:
-            raise ValueError('Qualified TriStar node is missing or ambiguous')
-        raw,_=devicetree.add_property(raw,paths[0],'soft-reset',b'')
+        raw=devicetree.add_tristar_soft_reset(raw)
     (out/'DeviceTree.raw').write_bytes(raw)
     run([tools()/'xpwntool',out/'DeviceTree.raw',out/'devicetree','-t',firmware/'DeviceTree.orig'],out/'tree-pack.log')
     if img3((out/'devicetree').read_bytes())[2]!=raw:raise ValueError('DeviceTree readback mismatch')

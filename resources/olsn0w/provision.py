@@ -10,6 +10,8 @@ import uuid
 import zipfile
 
 from archives import members
+from bootchain import uses_tristar_soft_reset
+import devicetree
 from common import IMAGE_TIMEOUT, KIT, MODELS, baseband_strategy, digest, integer, profile, run, tools
 from firmware import acquire, extract
 from hfs import HFS
@@ -94,6 +96,36 @@ def multipatch_key_metadata(base, donor):
         for field in ('iv','key'):
             if not source[0].get(field):raise ValueError('Incomplete multipatch firmware key: '+image)
             target[0][field]=source[0][field]
+    return output
+
+
+def soft_reset_restore_tree(firmware, keys, destination):
+    """Re-encrypt the 6.1.3 restore DeviceTree with the TriStar soft-reset.
+
+    Without it the iOS 6 restore kernel panics on a repeated TriStar
+    kIOReturnBadMessageID, e.g. after kDFU from a running iOS 8 (issue 27).
+    The donor key and KBAG are kept so the container stays a normal encrypted
+    restore component for futurerestore and iBEC.
+    """
+    matches=[item for item in keys.get('keys',[]) if item.get('image')=='DeviceTree']
+    if len(matches)!=1 or not matches[0].get('iv') or not matches[0].get('key'):
+        raise ValueError('Missing unique restore DeviceTree key')
+    iv,key=matches[0]['iv'],matches[0]['key']
+    raw=devicetree.add_tristar_soft_reset((firmware/'DeviceTree.raw').read_bytes())
+    plain=destination/'RestoreDeviceTree.raw'
+    output=destination/'RestoreDeviceTree.img3'
+    readback=destination/'RestoreDeviceTree.readback.raw'
+    try:
+        plain.write_bytes(raw)
+        run([tools()/'xpwntool',plain,output,'-t',firmware/'DeviceTree.orig','-iv',iv,'-k',key],
+            destination/'restore-tree-pack.log')
+        run([tools()/'xpwntool',output,readback,'-iv',iv,'-k',key],
+            destination/'restore-tree-readback.log')
+        if readback.read_bytes()!=raw:
+            raise ValueError('Restore DeviceTree readback differs')
+    finally:
+        for path in (plain,readback):
+            if path.exists():path.unlink()
     return output
 
 
@@ -352,13 +384,18 @@ def prepare(session, destination, ipsw=None, keys=None):
         if component == 'RestoreRamDisk' and data != image_path.read_bytes():
             raise ValueError('Restore RAM packing readback differs')
         replacements[identity['Manifest'][component]['Info']['Path']] = blob
-    additions=set();multipatch_manifest_sha256=None
+    additions=set();multipatch_manifest_sha256=None;tristar_soft_reset=False
     if native6:
         components=(('iBSS','iBSS.img3','ibss',None),
                     ('RestoreDeviceTree','DeviceTree.orig','dtre','Downgrade/RestoreDeviceTree'),
                     ('RestoreKernelCache','Kernelcache.orig','krnl','Downgrade/RestoreKernelCache'))
+        tristar_soft_reset=uses_tristar_soft_reset(selected['product'],'6.1.3')
+        restore_tree=(soft_reset_restore_tree(restore_firmware,restore_keys,destination)
+                      if tristar_soft_reset else None)
         for component,name,kind,downgrade_path in components:
-            source_file=(destination/name if component=='iBSS' else restore_firmware/name)
+            source_file=(destination/name if component=='iBSS' else
+                         restore_tree if component=='RestoreDeviceTree' and restore_tree else
+                         restore_firmware/name)
             blob=source_file.read_bytes();actual,tags,_=img3(blob)
             encrypted=component!='iBSS'
             if actual!=kind or ('KBAG' in tags) is not encrypted:
@@ -419,6 +456,7 @@ def prepare(session, destination, ipsw=None, keys=None):
     names = ['asr.patched','base8.ipsw','restore-ram.hfs','Ramdisk.img3','iBEC.img3']
     if native6:
         names+=['iBSS.img3','futurerestore-keys.json']
+        if tristar_soft_reset:names.append('RestoreDeviceTree.img3')
         names += [str(path.relative_to(destination)) for path in
                   (destination/'signed-technical').rglob('*') if path.is_file()]
     report = dict(kind='signed-base-restore-handoff',identity=selected,product=selected['product'],
@@ -438,6 +476,7 @@ def prepare(session, destination, ipsw=None, keys=None):
                   restore_bootchain_policy=('futurerestore-unpatched-rsa' if native6
                                             else 'futurerestore-stock-rsa'),
                   multipatch_manifest_sha256=multipatch_manifest_sha256,
+                  restore_tristar_soft_reset=tristar_soft_reset,
                   device_modified=False,physical_restore_verified=False,
                   asr_patch=asr_report,asr_source=asr_source,
                   stock_hfs_sha256=digest(base_firmware/'rootfs.hfs'),

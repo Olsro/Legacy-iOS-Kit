@@ -7,6 +7,8 @@ import tempfile
 import zipfile
 
 from archives import members, write_tar
+from bootchain import uses_tristar_soft_reset
+import devicetree
 from common import KIT, MODELS, digest, profile, run, tools
 from firmware import acquire, extract
 from hfs import HFS
@@ -16,7 +18,8 @@ from signing import resign, verify
 from system import entry, add_parents
 from restore_environment import checked_build, selected_build
 
-RECIPE_VERSION = 7
+# The native iOS 6 RAM writer DeviceTree carries the TriStar soft-reset.
+RECIPE_VERSION = 8
 RAM_VOLUME_BYTES = 64000000
 MAINTENANCE = '/olsn0w-maintenance'
 DISK_ENTITLEMENTS = {'com.apple.private.security.disk-device-access': True,
@@ -224,12 +227,20 @@ def prepare(session, ipsw=None, keys=None, port=6414, *, environment_build=None,
          restore_bootargs,
          *(['--ticket'] if native6 else [])],out/'ibec-patch.log',patcher=True)
     run([tools()/'xpwntool',out/'iBEC.patched',out/'iBEC.img3','-t',firmware/'iBEC.orig'])
-    run([tools()/'xpwntool',firmware/'DeviceTree.raw',out/'DeviceTree.img3','-t',firmware/'DeviceTree.orig'])
+    tree=firmware/'DeviceTree.raw'
+    tristar_soft_reset=native6 and uses_tristar_soft_reset(selected['product'],'6.1.3')
+    if tristar_soft_reset:
+        # Without this property the iOS 6 kernel panics on a repeated TriStar
+        # kIOReturnBadMessageID, e.g. after kDFU from a running iOS 8 (issue 27).
+        tree=out/'DeviceTree.raw'
+        tree.write_bytes(devicetree.add_tristar_soft_reset((firmware/'DeviceTree.raw').read_bytes()))
+    run([tools()/'xpwntool',tree,out/'DeviceTree.img3','-t',firmware/'DeviceTree.orig'])
     shutil.copyfile(firmware/'Kernelcache.img3',out/'Kernelcache.img3')
     for name, kind in [('Ramdisk.img3','rdsk'),('iBSS.img3','ibss'),('iBEC.img3','ibec'),('DeviceTree.img3','dtre'),('Kernelcache.img3','krnl')]:
         actual,tags,data = img3((out/name).read_bytes())
         if actual != kind or 'KBAG' in tags:raise ValueError('Unexpected encrypted rescue component: '+name)
         if name == 'Ramdisk.img3' and data != image.path.read_bytes():raise ValueError('RAM image packing differs')
+        if name == 'DeviceTree.img3' and data != tree.read_bytes():raise ValueError('RAM DeviceTree packing differs')
     from restore_run import target_prefix
     # target_prefix pins the standard key filenames, so publish a dedicated
     # rescue key under that name without sharing it with the target image.
@@ -247,6 +258,7 @@ def prepare(session, ipsw=None, keys=None, port=6414, *, environment_build=None,
     report = dict(recipe_version=RECIPE_VERSION,product=selected['product'],build='12H321',
                   restore_environment_build=environment_build,
                   multipatch=bool(selected_profile.get('multipatch')),
+                  tristar_soft_reset=tristar_soft_reset,
                   bootstrap_library_build='12H321',
                   ram_root='md0',automatic_disk_mounts=False,device_modified=False,physical_boot_verified=False,
                   files={name:digest(session/name) for name in published},

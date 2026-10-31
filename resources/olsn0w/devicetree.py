@@ -41,6 +41,14 @@ def parse(data):
     return nodes
 
 
+def add_tristar_soft_reset(raw):
+    """Let iOS 6 AppleTriStarBuiltIn reset and fall back on a System-ID IPC error."""
+    paths=[n['path'] for n in parse(raw) if n['path'].endswith('/tristar')]
+    if len(paths)!=1:
+        raise ValueError('Qualified TriStar node is missing or ambiguous')
+    return add_property(raw,paths[0],'soft-reset',b'')[0]
+
+
 def add_property(raw, path, name, value):
     before=parse(raw)
     matches=[n for n in before if n['path']==path]
