@@ -3,8 +3,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from restore_run import (boot_success_ready, cydia_initialization_ready, cydia_needs_start,
-                         pangu_needs_writable_root,
-                         pangu_writable_root_ready, services_ready,
+                         untether_needs_writable_root,
+                         untether_writable_root_ready, services_ready,
                          startup_failure, startup_status)
 
 class StartupQualification(unittest.TestCase):
@@ -16,21 +16,22 @@ class StartupQualification(unittest.TestCase):
         self.assertTrue(services_ready(jobs,'8.1.3',True,'selected'))
         self.assertFalse(services_ready(jobs,'8.1.3',True,'another'))
 
-    def test_pangu_completion_requires_marker_and_writable_selected_root(self):
+    def test_ios7_completion_requires_marker_and_writable_selected_root(self):
         report={'layout':{'partitions':[
             {'role':'system','device':'/dev/disk0s1s3'},
             {'role':'data','device':'/dev/disk0s1s2'}]}}
         lines=['N42AP','11D257','selected','CYDIA_READY:selected',
                'UNTETHER_READY:ready',
                '/dev/disk0s1s3 on / (hfs, local, journaled)']
-        self.assertTrue(pangu_writable_root_ready(lines,report))
-        self.assertFalse(pangu_writable_root_ready(
+        self.assertTrue(untether_writable_root_ready(lines,report))
+        self.assertFalse(untether_writable_root_ready(
             [*lines[:5],lines[5].replace('journaled','read-only, journaled')],report))
-        self.assertFalse(pangu_writable_root_ready(
+        self.assertFalse(untether_writable_root_ready(
             [*lines[:4],'UNTETHER_READY:',lines[5]],report))
-        self.assertTrue(pangu_needs_writable_root('7.1.2'))
-        self.assertFalse(pangu_needs_writable_root('7.0.6'))
-        self.assertFalse(pangu_needs_writable_root('8.4.1'))
+        for release in ('7.0', '7.0.6', '7.1', '7.1.2'):
+            self.assertTrue(untether_needs_writable_root(release))
+        self.assertFalse(untether_needs_writable_root('6.1.3'))
+        self.assertFalse(untether_needs_writable_root('8.4.1'))
 
     def test_active_data_migration_only_blocks_pre_ios8_boots(self):
         jobs='10 - com.apple.SpringBoard\n- 0 com.saurik.Cydia.Startup\n'

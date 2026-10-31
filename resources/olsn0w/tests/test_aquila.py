@@ -25,6 +25,33 @@ class ReleasePayload(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unqualified'):
             prepare_payload(b'unknown', '/dev/disk0s1s3', '/unused')
 
+    def test_shared_ios7_payload_widens_mapping_scan_and_unmap(self):
+        original = bytearray(0x6694)
+        original[0x6510:0x6514] = bytes.fromhex('c0f20011')
+        original[0x652e:0x6532] = bytes.fromhex('b0f1807f')
+        original[0x6690:0x6694] = bytes.fromhex('c0f20011')
+        original += b'/dev/disk0s1s1\0middle/bin/launchctl\0suffix'
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('aquila.hashlib.sha256') as sha256, \
+             patch('aquila.verify', return_value={'entitlements': b'plist'}), \
+             patch('aquila.resign') as resign:
+            sha256.return_value.hexdigest.return_value = \
+                'a10c700b7f0ff38121326c65be4543162459dec8fb8e2f90a6602a0383e25f49'
+            output = Path(directory)/'aquila'
+            prepare_payload(bytes(original), '/dev/disk0s1s3', output)
+            wide = output.read_bytes()
+            resign.assert_called_once_with(output, b'plist')
+            self.assertEqual(wide[0x6510:0x6514], bytes.fromhex('c0f20041'))
+            self.assertEqual(wide[0x652e:0x6532], bytes.fromhex('b0f1806f'))
+            self.assertEqual(wide[0x6690:0x6694], bytes.fromhex('c0f20041'))
+            self.assertIn(b'/dev/disk0s1s3\0', wide)
+            self.assertIn(b'/olsn0w/lctl\0', wide)
+            for offset in (0x6510, 0x652e, 0x6690):
+                damaged = bytearray(original)
+                damaged[offset] ^= 1
+                with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, 'kernel search'):
+                    prepare_payload(bytes(damaged), '/dev/disk0s1s3', output)
+
     def test_ios6_keeps_its_native_payload_and_stock_launchctl(self):
         import tarfile
         archive=Path(__file__).resolve().parents[2]/'jailbreak/aquila_6.tar'

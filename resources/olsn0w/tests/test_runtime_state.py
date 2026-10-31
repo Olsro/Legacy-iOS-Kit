@@ -177,13 +177,19 @@ class DistributedState(unittest.TestCase):
             activate.assert_called_once()
             self.assertFalse((Path(work)/'qualification.json').exists())
 
-    def test_central_qualification_waits_for_pangu_without_rebooting(self):
+    def test_central_qualification_waits_for_all_ios7_untethers_without_rebooting(self):
         result_record={'writable_root_verified':True}
         with patch.object(restore_run,'qualify',return_value=result_record) as qualify:
             result=restore_run.qualify_installed_target(
                 Path('/bundle'),['ssh'],'a'*40,'7.1.2',timeout=480,
                 progress=lambda _:None)
         self.assertIs(result,result_record)
+        qualify.assert_called_once()
+        self.assertTrue(qualify.call_args.kwargs['verify_writable_root'])
+
+        with patch.object(restore_run,'qualify',return_value=result_record) as qualify:
+            restore_run.qualify_installed_target(
+                Path('/bundle'),['ssh'],'a'*40,'7.0.6',progress=lambda _:None)
         qualify.assert_called_once()
         self.assertTrue(qualify.call_args.kwargs['verify_writable_root'])
 

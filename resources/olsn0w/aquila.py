@@ -66,6 +66,19 @@ def prepare_payload(original, root_device, output):
         if data.count(before) != 1 or len(after) > len(before):
             raise ValueError('Unrecognized Aquila path or oversized replacement')
         data = data.replace(before, after.ljust(len(before), b'\0'))
+    # P101 7.0.6 exposes the live kernel at framebuffer-relative 0x23fd000,
+    # beyond upstream's 16 MiB window. This limit belongs to the shared iOS 7
+    # executable, not to one board: correct every product using this payload.
+    # Widen mapping, scan and unmap together. Earlier headers still win and
+    # the upstream header checks/physical-address derivation remain intact.
+    for offset, before, after in (
+            (0x6510, 'c0f20011', 'c0f20041'),  # movt r1, #0x100 -> #0x400
+            (0x652e, 'b0f1807f', 'b0f1806f'),  # cmp r0, #16 MiB -> #64 MiB
+            (0x6690, 'c0f20011', 'c0f20041')):
+        before, after = bytes.fromhex(before), bytes.fromhex(after)
+        if data[offset:offset+len(before)] != before:
+            raise ValueError('Unrecognized Aquila kernel search window')
+        data = data[:offset] + after + data[offset+len(before):]
     output = Path(output)
     output.write_bytes(data)
     return resign(output, signature['entitlements'])

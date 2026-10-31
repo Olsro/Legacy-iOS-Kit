@@ -29,8 +29,8 @@ from signing import resign, verify
 
 PACKAGE_ROOT = KIT / 'resources/jailbreak'
 TARGET_SCRIPTS = Path(__file__).parent / 'target'
-# Rebuild cached target kernels with the qualified P105 TriStar fallback.
-RECIPE_VERSION = 56
+# Rebuild cached iOS 7 Aquila images with the wider live-kernel search window.
+RECIPE_VERSION = 57
 
 CYDIA_DEFAULT_SOURCES = (
     b'deb http://apt.saurik.com/ ios/847.27 main\n'

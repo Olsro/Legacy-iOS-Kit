@@ -610,6 +610,24 @@ link and its Data-backed default-source link at the real `/private/etc` HFS
 catalog path before first boot. The link's mobile-owned cache target is seeded
 with the five default Cydia repositories as well; Cydia returning status 0
 without creating that cache can therefore no longer yield an empty source list.
+
+System recipe 57 widens Aquila's framebuffer-relative kernel search from 16 to
+64 MiB for every product using the shared iOS 7 payload, including the iOS 7.1
+Aquila selections. On a physically tested iPad3,4 iOS 7.0.6 boot, the live kernel header
+was at offset `0x23fd000`, outside the original window. The pinned payload's
+mapping size, scan limit and unmap size are patched together and re-signed;
+the original first-header selection is preserved. This fixes Aquila's early
+`exploit failed` exit, which left System read-only and Cydia waiting for the
+untether completion marker. The repair reached a writable System and completed
+Cydia first-start on the installed Data generation, including after reboot,
+without another erase. This hardware verification is specific to iPad3,4 on
+7.0.6. The native iOS 5/6 Aquila binary already searches memory in successive
+chunks; the iOS 8 EverUntether binary uses a 256 MiB kernel search. Neither has
+this shared iOS 7 payload's 16 MiB limit.
+Startup qualification also requires the current boot's untether marker and a
+writable selected System volume for every iOS 7 release, including 7.0.x.
+An incomplete Aquila handoff now reports the root-remount wait directly.
+
 All iOS 5/6/7/8 target images also include the nine repositories listed at
 http://cydia.olsro.fr/ (checked 2026-09-24): BigBoss, Cydia.vn, Eat My Phone,
 Hack Your iPhone, ModMyi, Personal (Olsro), Ryan Petrich, Saurik and ZodTTD.

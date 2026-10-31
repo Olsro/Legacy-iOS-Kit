@@ -123,12 +123,12 @@ def cydia_needs_start(text, initialized):
     return not initialized and bool(job) and job[0] == '-'
 
 
-def pangu_needs_writable_root(release):
-    """Require the writable root for both iOS 7.1 untether choices."""
-    return version(release)[0] == 7 and version(release) >= version('7.1')
+def untether_needs_writable_root(release):
+    """Require kernel handoff and writable root for every iOS 7 untether."""
+    return version(release)[0] == 7
 
 
-def pangu_writable_root_ready(lines, report):
+def untether_writable_root_ready(lines, report):
     """Require the untether marker and the selected root mounted read-write."""
     if len(lines) < 6 or lines[4] != 'UNTETHER_READY:ready':
         return False
@@ -150,9 +150,9 @@ def lockdown_pairing_required(result):
 
 def qualify_installed_target(bundle, prefix, udid, release, timeout=360,
                              progress=print):
-    """Qualify the first boot, including the iOS 7.1 root remount."""
+    """Qualify the first boot, including every iOS 7 root remount."""
     return qualify(bundle,prefix,udid,timeout=timeout,progress=progress,
-                   verify_writable_root=pangu_needs_writable_root(release))
+                   verify_writable_root=untether_needs_writable_root(release))
 
 
 def qualify(bundle, prefix, udid, timeout=360, progress=print,
@@ -199,7 +199,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 if target_identity_ready(lines,report):
                     initialized=cydia_initialization_ready(lines,report['generation'])
                     writable=(not verify_writable_root or
-                              pangu_writable_root_ready(lines,report))
+                              untether_writable_root_ready(lines,report))
                     if not writable:
                         # Pangu can reach its launchctl endpoint despite a
                         # failed root remount. Its marker alone is therefore
