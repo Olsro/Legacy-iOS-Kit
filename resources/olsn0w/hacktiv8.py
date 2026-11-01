@@ -52,6 +52,18 @@ LOCKDOWN_435_EDITS = (
     (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
 )
 
+# The iPad2,1 4.3.2 (8H7) lockdownd is byte-identical to the qualified 4.3.5
+# 8L1 image around the activation call, differing only in LC_UUID, two dylib
+# version bytes and the ad-hoc signature. No historical bundle redistributes a
+# patch for it, so reuse only 4.3.5's functional skip (the 07f0d1fd BL at
+# 0xbb0e becomes an unconditional branch) and pin the complete input and result
+# rather than a model name or an assumed offset.
+LOCKDOWN_432_ORIGINAL = 'bd9e472719bb62e51061fa30957caac73d96838b8ffe2af281ed576e8624091f'
+LOCKDOWN_432_PATCHED = 'efcc1aa4f07254cb05c6cd16ad8785a50eafebbd34e562ff73b237d19a1c6372'
+LOCKDOWN_432_EDITS = (
+    (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+)
+
 LOCKDOWN_PATCHES = (
     (
         [
@@ -114,6 +126,19 @@ def patch_lockdownd(data, product=None, build=None, *, sign=False):
         result = rehash_adhoc(data, changed)
         if hashlib.sha256(result).hexdigest() != LOCKDOWN_435_PATCHED:
             raise ValueError('Legacy 4.3.5 patch does not match the qualified result')
+        return result, 0xbb0e, True
+    if checksum == LOCKDOWN_432_PATCHED:
+        verify(data)
+        return bytes(data), 0xbb0e, False
+    if checksum == LOCKDOWN_432_ORIGINAL:
+        changed = bytearray(data)
+        for offset, original, replacement in LOCKDOWN_432_EDITS:
+            if changed[offset:offset+len(original)] != original:
+                raise ValueError('Unexpected 4.3.2 lockdownd bytes')
+            changed[offset:offset+len(original)] = replacement
+        result = rehash_adhoc(data, changed)
+        if hashlib.sha256(result).hexdigest() != LOCKDOWN_432_PATCHED:
+            raise ValueError('Legacy 4.3.2 patch does not match the qualified result')
         return result, 0xbb0e, True
     if product in ('iPhone2,1', 'iPhone4,1') and build == '9B206':
         checksum = hashlib.sha256(data).hexdigest()

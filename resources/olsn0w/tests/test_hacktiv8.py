@@ -331,6 +331,31 @@ class Legacy4Regression(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'qualified result'):
                     hacktiv8.patch_lockdownd(original, 'iPhone2,1', '8L1')
 
+    def test_pinned_432_reuses_the_435_activation_skip(self):
+        original = bytearray(0xbc00)
+        patched = bytearray(original)
+        for offset, before, after in hacktiv8.LOCKDOWN_432_EDITS:
+            original[offset:offset+len(before)] = before
+            patched[offset:offset+len(after)] = after
+        original, patched = bytes(original), bytes(patched)
+        self.assertEqual(hacktiv8.LOCKDOWN_432_EDITS,
+                         (hacktiv8.LOCKDOWN_435_EDITS[-1],))
+        with patch.object(hacktiv8, 'LOCKDOWN_432_ORIGINAL', hashlib.sha256(original).hexdigest()), \
+             patch.object(hacktiv8, 'LOCKDOWN_432_PATCHED', hashlib.sha256(patched).hexdigest()), \
+             patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new)), \
+             patch.object(hacktiv8, 'verify'):
+            for product in ('iPad2,1', 'iPad2,2', None):
+                for sign in (True, False):
+                    self.assertEqual(hacktiv8.patch_lockdownd(original, product, '8H7', sign=sign),
+                                     (patched, 0xbb0e, True))
+                    self.assertEqual(hacktiv8.patch_lockdownd(patched, product, '8H7', sign=sign),
+                                     (patched, 0xbb0e, False))
+            with self.assertRaisesRegex(ValueError, 'does not recognize'):
+                hacktiv8.patch_lockdownd(original+b'x', 'iPad2,1', '8H7')
+            with patch.object(hacktiv8, 'rehash_adhoc', return_value=b'wrong'):
+                with self.assertRaisesRegex(ValueError, 'qualified result'):
+                    hacktiv8.patch_lockdownd(original, 'iPad2,1', '8H7')
+
     def test_setup_absence_is_only_accepted_before_ios5(self):
         image = Mock()
         for release in ('4.0', '4.2.1', '4.3.5', '5.0', '5.1.1', '6.1.3', '7.1.2', '8.3'):
