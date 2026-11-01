@@ -349,6 +349,19 @@ def data_formatter(rescue_build):
     raise ValueError('Unsupported restore formatter environment')
 
 
+def data_format_device(rescue_build, sector):
+    """Choose the Data node the selected formatter can address.
+
+    The iOS 7+ formatter reads its allocation bitmap in disk-sector units at
+    HFS-block offsets (MarkExtentUsed: 8192 bytes at 4096 on K93/K94/K95).
+    The raw node rejects that unaligned request with EINVAL; the buffered
+    block node accepts it and is flushed on close. Keep the qualified raw
+    path for 4 KiB sectors and for the native iOS 6 formatter.
+    """
+    if rescue_build=='12H321' and sector>BLOCK:return '/dev/disk0s1s2'
+    return '/dev/rdisk0s1s2'
+
+
 def require_data_environment(product, release, rescue_build):
     """Reject the A5/iOS5-6 cross-kernel crypto view before changing storage.
 
@@ -404,7 +417,7 @@ def _finish_data(bundle,ram,report,layout,expected,state,stage,progress):
     # the selected iOS 8 formatter cannot run against iOS 6 libSystem.
     formatter=data_formatter(ram.rescue_build)
     (bundle/'data-format.log').write_bytes(ram.run(
-        formatter+' -s -J'+options+' -v Data -b 4096 /dev/rdisk0s1s2'))
+        formatter+' -s -J'+options+' -v Data -b 4096 '+data_format_device(ram.rescue_build,layout['block_size'])))
     state['formatted_data']=True;checkpoint(journal,state)
     ram.run('rm /mnt1/olsn0w/restore-newfs')
     ram.run(ram.tool('unmount')+' /mnt1');ram.guard()

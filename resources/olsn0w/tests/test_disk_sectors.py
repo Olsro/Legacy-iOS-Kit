@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore import Rescue, aligned_ranges, align_image, copy_image, read_fresh_image, _finish_install
+from restore import Rescue, aligned_ranges, align_image, copy_image, data_format_device, read_fresh_image, _finish_install
 from test_layout import fixture
 import test_hfs_extents
 from hfs_extents import allocated_ranges
@@ -137,6 +137,13 @@ class DiskSectors(unittest.TestCase):
             self.assertIn('bs=8192 skip=2 count=1',endpoint)
             self.assertEqual([call.args for call in ram.read.call_args_list],
                              [('/dev/rdisk0s1',8,1),('/dev/rdisk0s1s3',0,1)])
+
+    def test_ios7_formatter_uses_buffered_data_node_only_on_8k_disks(self):
+        # MarkExtentUsed reads one 8 KiB sector at the 4 KiB bitmap block.
+        self.assertEqual(data_format_device('12H321',8192),'/dev/disk0s1s2')
+        self.assertEqual(data_format_device('12H321',4096),'/dev/rdisk0s1s2')
+        self.assertEqual(data_format_device('10B329',8192),'/dev/rdisk0s1s2')
+        self.assertEqual(data_format_device('10B329',4096),'/dev/rdisk0s1s2')
 
 
 if __name__=='__main__':unittest.main()
