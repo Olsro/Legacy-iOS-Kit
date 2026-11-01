@@ -148,6 +148,26 @@ class MacCMake(unittest.TestCase):
                     native_tools.prepare_macos_cmake()
                     fetch.assert_called_once()
 
+    def test_unusable_private_cmake_reports_the_actual_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self.fixture(root)
+            state = root / 'state'
+            (state / 'sources').mkdir(parents=True)
+            shutil.copy2(archive, state / 'sources' / (native_tools.CMAKE_MACOS_PACKAGE + '.tar.gz'))
+            def failing_cmake(executable, timeout=15):
+                self.assertEqual(timeout, native_tools.CMAKE_FIRST_LAUNCH_TIMEOUT)
+                return 'cmake --version exited with status 137'
+            with patch.object(native_tools, 'STATE', state), \
+                 patch.object(Path, 'home', return_value=root), \
+                 patch.object(native_tools.shutil, 'which', return_value=None), \
+                 patch.object(native_tools, 'usable_cmake', return_value=False), \
+                 patch.object(native_tools, 'cmake_problem', side_effect=failing_cmake), \
+                 patch.object(native_tools, 'CMAKE_MACOS_SHA256', native_tools.digest(archive)):
+                with self.assertRaisesRegex(RuntimeError, 'status 137.*brew install cmake'):
+                    native_tools.prepare_macos_cmake()
+            self.assertFalse((state / 'tools' / native_tools.CMAKE_MACOS_PACKAGE).exists())
+
     def test_bad_checksum_stops_before_extraction_or_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)

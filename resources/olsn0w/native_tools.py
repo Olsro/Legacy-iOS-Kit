@@ -19,12 +19,28 @@ CMAKE_MACOS_PACKAGE = 'cmake-3.31.12-macos10.10-universal'
 CMAKE_MACOS_SHA256 = 'cf096d869d45b79f5ce82f3d6abffa44f983fc146fee13cfe59024911e6975af'
 
 
-def usable_cmake(executable):
+# The first launch of a freshly extracted CMake.app can be held for a long time
+# by Gatekeeper/XProtect on recent macOS releases, especially on slow disks.
+CMAKE_FIRST_LAUNCH_TIMEOUT = 300
+
+
+def cmake_problem(executable, timeout=15):
+    """Return None if CMake runs, otherwise a short description of the failure."""
     try:
-        return subprocess.run([str(executable), '--version'], capture_output=True,
-                              timeout=15).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        result = subprocess.run([str(executable), '--version'], capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 'cmake --version did not finish within %d seconds' % timeout
+    except OSError as error:
+        return str(error)
+    if result.returncode:
+        output = (result.stdout + result.stderr).decode(errors='replace').strip()[-1000:]
+        return 'cmake --version exited with status %d%s' % (result.returncode,
+                                                            ': ' + output if output else '')
+    return None
+
+
+def usable_cmake(executable):
+    return cmake_problem(executable) is None
 
 
 def prepare_macos_cmake():
@@ -57,8 +73,11 @@ def prepare_macos_cmake():
         if result.returncode:
             raise RuntimeError('Could not extract private CMake: ' + result.stderr.decode(errors='replace'))
         extracted = Path(temporary) / CMAKE_MACOS_PACKAGE
-        if not usable_cmake(extracted / relative):
-            raise RuntimeError('Private CMake cannot run on this Mac; macOS 10.10+ is required.')
+        problem = cmake_problem(extracted / relative, CMAKE_FIRST_LAUNCH_TIMEOUT)
+        if problem is not None:
+            raise RuntimeError('Private CMake cannot run on this Mac (' + problem + '). '
+                               'Install CMake.app from https://cmake.org/download/ into /Applications, '
+                               'or run: brew install cmake, then run olsn0w again.')
         if destination.exists():
             shutil.rmtree(destination)
         extracted.rename(destination)
