@@ -21,7 +21,9 @@ def build(compiler,linker,libraries,formatter,output):
     prepare('iPad3,4','0'*40,compiler,linker,libraries,native)
     for name in PROGRAMS:
         (output/name).write_bytes((native/name).read_bytes())
-    for name,mib,clumps,label in [('root',30,'a=60,c=60,e=60','Olsn0wRoot'),('var',2,'a=16,c=8,e=8','Olsn0wVar')]:
+    # Bootstrap B-trees stay far below these clumps (~13 catalog nodes); larger
+    # clumps only take blocks from the fixed 30 MiB root reserve.
+    for name,mib,clumps,label in [('root',30,'a=16,c=32,e=8','Olsn0wRoot'),('var',2,'a=16,c=8,e=8','Olsn0wVar')]:
         file=output/(name+'.hfs')
         with file.open('xb') as f:f.truncate(mib*1024**2)
         subprocess.run([formatter,'-s','-b','4096','-c',clumps,'-U','0','-G','0','-M','0755','-v',label,str(file)],check=True)

@@ -9,7 +9,7 @@
     "service_gate": "7978eefc5e92b9421f1935ff01341df3aa8384e78ddd95e8652e42e5a76e851a",
     "power_ready": "30ba292e03ce1531b4df9022a830ddb286979133d6c99a71ecb07196a708e46f",
     "wake": "738fbb764f8e2a8f51ae67ae6850122c43dda44edb89f18ac201847508f7a614",
-    "root.hfs.gz": "c6cb87683f4133139c0200a78ff24a299c6b85a699b1893582318790c55fddae",
+    "root.hfs.gz": "83c3ed04dec1139370a4c5f2f20770fd293983bc193d74872f9fb9f2ba90c5f2",
     "var.hfs.gz": "ffc41e575cfb1b900683d24261b38165908b8fc13baeb81e941b362899218477",
     "wake_a5": "bd1859e093b0e62682521db20acce41b33116f7f79a2ddb9d8f1faf450d30071"
   },
@@ -24,12 +24,12 @@
     "native/bootstrap/wake_a5.c": "93ca58160042b682b200bc424b686cc0cdf5c20a364c91c05b6e4cfbfe1377b9",
     "native/bootstrap/root_start.c": "5f9a13fe6327cad7756c2241edce18c64c48dba146b4bacb809652a80008949f",
     "bootstrap_native.py": "79dd7a7dfa0be8b2c55e757b459171162b50f4ed4c68ddea755793c899de6536",
-    "native/bootstrap-assets/build.py": "530c4559a7321efed5075670573a4f62500ebfff3e3e9b7ec7471f48fb15bba9"
+    "native/bootstrap-assets/build.py": "4fb7de1a08378d735adc3b967762730533216302bd764c5ef0098c0f3c9cf581"
   },
   "templates": {
     "root": {
       "bytes": 31457280,
-      "sha256": "39fa56a4112ad1f5bfd776dca666c5bbc7276b980423789330d8a4b485f25b36"
+      "sha256": "b2f580cc4fa4067ee92adfd55fcb02fb7038bcdc459d9b349f2e76c0bcaed3d1"
     },
     "var": {
       "bytes": 2097152,
