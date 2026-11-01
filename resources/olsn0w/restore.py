@@ -349,17 +349,17 @@ def data_formatter(rescue_build):
     raise ValueError('Unsupported restore formatter environment')
 
 
-def data_format_device(rescue_build, sector):
-    """Choose the Data node the selected formatter can address.
+def data_block_size(rescue_build, sector):
+    """Choose the Data HFS block size the selected formatter can write.
 
     The iOS 7+ formatter reads its allocation bitmap in disk-sector units at
     HFS-block offsets (MarkExtentUsed: 8192 bytes at 4096 on K93/K94/K95).
-    The raw node rejects that unaligned request with EINVAL; the buffered
-    block node accepts it and is flushed on close. Keep the qualified raw
-    path for 4 KiB sectors and for the native iOS 6 formatter.
+    Both raw and block nodes reject that unaligned request with EINVAL, so
+    8 KiB-sector disks get sector-sized HFS blocks. Keep the qualified 4 KiB
+    geometry for 4 KiB sectors and for the native iOS 6 formatter.
     """
-    if rescue_build=='12H321' and sector>BLOCK:return '/dev/disk0s1s2'
-    return '/dev/rdisk0s1s2'
+    if rescue_build=='12H321' and sector>BLOCK:return sector
+    return BLOCK
 
 
 def require_data_environment(product, release, rescue_build):
@@ -416,14 +416,15 @@ def _finish_data(bundle,ram,report,layout,expected,state,stage,progress):
     # Its native formatter supports the required HFS content-protection flags;
     # the selected iOS 8 formatter cannot run against iOS 6 libSystem.
     formatter=data_formatter(ram.rescue_build)
+    block=data_block_size(ram.rescue_build,layout['block_size'])
     (bundle/'data-format.log').write_bytes(ram.run(
-        formatter+' -s -J'+options+' -v Data -b 4096 '+data_format_device(ram.rescue_build,layout['block_size'])))
+        formatter+' -s -J'+options+' -v Data -b '+str(block)+' /dev/rdisk0s1s2'))
     state['formatted_data']=True;checkpoint(journal,state)
     ram.run('rm /mnt1/olsn0w/restore-newfs')
     ram.run(ram.tool('unmount')+' /mnt1');ram.guard()
     part=next(p for p in layout['partitions'] if p['role']=='data')
     path=bundle/'data-native.hfs'
-    read_fresh_image(ram,'/dev/rdisk0s1s2',path,part['bytes'])
+    read_fresh_image(ram,'/dev/rdisk0s1s2',path,part['bytes'],block)
     image=HFS(path)
     if protect:
         if version(report['version'])[0] == 5:
@@ -481,12 +482,14 @@ def resume_data_format(bundle,ram,progress=print):
         state['error']=str(failure);checkpoint(journal,state);raise
 
 
-def read_fresh_image(ram, device, path, expected_bytes):
+def read_fresh_image(ram, device, path, expected_bytes, expected_block=BLOCK):
     """Copy only allocated native-format blocks into a sparse host file."""
     first=ram.read(device,0,1)
     if first[1024:1026]!=b'HX':raise ValueError('Native formatter did not create HFSX')
     block,total=struct.unpack_from('>II',first,1024+40)
-    if block!=BLOCK or total*block!=expected_bytes:raise ValueError('Formatted geometry differs')
+    if block!=expected_block or total*block!=expected_bytes:raise ValueError('Formatted geometry differs')
+    # ram.read and allocated_ranges address 4 KiB units.
+    scale=block//BLOCK
     with Path(path).open('xb') as stream:stream.truncate(expected_bytes)
     with Path(path).open('r+b') as stream:
         stream.write(first)
@@ -495,6 +498,7 @@ def read_fresh_image(ram, device, path, expected_bytes):
             start,count=struct.unpack_from('>II',first,1024+128+i*8)
             if not count:continue
             if start+count>total:raise ValueError('Bitmap extent outside partition')
+            start*=scale;count*=scale
             while count:
                 n=min(count,CHUNK);stream.seek(start*BLOCK);stream.write(ram.read(device,start,n));start+=n;count-=n
         # allocated_ranges opens the host image separately; publish even a

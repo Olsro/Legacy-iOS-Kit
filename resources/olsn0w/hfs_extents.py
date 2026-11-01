@@ -4,13 +4,14 @@ from pathlib import Path
 
 
 def allocated_ranges(path):
+    """Return allocated spans in 4 KiB units, whatever the HFS block size."""
     path=Path(path)
     with path.open('rb') as stream:
         stream.seek(1024);header=stream.read(512)
         if header[:2] not in (b'H+',b'HX'):
             raise ValueError('Expected HFS image')
         block,total,free=struct.unpack_from('>III',header,40)
-        if block!=4096 or path.stat().st_size!=block*total:
+        if block not in (4096,8192) or path.stat().st_size!=block*total:
             raise ValueError('Unsupported HFS image geometry')
         logical,_,fork_blocks=struct.unpack_from('>QII',header,112)
         extents=[struct.unpack_from('>II',header,128+i*8) for i in range(8)]
@@ -36,4 +37,5 @@ def allocated_ranges(path):
     if begin is not None:ranges.append((begin,total-begin))
     if used!=total-free or not ranges or ranges[0][0]!=0 or sum(ranges[-1])!=total:
         raise ValueError('Allocation bitmap disagrees with HFS header/reserved blocks')
-    return ranges
+    scale=block//4096
+    return [(first*scale,count*scale) for first,count in ranges]

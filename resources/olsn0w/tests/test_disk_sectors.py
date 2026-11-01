@@ -1,13 +1,14 @@
 """Raw 8 KiB sectors must stay distinct from 4 KiB HFS allocation units."""
 from pathlib import Path
 import shlex
+import struct
 import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from restore import Rescue, aligned_ranges, align_image, copy_image, data_format_device, read_fresh_image, _finish_install
+from restore import Rescue, aligned_ranges, align_image, copy_image, data_block_size, read_fresh_image, _finish_install
 from test_layout import fixture
 import test_hfs_extents
 from hfs_extents import allocated_ranges
@@ -138,12 +139,33 @@ class DiskSectors(unittest.TestCase):
             self.assertEqual([call.args for call in ram.read.call_args_list],
                              [('/dev/rdisk0s1',8,1),('/dev/rdisk0s1s3',0,1)])
 
-    def test_ios7_formatter_uses_buffered_data_node_only_on_8k_disks(self):
-        # MarkExtentUsed reads one 8 KiB sector at the 4 KiB bitmap block.
-        self.assertEqual(data_format_device('12H321',8192),'/dev/disk0s1s2')
-        self.assertEqual(data_format_device('12H321',4096),'/dev/rdisk0s1s2')
-        self.assertEqual(data_format_device('10B329',8192),'/dev/rdisk0s1s2')
-        self.assertEqual(data_format_device('10B329',4096),'/dev/rdisk0s1s2')
+    def test_ios7_formatter_uses_sector_sized_data_blocks_only_on_8k_disks(self):
+        # MarkExtentUsed reads one disk sector at the first bitmap block offset.
+        self.assertEqual(data_block_size('12H321',8192),8192)
+        self.assertEqual(data_block_size('12H321',4096),4096)
+        self.assertEqual(data_block_size('10B329',8192),4096)
+        self.assertEqual(data_block_size('10B329',4096),4096)
 
+    def test_8k_hfs_blocks_are_reported_and_collected_in_4k_units(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'source.hfs'
+            data=bytearray(8*8192);data[1024:1026]=b'HX'
+            struct.pack_into('>III',data,1024+40,8192,8,5)
+            struct.pack_into('>QII',data,1024+112,1,8192,1)
+            struct.pack_into('>II',data,1024+128,1,1)
+            data[8192]=0xc1  # blocks 0,1,7; block 6 holds stale bytes
+            data[6*8192:7*8192]=b'u'*8192;data[7*8192:]=b'v'*8192
+            path.write_bytes(data)
+            self.assertEqual(allocated_ranges(path),[(0,4),(14,2)])
+            ram=self.ram();run,_=self.transport(ram,data)
+            destination=Path(root)/'collected.hfs'
+            with patch.object(ram,'run',side_effect=run):
+                with self.assertRaisesRegex(ValueError,'geometry'):
+                    read_fresh_image(ram,'/dev/rdisk0s1s2',Path(root)/'wrong.hfs',len(data))
+                read_fresh_image(ram,'/dev/rdisk0s1s2',destination,len(data),8192)
+            collected=destination.read_bytes()
+            self.assertEqual(collected[:2*8192],bytes(data[:2*8192]))
+            self.assertEqual(collected[7*8192:],b'v'*8192)
+            self.assertEqual(collected[6*8192:7*8192],bytes(8192))
 
 if __name__=='__main__':unittest.main()
