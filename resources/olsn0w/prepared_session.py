@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from common import STATE, hardware_model, target_paths
+from common import STATE, dead_baseband, hardware_model, target_paths
 from device import same_hardware
 from restore import checked_manifest
 
@@ -42,7 +42,8 @@ def load_plan(path, identity, release, remove_setup_app, *, state=None, verbose=
     record = json.loads((session/'device.json').read_text())
     if (not same_hardware(record['identity'], identity) or record.get('device_modified') is not False
             or record.get('remove_setup_app', False) is not remove_setup_app
-            or record.get('verbose_boot', False) is not verbose):
+            or record.get('verbose_boot', False) is not verbose
+            or record.get('dead_baseband', False) is not dead_baseband(identity['product'])):
         raise ValueError('Saved preparation identity, activation or boot policy differs')
     bundle = plan['bundle']
     # work and run.json are created before the restore process can start.
@@ -105,7 +106,8 @@ def find_plan(identity, release, remove_setup_app, show=print, *, state=None, ve
             record = json.loads((path.parent/'device.json').read_text())
             if (not same_hardware(record['identity'], identity)
                     or record.get('remove_setup_app', False) is not remove_setup_app
-                    or record.get('verbose_boot', False) is not verbose):
+                    or record.get('verbose_boot', False) is not verbose
+                    or record.get('dead_baseband', False) is not dead_baseband(identity['product'])):
                 continue
             raw = json.loads(path.read_text())
             system = json.loads((Path(raw['system'])/'manifest.json').read_text())

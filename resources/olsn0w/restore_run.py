@@ -7,7 +7,7 @@ import socket
 import subprocess
 import time
 
-from common import hardware_model, profile, tools, version
+from common import dead_baseband, hardware_model, profile, tools, version
 from device import parse_recovery, same_hardware
 from rescue import boot, connect
 from restore import checked_manifest, checkpoint, install, refresh_layout
@@ -266,6 +266,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
             if (values.get('ProductType'),values.get('ProductVersion'),values.get('BuildVersion'))!=(report['product'],report['version'],report['build']):
                 raise ValueError('Lockdown reports a different target')
             baseband_ready=(cellular_disabled or not profile(report['product'])['has_baseband']
+                            or dead_baseband(report['product'])
                             or bool(values.get('BasebandVersion')))
             if retry_stalled_untether and baseband_ready:
                 progress('Pangu completed without remounting the selected System volume. '
@@ -367,6 +368,7 @@ def qualify(bundle, prefix, udid, timeout=360, progress=print,
                 writable_root_verified=verify_writable_root,autoboot_verified=True,
                 activation_skipped=activation_skipped,
                 cellular_service_disabled=cellular_disabled,
+                dead_baseband=dead_baseband(report['product']),
                 untether_retry_rebooted=untether_retry_rebooted)
     result['activation_acknowledgement']=activation_acknowledgement
     checkpoint(bundle/'qualification.json',result)

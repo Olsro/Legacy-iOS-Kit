@@ -130,6 +130,24 @@ def profile(product):
     return value
 
 
+_DEAD_BASEBAND = False
+
+
+def set_dead_baseband(enabled):
+    """Select the Kit's --dead-bb policy for this process (one device per run)."""
+    global _DEAD_BASEBAND
+    if type(enabled) is not bool:
+        raise ValueError('Expected an explicit dead-baseband policy')
+    _DEAD_BASEBAND = enabled
+
+
+def dead_baseband(product=None):
+    """Whether the user declared this cellular device's modem unresponsive."""
+    if product is not None and not profile(product)['has_baseband']:
+        return False
+    return _DEAD_BASEBAND
+
+
 def baseband_strategy(product):
     """Return whether the signed-base restore updates or preserves the modem."""
     selected=profile(product)
@@ -140,6 +158,10 @@ def baseband_strategy(product):
         raise ValueError('Unsupported modem restore strategy')
     if strategy=='update' and 'baseband_family' not in selected:
         raise ValueError('Updated modem profile needs a firmware family')
+    # A dead modem cannot be flashed: restored fails the whole restore while
+    # updating it. Never touch it, exactly like the preserved cellular iPads.
+    if _DEAD_BASEBAND:
+        return 'preserve'
     return strategy
 
 

@@ -11,7 +11,7 @@ import subprocess
 import time
 import uuid
 
-from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, integer, profile, run, save, tools, version, target_paths
+from common import KIT, MODELS, STATE, SUPPORT_MESSAGE, dead_baseband, integer, profile, run, save, tools, version, target_paths
 from device import query_recovery, same_hardware
 from firmware import releases
 from guided_inputs import tool
@@ -359,15 +359,24 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
     from hacktiv8 import available as hacktiv8_available, requires_cellular_disable
     use_hacktiv8=hacktiv8_available(
         selected['version'], product, selected['buildid'])
-    show('Optional configuration: official activation will be skipped if enabled.')
-    show('Apply Hacktiv8 while preserving Setup.app.'
-         if use_hacktiv8 else
-         'Hacktiv8 does not support this device/build. Setup.app can still be removed.')
-    if use_hacktiv8 and requires_cellular_disable(selected['version'],product):
-        show('Hacktiv8 on this iOS 8 cellular device disables the telephony service. Calls, SMS and cellular data will be unavailable; Wi-Fi remains available. Choose n to keep official activation and cellular service.')
+    dead=dead_baseband(product)
+    if dead:
+        # Apple cannot activate a cellular device whose modem does not answer.
+        show('dead-bb flag detected: the modem will not be flashed, collected or waited for.')
+        show('Official activation is unavailable with a dead baseband. '+
+             ('Hacktiv8 will be applied and Setup.app kept.' if use_hacktiv8 else
+              'Hacktiv8 does not support this device/build; Setup.app will be removed.'))
+        remove_setup_app=True
+    else:
+        show('Optional configuration: official activation will be skipped if enabled.')
+        show('Apply Hacktiv8 while preserving Setup.app.'
+             if use_hacktiv8 else
+             'Hacktiv8 does not support this device/build. Setup.app can still be removed.')
+        if use_hacktiv8 and requires_cellular_disable(selected['version'],product):
+            show('Hacktiv8 on this iOS 8 cellular device disables the telephony service. Calls, SMS and cellular data will be unavailable; Wi-Fi remains available. Choose n to keep official activation and cellular service.')
     prompt=('Apply Hacktiv8 and keep Setup.app? [y/n]: ' if use_hacktiv8 else
             'Remove Setup.app and skip activation? [y/n]: ')
-    while True:
+    while not dead:
         answer=read(prompt).strip().lower()
         if answer in ('y','yes','n','no'):
             remove_setup_app=answer in ('y','yes')
@@ -386,6 +395,7 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
         session=STATE/'sessions'/str(uuid.uuid4());session.mkdir(parents=True,mode=0o700)
         record=dict(identity=identity,device_modified=False,state='selected',manage_usb_tunnel=True,
                     remove_setup_app=remove_setup_app,verbose_boot=verbose,ipsws=ipsws)
+        if dead:record['dead_baseband']=True
         if udid:record['ram_udid']=udid
         save(session/'device.json',record)
         show('Preparing iOS '+selected['version']+' for '+product+'. Logs: '+str(session))
@@ -394,6 +404,7 @@ def menu(product,ecid,udid=None,refresh=False,read=input,show=print):
                  ' Setup.app will be removed.')+' Official activation will be skipped.'
                 if remove_setup_app else '')
     boot_note=' Verbose boot: '+('enabled.' if verbose else 'disabled.')
+    if dead:boot_note+=' Baseband: left untouched (dead-bb).'
     show('Ready: restore '+product+' to iOS '+selected['version']+'. This erases all data on this device.'+setup_note+boot_note)
     if read('Continue with restoration? [y/N]: ').strip().lower() not in ('y','yes'):
         show('Cancelled. Prepared files retained; no device was erased.');return

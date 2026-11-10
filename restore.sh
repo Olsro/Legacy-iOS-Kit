@@ -8803,7 +8803,11 @@ olsn0w_supported() {
 }
 
 menu_olsn0w() {
-    sh ../resources/olsn0w/run.sh menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" || warn "olsn0w stopped; see the reported reason."
+    local olsn0w_flags=()
+    if [[ $device_deadbb == 1 ]]; then
+        olsn0w_flags+=(--dead-bb)
+    fi
+    sh ../resources/olsn0w/run.sh menu --product "$device_type" --ecid "$device_ecid" --udid "${device_udid:-}" "${olsn0w_flags[@]}" || warn "olsn0w stopped; see the reported reason."
     pause
 }
 
@@ -10924,6 +10928,7 @@ menu_miscutilities() {
                 if olsn0w_supported; then
                     menu_items+=("Configure olsn0w restored device for SSH external access")
                     menu_items+=("Restore saved activation records on olsn0w device")
+                    menu_items+=("Stash olsn0w restored device (more space for tweaks)")
                 fi
             fi
             if [[ $device_proc != 1 ]] && (( device_proc < 7 )); then
@@ -10980,6 +10985,7 @@ menu_miscutilities() {
             "hactiv8" ) device_hacktiv8;;
             "Configure olsn0w restored device for SSH external access" ) device_olsn0w_external_ssh;;
             "Restore saved activation records on olsn0w device" ) device_olsn0w_restore_activation;;
+            "Stash olsn0w restored device (more space for tweaks)" ) device_olsn0w_stash;;
             "Activation Records" ) mode="actrec";;
             "Enable Flags" ) menu_flags;;
             "(Re-)Install Dependencies" ) install_depends;;
@@ -11174,6 +11180,19 @@ device_olsn0w_external_ssh() {
     [[ $? != 1 ]] && return
     sh ../resources/olsn0w/run.sh configure-ssh --product "$device_type" \
         --udid "$device_udid" --ecid "$device_ecid" || warn "OpenSSH configuration failed; see the reported reason."
+}
+
+device_olsn0w_stash() {
+    print "* Stashes an existing olsn0w installation, like Cydia does on a regular jailbreak."
+    print "* Applications, wallpapers, ringtones, /usr/include and /usr/share are moved to the"
+    print "  Data partition, which frees the System partition for more tweaks and packages."
+    print "* Requires this device's saved olsn0w restoration keys in this Kit folder."
+    print "* Close Cydia first and keep the device connected. This can take several minutes."
+    warn "olsn0w restores without stashing by default. Stashing cannot be undone from this menu."
+    select_yesno
+    [[ $? != 1 ]] && return
+    sh ../resources/olsn0w/run.sh stash --product "$device_type" \
+        --udid "$device_udid" --ecid "$device_ecid" || warn "Stashing did not complete; see the reported reason."
 }
 
 device_ssh() {

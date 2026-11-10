@@ -168,6 +168,49 @@ For a target bundle saved elsewhere, append `--bundle "$BUNDLE"`. The backups
 remain in `/var/lib/olsn0w/ssh-external-*` on the device. A normal restoration
 continues to use USB-only, key-authenticated SSH until this option is selected.
 
+## Stash an existing installation
+
+olsn0w restores with `/.cydia_no_stash`, so Cydia keeps everything on the System
+partition. To free that partition for more tweaks and packages, boot the
+restored device normally, connect it by USB, close Cydia and select **Misc
+Utilities → Stash olsn0w restored device (more space for tweaks)**.
+
+The option authenticates with the device-bound target keys under
+`saved/olsn0w/sessions/`, verifies the installed generation and that Cydia
+preparation completed, then runs Cydia's own `/usr/libexec/cydia/free.sh` on the
+device. `/Applications`, `/Library/Wallpaper`, `/Library/Ringtones`,
+`/usr/include` and `/usr/share` move to `/var/stash` on the Data partition and
+are replaced by symbolic links. Cydia skips a directory larger than the free
+Data space; the option then reports it and can be selected again later. Already
+stashed directories are left alone. The relocation continues on the device if
+the USB link drops; its output is kept in `/var/lib/olsn0w/stash.log`.
+`/.cydia_no_stash` is retained, so Cydia never starts a relocation by itself.
+Restart the device afterwards. There is no option to reverse stashing.
+
+The equivalent command is:
+
+```sh
+./restore.sh --olsn0w stash --product iPad2,5 --udid "$UDID"
+```
+
+## Dead baseband (`--dead-bb`)
+
+A cellular device whose modem no longer answers cannot complete the signed-base
+restore: `restored` fails while updating the baseband. Start the Kit with
+`./restore.sh --dead-bb` (or enable the flag in **Misc Utilities → Enable
+Flags**) before opening olsn0w. The modem is then handled like the preserved
+cellular iPad 2/3 modems: no modem firmware is downloaded, the restore runs with
+`--no-baseband` and `UpdateBaseband=false` in the restore RAM options, no
+personalized modem files are collected or installed, and startup verification
+does not wait for a `BasebandVersion`.
+
+Apple cannot activate a cellular device without a working modem, so official
+activation is skipped: Hacktiv8 is applied when the device/build supports it,
+otherwise Setup.app is removed. A preparation made without the flag is not
+reused with it (and conversely). The flag has no effect on Wi-Fi-only models.
+With the standalone commands, pass `--dead-bb` to every olsn0w action of the
+restoration together with `--hacktiv8`.
+
 ## Reinstall a provisioned device
 
 After preparing the firmware/system, supply the selected device's session and
