@@ -180,7 +180,18 @@ The option authenticates with the device-bound target keys under
 preparation completed, then runs Cydia's own `/usr/libexec/cydia/free.sh` on the
 device. `/Applications`, `/Library/Wallpaper`, `/Library/Ringtones`,
 `/usr/include` and `/usr/share` move to `/var/stash` on the Data partition and
-are replaced by symbolic links. Cydia skips a directory larger than the free
+are replaced by symbolic links.
+
+The restored Data partition keeps Apple's `nosuid` mount option, which would
+silently disable the root helpers of stashed applications such as iFile or
+iCleaner. The option therefore first removes `nosuid` (and nothing else) from the
+`/private/var` line of `/private/etc/fstab`, as the Kit's regular jailbreaks do.
+The original is kept in `/var/lib/olsn0w/stash-fstab-*` and the change applies at
+the next restart. Selecting the option again on an already stashed device only
+applies this mount correction. Deleting `/.cydia_no_stash` by hand makes Cydia
+relocate the directories without this correction, and is not supported.
+
+Cydia skips a directory larger than the free
 Data space; the option then reports it and can be selected again later. Already
 stashed directories are left alone. The relocation continues on the device if
 the USB link drops; its output is kept in `/var/lib/olsn0w/stash.log`.

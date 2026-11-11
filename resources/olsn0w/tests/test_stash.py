@@ -46,6 +46,7 @@ class Stash(unittest.TestCase):
             device_info=patch.object(stash, 'device_info', return_value=self.info),
             candidates=patch.object(stash, 'candidates', return_value=[(self.folder, {})]),
             check_target=patch.object(stash, 'check_target'),
+            allow_suid=patch.object(stash, 'allow_suid', return_value=False),
             connect=patch.object(stash, 'connect', side_effect=connect))
         self.mocks = {}
         for name, patcher in patches.items():
@@ -70,6 +71,31 @@ class Stash(unittest.TestCase):
         self.stash()
         self.assertNotIn(stash.RUN, target.commands)
         self.assertIn('already stashed', self.messages[-1])
+
+    def test_already_stashed_target_still_gets_the_mount_fix(self):
+        target = Target([self.done])
+        self.start(target)
+        self.mocks['allow_suid'].return_value = True
+        self.stash()
+        self.assertNotIn(stash.RUN, target.commands)
+        self.assertIn('nosuid', self.messages[0])
+        self.assertIn('Restart the device now', self.messages[-1])
+
+    def test_mount_fix_precedes_relocation(self):
+        target = Target([self.fresh, self.done])
+        self.start(target)
+        self.mocks['allow_suid'].side_effect = lambda connection: target.commands.append('fstab') or True
+        self.stash()
+        self.assertLess(target.commands.index('fstab'), target.commands.index(stash.RUN))
+        self.assertIn('Restart the device now', self.messages[-1])
+
+    def test_unexpected_fstab_stops_before_relocation(self):
+        target = Target([self.fresh])
+        self.start(target)
+        self.mocks['allow_suid'].side_effect = ValueError('Unexpected Data mount')
+        with self.assertRaisesRegex(ValueError, 'Unexpected Data mount'):
+            self.stash()
+        self.assertNotIn(stash.RUN, target.commands)
 
     def test_unauthenticated_target_is_not_modified(self):
         target = Target([self.fresh])
@@ -108,6 +134,84 @@ class Stash(unittest.TestCase):
                 patch('ssh_client.check'), patch.object(stash, 'stash') as run:
             olsn0w.main()
         run.assert_called_once_with(self.product, self.udid, '123', None)
+
+
+class Fstab(unittest.TestCase):
+    stock = (b'/dev/disk0s1s3 / hfs ro 0 1\n'
+             b'/dev/disk0s1s2 /private/var hfs rw,nosuid,nodev,protect 0 2\n')
+
+    def test_only_nosuid_is_removed_from_the_data_mount(self):
+        result = stash.suid_fstab(self.stock)
+        self.assertEqual(result, self.stock.replace(b'rw,nosuid,nodev', b'rw,nodev'))
+        self.assertEqual(stash.suid_fstab(result), result)
+        spaced = b'# data\n/dev/disk0s2  /private/var  hfs  nosuid,rw  0 2'
+        self.assertEqual(stash.suid_fstab(spaced), b'# data\n/dev/disk0s2 /private/var hfs rw 0 2')
+
+    def test_unfamiliar_fstab_is_refused(self):
+        for content in (b'/dev/disk0s1 / hfs ro 0 1\n', self.stock+self.stock.splitlines()[1]+b'\n',
+                        self.stock.replace(b'rw,nosuid', b'ro,nosuid'),
+                        self.stock.replace(b'/private/var hfs', b'/private/var apfs'),
+                        self.stock.replace(b' 0 2', b' 0')):
+            with self.subTest(content=content), self.assertRaises(ValueError):
+                stash.suid_fstab(content)
+
+
+class LocalConnection:
+    """Run the fstab transaction's real shell operations in a disposable tree."""
+    def __init__(self, root, corrupt=False, fail=False):
+        self.root, self.corrupt, self.fail = root, corrupt, fail
+        (root/'private/etc').mkdir(parents=True)
+        (root/'var/lib/olsn0w').mkdir(parents=True)
+        (root/'private/etc/fstab').write_bytes(Fstab.stock)
+
+    def local(self, command):
+        return (command.replace('/sbin/mount -u -w /', 'true').replace('/bin/sync', 'true')
+                .replace('/private/etc/', str(self.root/'private/etc')+'/')
+                .replace('/var/lib/olsn0w/', str(self.root/'var/lib/olsn0w')+'/'))
+
+    def read(self, path):
+        data = Path(self.local(path)).read_bytes()
+        return b'corrupted' if self.corrupt and path == stash.FSTAB and b'nosuid' not in data else data
+
+    def run(self, command, data=None, timeout=30):
+        if command == '/bin/sh -s':
+            command, data = data.decode(), None
+        elif self.fail and '/bin/mv -f' in command:
+            command = command.replace('/bin/mv -f', 'false')
+        result = subprocess.run(['/bin/sh', '-c', self.local(command)], input=data, capture_output=True)
+        if result.returncode:
+            raise RuntimeError('Transaction failed')
+        return result.stdout
+
+
+class FstabTransaction(unittest.TestCase):
+    def target(self, **options):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        return LocalConnection(self.root, **options)
+
+    def files(self):
+        return sorted(p.name for p in (self.root/'private/etc').iterdir())
+
+    def test_updates_once_and_keeps_the_original(self):
+        connection = self.target()
+        self.assertTrue(stash.allow_suid(connection))
+        self.assertEqual((self.root/'private/etc/fstab').read_bytes(), stash.suid_fstab(Fstab.stock))
+        backups = list((self.root/'var/lib/olsn0w').glob('stash-fstab-*/original'))
+        self.assertEqual([b.read_bytes() for b in backups], [Fstab.stock])
+        self.assertFalse(stash.allow_suid(connection))
+        self.assertEqual(len(list((self.root/'var/lib/olsn0w').iterdir())), 1)
+        self.assertEqual(self.files(), ['fstab'])
+
+    def test_failed_commit_or_readback_restores_the_original(self):
+        for options in (dict(fail=True), dict(corrupt=True)):
+            with self.subTest(**options):
+                connection = self.target(**options)
+                with self.assertRaises(RuntimeError):
+                    stash.allow_suid(connection)
+                self.assertEqual((self.root/'private/etc/fstab').read_bytes(), Fstab.stock)
+                self.assertEqual(self.files(), ['fstab'])
 
 
 class DeviceScripts(unittest.TestCase):

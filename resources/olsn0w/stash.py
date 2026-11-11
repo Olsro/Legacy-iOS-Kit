@@ -1,5 +1,6 @@
 """Stash an already restored olsn0w target with Cydia's own relocation script."""
 import subprocess
+import uuid
 
 from external_ssh import candidates, check_target, connect, device_info
 
@@ -51,6 +52,64 @@ RUN = ('set -eu\n'+PATH+
        '/bin/sync\n')
 
 
+FSTAB = '/private/etc/fstab'
+
+
+def suid_fstab(data):
+    """Let stashed setuid applications keep their privileges on the Data volume.
+
+    The stock policy mounts Data nosuid, which silently disables root helpers of
+    applications relocated to /var/stash (iFile, iCleaner). The Kit's regular
+    jailbreaks drop that option too. Every other option and line is retained.
+    """
+    lines, found = data.decode('ascii').split('\n'), 0
+    for index, line in enumerate(lines):
+        fields = line.split()
+        if not fields or fields[0].startswith('#') or len(fields) < 4 or fields[1] != '/private/var':
+            continue
+        options = fields[3].split(',')
+        if len(fields) != 6 or fields[2] != 'hfs' or 'rw' not in options:
+            raise ValueError('Unexpected Data mount in the device fstab; nothing was changed')
+        found += 1
+        if 'nosuid' in options:
+            fields[3] = ','.join(option for option in options if option != 'nosuid')
+            lines[index] = ' '.join(fields)
+    if found != 1:
+        raise ValueError('Unexpected Data mount in the device fstab; nothing was changed')
+    return '\n'.join(lines).encode('ascii')
+
+
+def allow_suid(connection):
+    """Return True when the fstab was changed; a restart then applies it."""
+    original = connection.read(FSTAB)
+    updated = suid_fstab(original)
+    if updated == original:
+        return False
+    # Same transaction as the SSH configuration: keep the original on Data,
+    # stage beside the destination, rename, read back, and restore on mismatch.
+    backup = '/var/lib/olsn0w/stash-fstab-'+uuid.uuid4().hex
+    pending = FSTAB+'.'+backup.rsplit('-', 1)[1]
+    connection.run('umask 077; /bin/mkdir '+backup+' && /bin/cp -p '+FSTAB+' '+backup+'/original')
+    if connection.read(backup+'/original') != original:
+        raise RuntimeError('Backup readback failed; the device fstab was left unchanged')
+    restore = '/bin/cp -p '+backup+'/original '+FSTAB+'\n/bin/sync\n'
+    script = ('set -eu\n/sbin/mount -u -w /\n'
+              'test ! -e '+pending+' && test ! -L '+pending+'\n'
+              "trap '/bin/rm -f "+pending+"' 0\n"
+              '/bin/cp -p '+FSTAB+' '+pending+'\n'
+              '/bin/cat > '+pending+'\n'
+              '/bin/mv -f '+pending+' '+FSTAB+'\n/bin/sync\n')
+    try:
+        # The script itself is the remote command so that stdin carries the file.
+        connection.run(script, updated)
+        if connection.read(FSTAB) != updated:
+            raise RuntimeError('The device fstab readback differs')
+    except Exception:
+        connection.run('/bin/sh -s', ('set -e\n'+restore).encode())
+        raise
+    return True
+
+
 def read_state(connection):
     state = {}
     for line in connection.run(STATE).decode().splitlines():
@@ -85,8 +144,15 @@ def stash(product, udid, ecid=None, bundle=None, progress=print, timeout=3600):
         if unexpected:
             raise ValueError('Unexpected non-directory on the device, nothing was changed: '+
                              ', '.join(unexpected))
+        restart = 'Restart the device before installing packages.'
+        remounted = allow_suid(connection)
+        if remounted:
+            progress('Data partition: removed the nosuid mount option from '+FSTAB+
+                     ' so stashed root applications keep working.')
+            restart = 'Restart the device now: root applications such as iFile need it.'
         if all(s == 'stashed' for s in before.values()):
-            progress('This installation is already stashed; nothing was changed.')
+            progress('This installation is already stashed; no directory was moved.'+
+                     (' '+restart if remounted else ''))
             return
         progress('Moving '+', '.join(d for d, s in before.items() if s != 'stashed')+
                  ' to the Data partition.')
@@ -113,4 +179,4 @@ def stash(product, udid, ecid=None, bundle=None, progress=print, timeout=3600):
                                ', '.join(remaining)+'. Cydia skips a directory larger than the '
                                'free space of the Data partition. Free some space on the device, '
                                'then select this option again. Device log: '+LOG)
-        progress('Stashing completed. Restart the device before installing packages.')
+        progress('Stashing completed. '+restart)

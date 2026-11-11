@@ -11186,6 +11186,8 @@ device_olsn0w_stash() {
     print "* Stashes an existing olsn0w installation, like Cydia does on a regular jailbreak."
     print "* Applications, wallpapers, ringtones, /usr/include and /usr/share are moved to the"
     print "  Data partition, which frees the System partition for more tweaks and packages."
+    print "* The Data partition is also remounted without nosuid (fstab), so stashed root apps"
+    print "  such as iFile keep working. Select this again to repair an already stashed device."
     print "* Requires this device's saved olsn0w restoration keys in this Kit folder."
     print "* Close Cydia first and keep the device connected. This can take several minutes."
     warn "olsn0w restores without stashing by default. Stashing cannot be undone from this menu."
