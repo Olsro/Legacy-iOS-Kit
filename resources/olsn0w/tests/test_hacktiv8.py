@@ -59,7 +59,7 @@ class Legacy511Regression(unittest.TestCase):
         self.addCleanup(verifier.stop)
 
     def test_exact_recipe_and_idempotency(self):
-        for product in ('iPhone2,1', 'iPhone4,1'):
+        for product in ('iPhone2,1', 'iPhone4,1', 'iPad3,1'):
             for sign in (False, True):
                 with self.subTest(product=product, sign=sign):
                     self.assertEqual(hacktiv8.patch_lockdownd(self.original, product, '9B206', sign=sign),
@@ -67,18 +67,26 @@ class Legacy511Regression(unittest.TestCase):
                     self.assertEqual(hacktiv8.patch_lockdownd(self.patched, product, '9B206', sign=sign),
                                      (self.patched, 0xb932, False))
 
-    def test_unknown_bytes_model_or_build_never_borrow_fixed_offset(self):
+    def test_unknown_bytes_never_borrow_fixed_offset(self):
         for data, product, build in (
                 (self.original+b'x', 'iPhone4,1', '9B206'),
                 (self.original+b'x', 'iPhone2,1', '9B206'),
-                (self.original, 'iPhone2,1', '9B208'),
-                (self.original, 'iPhone3,1', '9B206'),
-                (self.original, 'iPhone4,1', '9B208')):
+                (self.original+b'x', 'iPad3,1', '9B206'),
+                (self.original[:-1]+b'x', 'iPhone3,1', '9B208')):
             with self.assertRaisesRegex(ValueError, 'does not recognize'):
                 hacktiv8.patch_lockdownd(data, product, build)
 
+    def test_identity_is_the_executable_not_the_model(self):
+        # The IPSW sweep found the same 5.1.1 executable on every product,
+        # including the iPhone 4 GSM 9B208 build.
+        for product, build in (('iPhone3,1', '9B208'), ('iPad2,1', '9B206'),
+                               ('iPod4,1', '9B206'), (None, None)):
+            with self.subTest(product=product, build=build):
+                self.assertEqual(hacktiv8.patch_lockdownd(self.original, product, build),
+                                 (self.patched, 0xb932, True))
+
     def test_image_install_readback_and_live_share_recipe(self):
-        for product in ('iPhone2,1', 'iPhone4,1'):
+        for product in ('iPhone2,1', 'iPhone4,1', 'iPad3,1'):
             with self.subTest(product=product):
                 self.check_image_install_readback_and_live_share_recipe(product)
 
@@ -104,6 +112,66 @@ class Legacy511Regression(unittest.TestCase):
         self.assertEqual(hacktiv8.install(image, '5.1.1', product, '9B206'), report)
         self.assertEqual(hacktiv8_live.patched_bytes(
             'lockdownd-patch', self.original, product, '9B206'), self.patched)
+
+
+class PinnedRecipeTable(unittest.TestCase):
+    def setUp(self):
+        source = bytearray(0x2000)
+        source[0x5f8:0x5fc] = bytes.fromhex('00112233')
+        source[0x1800:0x1804] = bytes.fromhex('07f0d1fd')
+        self.original = bytes(source)
+        source[0x5f8:0x5fc] = bytes.fromhex('44556677')
+        source[0x1800:0x1804] = bytes.fromhex('7de20000')
+        self.patched = bytes(source)
+        original, patched = (hashlib.sha256(x).hexdigest() for x in (self.original, self.patched))
+        recipes = {original: (patched, 0x1800, (
+            (0x5f8, bytes.fromhex('00112233'), bytes.fromhex('44556677')),
+            (0x1800, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+        ))}
+        for name, value in (('LOCKDOWN_RECIPES', recipes),
+                            ('LOCKDOWN_RECIPES_PATCHED', {patched: 0x1800})):
+            replacement = patch.object(hacktiv8, name, value)
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        signer = patch.object(hacktiv8, 'rehash_adhoc', side_effect=lambda old, new: bytes(new))
+        signer.start()
+        self.addCleanup(signer.stop)
+        verifier = patch.object(hacktiv8, 'verify')
+        verifier.start()
+        self.addCleanup(verifier.stop)
+
+    def test_exact_recipe_and_idempotency(self):
+        for product, build in (('iPhone2,1', '8G4'), ('iPad2,3', '8H8'), (None, None)):
+            with self.subTest(product=product, build=build):
+                self.assertEqual(hacktiv8.patch_lockdownd(self.original, product, build),
+                                 (self.patched, 0x1800, True))
+                self.assertEqual(hacktiv8.patch_lockdownd(self.patched, product, build),
+                                 (self.patched, 0x1800, False))
+
+    def test_unknown_bytes_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'does not recognize'):
+            hacktiv8.patch_lockdownd(self.original+b'x', 'iPhone2,1', '8G4')
+
+    def test_result_must_match_the_pinned_output(self):
+        hacktiv8.rehash_adhoc.side_effect = lambda old, new: bytes(new)+b'x'
+        with self.assertRaisesRegex(ValueError, 'does not match the qualified result'):
+            hacktiv8.patch_lockdownd(self.original)
+
+
+class PinnedRecipeTableShape(unittest.TestCase):
+    def test_entries_are_complete_and_disjoint(self):
+        originals = set(hacktiv8.LOCKDOWN_RECIPES)
+        patched = {value[0] for value in hacktiv8.LOCKDOWN_RECIPES.values()}
+        self.assertFalse(originals & patched)
+        for checksum, (result, offset, edits) in hacktiv8.LOCKDOWN_RECIPES.items():
+            with self.subTest(checksum=checksum):
+                self.assertRegex(checksum, '^[0-9a-f]{64}$')
+                self.assertRegex(result, '^[0-9a-f]{64}$')
+                self.assertIn(offset, [at for at, _, _ in edits])
+                for at, original, replacement in edits:
+                    self.assertEqual(len(original), len(replacement))
+                    self.assertNotEqual(original, replacement)
+                self.assertEqual(hacktiv8.LOCKDOWN_RECIPES_PATCHED[result], offset)
 
 
 class Legacy614Regression(unittest.TestCase):

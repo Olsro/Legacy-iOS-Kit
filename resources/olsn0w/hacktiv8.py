@@ -30,7 +30,8 @@ HELPER_ASSET = Path(__file__).parent / 'target/hacktiv8-mobilegestalt'
 HELPER_SHA256 = '7a428f02fe6ad4febbe7d28de559db38a91b0d42e34d240d943a53f05765087b'
 
 # Shared by IPSW preparation, olsn0w and the live-device utility. Only this
-# exact 3GS/4S 9B206 executable may use the historic patch's fixed offset.
+# exact 9B206/9B208 executable may use the historic patch's fixed offset. The
+# 2026-11-11 IPSW sweep found it byte-identical on every 5.1.1 product.
 LOCKDOWN_511_ORIGINAL = 'bac1d37df1587685787aab68e97f561af711566fa950caa29d0e8eb529977710'
 LOCKDOWN_511_PATCHED = 'd278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f'
 
@@ -63,6 +64,73 @@ LOCKDOWN_432_PATCHED = 'efcc1aa4f07254cb05c6cd16ad8785a50eafebbd34e562ff73b237d1
 LOCKDOWN_432_EDITS = (
     (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
 )
+
+# Exact executables reached by the 2026-11-11 sweep of every iOS 4-6 IPSW for
+# the Kit's 32-bit devices (issue #34). Each entry pins the full original and
+# rehashed result; the offset is the skipped activation call. Products are
+# listed for documentation only: identity is the complete SHA-256.
+LOCKDOWN_RECIPES = {
+    # 4.0/4.0.1/4.0.2 (8A293, 8A306, 8A400): iPhone2,1, iPhone3,1, iPod3,1
+    # Recipe reproduces `Down_iPhone2,1_4.0.2_8A400.bundle/lockdownd.patch` byte-for-byte.
+    'f09228ac72193e20004e397485bf1373a387b162ba38f5f504e8dc40f8bc1983': ('0f264d02f5cf279b426be2835e7559867a8da7d104c7bf42e0cd8dadc2473740', 0x9aa6, (
+        (0x9aa6, bytes.fromhex('06f091fb'), bytes.fromhex('14e20000')),
+    )),
+    # 4.1 (8B117): iPhone1,2, iPod2,1
+    # Recipe reproduces `Down_iPhone1,2_4.1_8B117.bundle/lockdownd.patch` byte-for-byte.
+    'af7492d6f287b1b79e6cf3917661cee760da1d910a8cd20e0e7dd4ffcd3acb2d': ('063d2821a09e3afc968ed5f1af00222bcdc764df807ad77c56940db6d74e2227', 0xd7ac, (
+        (0xd7ac, bytes.fromhex('0300'), bytes.fromhex('8001')),
+        (0xd7af, bytes.fromhex('1a'), bytes.fromhex('ea')),
+    )),
+    # 4.1 (8B117, 8B118): iPhone2,1, iPhone3,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_4.1_8B117.bundle/lockdownd.patch` byte-for-byte.
+    '27980c08557538e7a11d6a3fd423f6dfc3f88621812f8d44415c1fb0c855c5fa': ('737f3a84c280a510f254dafbb65848c3687dff847fb343c172d0047af5260fea', 0x9f06, (
+        (0x9f06, bytes.fromhex('06f0a9fb'), bytes.fromhex('04e20000')),
+    )),
+    # 4.2.1 (8C148, 8C148a): iPad1,1, iPhone2,1, iPhone3,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_4.2.1_8C148a.bundle/lockdownd.patch` byte-for-byte.
+    '60597aa3ef4cdbefac0ec6f906de5da7a46e38bc0003eccfc3f755f4a6c4d802': ('93db22ef67c875fdbc61b7645ac8cb33e4e068c59cbd656afb99306efe68f50c', 0xb1be, (
+        (0xb1be, bytes.fromhex('07f033fd'), bytes.fromhex('7de20000')),
+    )),
+    # 4.2.1 (8C148): iPhone1,2, iPod2,1
+    # Recipe reproduces `Down_iPhone1,2_4.2.1_8C148.bundle/lockdownd.patch` byte-for-byte.
+    'c6af75ce49bd55f15b048f5b3559685ab4581cc222a647bee88ae4c49d67cff1': ('79e2a3356fa922471c4dfec1e9d4776dbaea27493cfd25f755f466f507b76913', 0xf0a0, (
+        (0xf0a0, bytes.fromhex('0500'), bytes.fromhex('d601')),
+        (0xf0a3, bytes.fromhex('1a'), bytes.fromhex('ea')),
+    )),
+    # 4.3 (8F190, 8F191): iPad1,1, iPad2,1, iPad2,2, iPad2,3, iPhone2,1, iPhone3,1, iPod3,1, iPod4,1
+    # Recipe ports the 4.3.1 8G4 edit; the whole span from the call to the branch target is byte-identical.
+    '1034b05e8e6223c4cbb544053ea7dce605c5eb5dbf6f8c1dd3f7f5d2e49b274d': ('480ac3b0b1d7135b3383ac3d1ff34085df208d4ff99a8421721791484cd5fe80', 0xbb0e, (
+        (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+    )),
+    # 4.3.1 (8G4): iPad1,1, iPad2,1, iPad2,2, iPad2,3, iPhone2,1, iPhone3,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_4.3.1_8G4.bundle/lockdownd.patch` byte-for-byte.
+    'b12291f9f61b3d89cde604ac0227cb6d5b7bf978c239bb317e37bad255094e0f': ('f6c6883d910618f9190d0fd9c391114ae44829b3d71c19900b7d2b7c85f51909', 0xbb0e, (
+        (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+    )),
+    # 4.3.2 (8H8): iPad2,3
+    # Recipe ports the 4.3.2 8H7 edit; the whole span from the call to the branch target is byte-identical.
+    '27fa99180585dca33816817d74321751a2ede34555978af4b6d8d33244fa60d2': ('27114246a66f84876be9089943b64aafe9d88e767902a2fe39ad6778db347c01', 0xbb0e, (
+        (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+    )),
+    # 4.3.3 (8J2): iPad2,1, iPad2,2, iPad2,3, iPhone2,1, iPhone3,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_4.3.3_8J2.bundle/lockdownd.patch` byte-for-byte.
+    'fbb7c2091889416395c288dc398cb2f3f86cf51a274771df0acfd05f79f8d267': ('2ab13d63d380d5fdcc44f859318ce9a4bde163e03365c93f3ce1ab8fe3fa83ce', 0xbb0e, (
+        (0xbb0e, bytes.fromhex('07f0d1fd'), bytes.fromhex('7de20000')),
+    )),
+    # 5.0.1 (9A405, 9A406): iPad1,1, iPad2,1, iPad2,2, iPad2,3, iPhone2,1, iPhone3,1, iPhone3,3, iPhone4,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_5.0.1_9A405.bundle/lockdownd.patch` byte-for-byte.
+    '37c9808b20515b62f98f7c1b8dd4a116016e0f11457cbc3d6d8c73f90f494574': ('7ccbb3974c923291ff1b4bf895810e1c748fb0a00be212b9c4f28bd6c2a9f138', 0xb3c4, (
+        (0xb3c4, bytes.fromhex('fff7ecfd'), bytes.fromhex('01200120')),
+    )),
+    # 5.1 (9B176, 9B179): iPad1,1, iPad2,1, iPad2,2, iPad2,3, iPad2,4, iPad3,1, iPad3,2, iPad3,3, iPhone2,1, iPhone3,1, iPhone3,3, iPhone4,1, iPod3,1, iPod4,1
+    # Recipe reproduces `Down_iPhone2,1_5.1_9B176.bundle/lockdownd.patch` byte-for-byte.
+    '430b894584cf40faaf85546b22feec5b9b2faac91c16713cf11faadc9483ff45': ('d278d52d4f461d46a7e91d6fae4902a2db5fc184f57842e78446a94dba1d9e4f', 0xb932, (
+        (0x5f8, bytes.fromhex('0095f750159533739e1f21d40733b2cc'), bytes.fromhex('b06de06b9f6939d3afc607b968841ab9')),
+        (0x7a1, bytes.fromhex('10'), bytes.fromhex('15')),
+        (0xb932, bytes.fromhex('fff733fe'), bytes.fromhex('01200120')),
+    )),
+}
+LOCKDOWN_RECIPES_PATCHED = {patched: offset for patched, offset, _ in LOCKDOWN_RECIPES.values()}
 
 LOCKDOWN_PATCHES = (
     (
@@ -140,20 +208,32 @@ def patch_lockdownd(data, product=None, build=None, *, sign=False):
         if hashlib.sha256(result).hexdigest() != LOCKDOWN_432_PATCHED:
             raise ValueError('Legacy 4.3.2 patch does not match the qualified result')
         return result, 0xbb0e, True
-    if product in ('iPhone2,1', 'iPhone4,1') and build == '9B206':
-        checksum = hashlib.sha256(data).hexdigest()
-        if checksum == LOCKDOWN_511_PATCHED:
-            verify(data)
-            return bytes(data), 0xb932, False
-        if checksum == LOCKDOWN_511_ORIGINAL:
-            changed = bytearray(data)
-            if changed[0xb932:0xb936] != bytes.fromhex('fff733fe'):
-                raise ValueError('Unexpected 5.1.1 lockdownd instruction')
-            changed[0xb932:0xb936] = bytes.fromhex('01200120')
-            result = rehash_adhoc(data, changed)
-            if hashlib.sha256(result).hexdigest() != LOCKDOWN_511_PATCHED:
-                raise ValueError('Legacy 5.1.1 patch does not match the qualified result')
-            return result, 0xb932, True
+    if checksum in LOCKDOWN_RECIPES:
+        patched_checksum, offset, edits = LOCKDOWN_RECIPES[checksum]
+        changed = bytearray(data)
+        for at, original, replacement in edits:
+            if changed[at:at+len(original)] != original:
+                raise ValueError('Unexpected pinned lockdownd bytes')
+            changed[at:at+len(original)] = replacement
+        result = rehash_adhoc(data, changed)
+        if hashlib.sha256(result).hexdigest() != patched_checksum:
+            raise ValueError('Pinned lockdownd recipe does not match the qualified result')
+        return result, offset, True
+    if checksum == LOCKDOWN_511_PATCHED:
+        verify(data)
+        return bytes(data), 0xb932, False
+    if checksum in LOCKDOWN_RECIPES_PATCHED:
+        verify(data)
+        return bytes(data), LOCKDOWN_RECIPES_PATCHED[checksum], False
+    if checksum == LOCKDOWN_511_ORIGINAL:
+        changed = bytearray(data)
+        if changed[0xb932:0xb936] != bytes.fromhex('fff733fe'):
+            raise ValueError('Unexpected 5.1.1 lockdownd instruction')
+        changed[0xb932:0xb936] = bytes.fromhex('01200120')
+        result = rehash_adhoc(data, changed)
+        if hashlib.sha256(result).hexdigest() != LOCKDOWN_511_PATCHED:
+            raise ValueError('Legacy 5.1.1 patch does not match the qualified result')
+        return result, 0xb932, True
     if product in ('iPhone5,1', 'iPhone5,2') and build == '10B350':
         if checksum == LOCKDOWN_614_PATCHED:
             verify(data)

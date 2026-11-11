@@ -85,6 +85,23 @@ Hacktiv8 preparation and DMG/ZIP reconstruction. Readback verified the exact
 historic patched binary, original backup, file metadata and preserved Setup.app;
 all 30 other archive entries were unchanged. Host regression tests cover both
 products, reapplication, shared image/live paths and rejection of unknown inputs.
+On 2026-11-11 (issue #34) lockdownd was read from all 247 Apple IPSWs for
+iOS 4.0-6.1.6 on the Kit's 32-bit devices (31 distinct executables). 227
+product/build combinations now resolve to a pinned or signature recipe:
+- The 5.1.1 executable is byte-identical on every 9B206/9B208 product (iPad1/2/3,
+  iPod3/4, iPhone 3GS/4/4S). Its recipe now matches on the SHA-256 alone; the
+  former product allowlist rejected identical bytes (e.g. iPad3,1).
+- `LOCKDOWN_RECIPES` pins 11 more executables (4.0-4.3.3, 5.0.1, 5.1). Nine
+  reproduce the Kit's historic `Down_*.bundle/lockdownd.patch` byte-for-byte
+  after the original ad-hoc signature is rehashed. 4.3/8F190-8F191 and the
+  iPad2,3 4.3.2/8H8 executable reuse the 8G4/8H7 edit because the whole span
+  from the call to the branch target is byte-identical and unique.
+- Every iOS 6 executable already matched the generic ARMv7/ARMv7s signature.
+Still rejected (20 combinations): iPhone 3G/iPod2 4.0-4.0.2 (armv6), iPhone 4
+CDMA 4.2.6-4.2.10 and all 5.0/9A334 products. No historic patch applies and no
+edit site could be carried over without writing a new patch.
+These are preparation checks on the real executables, not hardware activation
+tests; only the 4S 9B206 case below was confirmed on a device.
 
 The host reports file-patch verification, not successful official activation.
 After restart, verify Setup Assistant, device connectivity and normal use.
