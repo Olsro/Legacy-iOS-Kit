@@ -680,6 +680,8 @@ set_tool_paths() {
     fi
 
     scp2+=" -F ./ssh_config"
+    # the bundled static scp has /opt/openssh/bin/ssh compiled in (issue #38)
+    [[ $platform == "linux" ]] && scp2+=" -S ./ssh"
     ssh2+=" -F ./ssh_config"
 }
 
